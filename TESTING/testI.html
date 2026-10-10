@@ -2,3 +2,37 @@
         <!-- Implementation I: CSV Reader -->                                                           <!-- style="display: block; margin: 50px auto;" turns the button into a standalone centered box with 50px vertical spacing -->
          <input type="file" id="csvFileInput" accept=".csv" style="display: block; margin: 50px auto;">
          <!-- Creates a file upload button for CSVs only, The ID gives this specific button a unique name tag. -->
+
+            <!-- This is the start of the CSV display / reader implementation section, we will be using javascript and it's filereader API for this -->
+            
+            <!-- This is the output box where the CSV's content will be displayed, it is set to be 80% of the page's width, with a maximum width of 600px, formatted properly within html's nomenclature-->
+                <pre id="output" style="width: 80%; max-width: 600px; margin: 20px auto; padding: 15px; background: #f9f9f9; border: 1px solid #ddd; border-radius: 4px; white-space: pre-wrap;"></pre>
+
+                <script>
+   
+   <!-- This script handles reading and displaying the content of a CSV file utilizing the FileReader API -->
+    // 1. Grabs the button and the output box using their IDs
+    const fileInput = document.getElementById('csvFileInput');
+    const outputBox = document.getElementById('output');
+
+    // 2. Waits for when a file is selected
+    fileInput.addEventListener('change', function(event) {
+        const file = event.target.files[0];
+        if (!file) return; // Safety check for if user cancels
+
+        // 3. Initializes FileReader API
+        const reader = new FileReader();
+
+        // 4. Tells it what to do when the file is finished reading
+        reader.onload = function(e) {
+            const textContent = e.target.result;
+            outputBox.textContent = textContent; // Display text on the page
+        };
+
+        // 5. Executes the reader
+        reader.readAsText(file);
+    });
+</script>
+
+</body>
+</html>
