@@ -24,9 +24,9 @@
 
         
         reader.onload = function(e) {
-            const textContent = e.target.result;
+            const textContent = e.target.result; 
             outputBox.textContent = textContent; // Display text on the page
-        
+        }
 
         reader.readAsText(file);
     });
