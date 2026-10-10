@@ -1,36 +1,21 @@
 
-         <input type="file" id="csvFileInput" accept=".csv" style="display: block; margin: 50px auto;">
-         
-
-            
-            
-           
-                <pre id="output" style="width: 80%; max-width: 600px; margin: 20px auto; padding: 15px; background: #f9f9f9; border: 1px solid #ddd; border-radius: 4px; white-space: pre-wrap;"></pre>
-
-                <script>
-   
-   
-   
-    const fileInput = document.getElementById('csvFileInput');
-    const outputBox = document.getElementById('output');
-
-   
-    fileInput.addEventListener('change', function(event) {
-        const file = event.target.files[0];
-        if (!file) return; 
-
-        
-        const reader = new FileReader();
-
-        
-        reader.onload = function(e) {
-            const textContent = e.target.result; 
-            outputBox.textContent = textContent; // Display text on the page
-        }
-
-        reader.readAsText(file);
-    });
+<input type="file" id="csvFileInput" accept=".csv" style="display: block; margin: 50px auto;">         
+<pre id="output" style="width: 80%; max-width: 600px; margin: 20px auto; padding: 15px; background: #f9f9f9; border: 1px solid #ddd; border-radius: 4px; white-space: pre-wrap;">
+</pre>
+<script> 
+const fileInput = document.getElementById('csvFileInput');
+const outputBox = document.getElementById('output');   
+fileInput.addEventListener('change', function(event) {
+const file = event.target.files[0];
+if (!file) return; 
+const reader = new FileReader();
+reader.onload = function(e) 
+{    
+const textContent = e.target.result; 
+outputBox.textContent = textContent; 
+}
+reader.readAsText(file);
+});
 </script>
-
 </body>
 </html>
