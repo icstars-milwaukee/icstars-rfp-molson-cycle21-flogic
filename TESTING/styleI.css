@@ -1,0 +1,24 @@
+/* THE NANDO NOTES - styleI.css
+   This file controls how the CSV reader page LOOKS. It's linked from testI.html's <head>.
+   The "#" in front of a name means "find the element with this id" (e.g. #output -> id="output"). */
+
+/* The "Choose File" button
+   display: block + margin: 50px auto turns the button into a standalone centered box with 50px vertical spacing
+   - display: block  -> puts the button on its own line (by default it sits inline like a word in a sentence)
+   - margin: 50px auto -> 50px space above and below; "auto" left/right splits the leftover space evenly = centered */
+#csvFileInput {
+    display: block;
+    margin: 50px auto;
+}
+
+/* The output box where the CSV text appears */
+#output {
+    width: 80%;               /* takes up 80% of the page's width... */
+    max-width: 600px;         /* ...but never grows wider than 600px on big screens */
+    margin: 20px auto;        /* 20px space above/below, centered left/right (same trick as the button) */
+    padding: 15px;            /* breathing room between the box's edge and the text inside */
+    background: #f9f9f9;      /* very light gray background */
+    border: 1px solid #ddd;   /* thin light-gray outline */
+    border-radius: 4px;       /* slightly rounded corners */
+    white-space: pre-wrap;    /* keeps the CSV's line breaks, but wraps long lines instead of scrolling sideways */
+}

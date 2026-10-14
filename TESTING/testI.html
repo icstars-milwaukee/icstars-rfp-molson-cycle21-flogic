@@ -1,38 +1,47 @@
+<!DOCTYPE html>
 <!-- THE NANDO NOTES -->
-        <!-- Implementation I: CSV Reader -->                                                           <!-- style="display: block; margin: 50px auto;" turns the button into a standalone centered box with 50px vertical spacing -->
-         <input type="file" id="csvFileInput" accept=".csv" style="display: block; margin: 50px auto;">
-         <!-- Creates a file upload button for CSVs only, The ID gives this specific button a unique name tag. -->
+<!-- <!DOCTYPE html> tells the browser "this is modern HTML5". It must be the very first line,
+     otherwise the browser falls back to old "quirks mode" and layouts can act strange. -->
 
-            <!-- This is the start of the CSV display / reader implementation section, we will be using javascript and it's filereader API for this -->
-            
-            <!-- This is the output box where the CSV's content will be displayed, it is set to be 80% of the page's width, with a maximum width of 600px, formatted properly within html's nomenclature-->
-                <pre id="output" style="width: 80%; max-width: 600px; margin: 20px auto; padding: 15px; background: #f9f9f9; border: 1px solid #ddd; border-radius: 4px; white-space: pre-wrap;"></pre>
+<!-- <html> wraps the whole page. lang="en" tells browsers and screen readers the page is in English. -->
+<html lang="en">
 
-                <script>
-   
-   <!-- This script handles reading and displaying the content of a CSV file utilizing the FileReader API -->
-    // 1. Grabs the button and the output box using their IDs
-    const fileInput = document.getElementById('csvFileInput');
-    const outputBox = document.getElementById('output');
+<!-- <head> holds info ABOUT the page (settings, title, linked files). Nothing in here shows up on the page itself. -->
+<head>
+    <!-- charset="UTF-8" lets the page display any character correctly (accents, symbols, emojis) -->
+    <meta charset="UTF-8">
 
-    // 2. Waits for when a file is selected
-    fileInput.addEventListener('change', function(event) {
-        const file = event.target.files[0];
-        if (!file) return; // Safety check for if user cancels
+    <!-- Makes the page scale properly on phones instead of showing a tiny zoomed-out desktop view -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-        // 3. Initializes FileReader API
-        const reader = new FileReader();
+    <!-- The text shown on the browser tab -->
+    <title>CSV Reader Test</title>
 
-        // 4. Tells it what to do when the file is finished reading
-        reader.onload = function(e) {
-            const textContent = e.target.result;
-            outputBox.textContent = textContent; // Display text on the page
-        };
+    <!-- Links the stylesheet. Styling lives in styleI.css (button centering + output box look) -->
+    <link rel="stylesheet" href="styleI.css">
+</head>
 
-        // 5. Executes the reader
-        reader.readAsText(file);
-    });
-</script>
+<!-- <body> holds everything the user actually sees on the page -->
+<body>
+
+    <!-- Implementation I: CSV Reader -->
+
+    <!-- Creates a file upload button for CSVs only. The ID gives this specific button a unique name tag.
+         - type="file"    -> makes it a "Choose File" button instead of a text box
+         - id="csvFileInput" -> the name tag JavaScript and CSS use to find this exact button
+         - accept=".csv"  -> the file picker only shows .csv files (the user can still override this,
+                             so it's a convenience filter, not a security check) -->
+    <input type="file" id="csvFileInput" accept=".csv">
+
+    <!-- This is the output box where the CSV's content will be displayed.
+         <pre> stands for "preformatted": it keeps the file's line breaks and spacing exactly as they are.
+         It starts empty; scriptI.js fills it in once a file is picked. -->
+    <pre id="output"></pre>
+
+    <!-- The CSV display / reader logic lives in scriptI.js, using JavaScript's FileReader API.
+         Loaded at the end of <body> so the button and output box exist before the script runs.
+         (If it were in <head>, the script would look for elements that haven't been created yet.) -->
+    <script src="scriptI.js"></script>
 
 </body>
 </html>
