@@ -9,21 +9,26 @@
     ==========================================================
 
 
-    THE WHOLE STORY, IN 5 STEPS:
+    THE WHOLE STORY, IN 6 STEPS:
 
 
         1.   You pick a CSV file.
 
         2.   The brain reads the file.
 
-        3.   The brain cuts the file into lines.
-             (one line = one row)
+        3.   The brain cuts the file into lines,
+             and cuts every line into CELLS at the commas.
+             (just like boxes in Excel)
 
-        4.   The brain puts every row inside the window.
-             The window only shows 15 rows at a time.
+        4.   The FIRST line is special.  It's line 0: the HEADER.
+             It holds the column names, and it stays stuck
+             to the top of the window.
+
+        5.   The brain puts every other row inside the window.
+             The window shows 15 rows at a time.
              You scroll to see the rest.
 
-        5.   When you type in the search bar,
+        6.   When you type in the search bar,
              the brain only keeps the rows that have your word,
              and paints your word yellow.
 
@@ -39,7 +44,7 @@
 //
 //    HOW MANY ROWS FIT IN THE WINDOW
 //
-//    15 rows.
+//    15 rows  (plus the header on top).
 //    If you change this, change the 15 in styleI.css too.
 //
 // ----------------------------------------------------------
@@ -60,12 +65,13 @@ const WINDOW_SIZE = 15;
 
 const fileInput   = document.getElementById('csvFileInput');   //  the "Choose File" button
 const searchInput = document.getElementById('searchInput');    //  the search bar
-const statusText  = document.getElementById('status');         //  the "Lines 1–15 of 100" words
+const statusText  = document.getElementById('status');         //  the "Rows 1–15 of 100" words
 const outputBox   = document.getElementById('output');         //  the glass window
+const headerBox   = document.getElementById('header');         //  the header row  (line 0)
 const rowsBox     = document.getElementById('rows');           //  the rows inside the window
-const controls    = document.getElementById('controls');       //  the Go-to-line + Expand area
-const jumpInput   = document.getElementById('jumpInput');      //  the "Line #" box
-const jumpBtn     = document.getElementById('jumpBtn');        //  the "Go to line" button
+const controls    = document.getElementById('controls');       //  the Go-to-row + Expand area
+const jumpInput   = document.getElementById('jumpInput');      //  the "Row #" box
+const jumpBtn     = document.getElementById('jumpBtn');        //  the "Go to row" button
 const expandBtn   = document.getElementById('expandBtn');      //  the "Expand" button
 const topBtn      = document.getElementById('topBtn');         //  the "Top" button
 
@@ -79,14 +85,16 @@ const topBtn      = document.getElementById('topBtn');         //  the "Top" but
 //
 // ----------------------------------------------------------
 
-let allLines = [];    //  EVERY line from the file.          Like:  ["name,age", "Ana,22"]
-let matches  = [];    //  ONLY the lines we are showing now.  Like:  [{ num: 2, text: "Ana,22" }]
+let headerCells = [];   //  the column names  (line 0).        Like:  ["name", "age"]
+let dataRows    = [];   //  EVERY other row, cut into cells.    Like:  [["Ana", "22"], ["Bo", "31"]]
+let columnCount = 0;    //  how many columns the widest row has
+let matches     = [];   //  ONLY the rows we are showing now.   Like:  [{ num: 1, cells: ["Ana", "22"] }]
 
 
 
 // ----------------------------------------------------------
 //
-//    STEP 1 + 2 + 3:  PICK A FILE  ->  READ IT  ->  CUT IT INTO LINES
+//    STEP 1 + 2 + 3 + 4:  PICK A FILE  ->  READ IT  ->  CUT IT UP
 //
 // ----------------------------------------------------------
 
@@ -105,17 +113,34 @@ fileInput.addEventListener('change', function (event) {
 
         //  Cut the file into lines.
         //  (Windows and Mac end lines a little differently. This handles both.)
-        allLines = e.target.result.split(/\r?\n/);
+        const lines = e.target.result.split(/\r?\n/);
 
         //  Files often end with one empty line. Throw it away.
-        if (allLines[allLines.length - 1] === '') allLines.pop();
+        if (lines[lines.length - 1] === '') lines.pop();
+
+
+        //  Line 0  =  the header  (the column names).
+        //  Everything after it  =  the data rows.
+        //  Every line gets cut into cells.
+        headerCells = splitIntoCells(lines[0] || '');
+        dataRows    = lines.slice(1).map(splitIntoCells);
+
+
+        //  How many columns?  Count the cells in the widest row.
+        columnCount = headerCells.length;
+        dataRows.forEach(function (cells) {
+            columnCount = Math.max(columnCount, cells.length);
+        });
+
 
         //  Clean slate for the new file.
         searchInput.value = '';
         searchInput.disabled = false;       //  turn the search bar ON
         jumpInput.value = '';
 
-        render();                           //  draw the rows  (see STEP 4 below)
+        setColumnWidths();                  //  decide how wide each column is
+        drawHeader();                       //  draw line 0
+        render();                           //  draw the rows  (see STEP 5 below)
     };
 
 
@@ -126,7 +151,130 @@ fileInput.addEventListener('change', function (event) {
 
 // ----------------------------------------------------------
 //
-//    STEP 5:  SEARCH
+//    CUT ONE LINE INTO CELLS
+//
+//    Easy case:    Ana,22,Chicago        ->   [Ana] [22] [Chicago]
+//
+//    Tricky case:  Ana,22,"Chicago, IL"  ->   [Ana] [22] [Chicago, IL]
+//
+//    Quotes mean:  "the comma inside here is NOT a cut."
+//    Two quotes in a row ("") mean:  "a real quote mark."
+//
+// ----------------------------------------------------------
+
+function splitIntoCells(line) {
+
+    const cells = [];
+    let current = '';           //  the cell we're building right now
+    let insideQuotes = false;   //  are we inside "quotes" right now?
+
+
+    //  Walk along the line, one letter at a time.
+    for (let i = 0; i < line.length; i++) {
+
+        const letter = line[i];
+
+        if (insideQuotes) {
+
+            if (letter === '"' && line[i + 1] === '"') {
+                current += '"';             //  ""  =  a real quote mark
+                i++;                        //  skip the second one
+            } else if (letter === '"') {
+                insideQuotes = false;       //  closing quote.  Back to normal.
+            } else {
+                current += letter;          //  anything else (even a comma!) is part of the cell
+            }
+
+        } else {
+
+            if (letter === '"') {
+                insideQuotes = true;        //  opening quote
+            } else if (letter === ',') {
+                cells.push(current);        //  a comma = CUT!  This cell is done.
+                current = '';
+            } else {
+                current += letter;
+            }
+        }
+    }
+
+    cells.push(current);                    //  don't forget the last cell
+    return cells;
+}
+
+
+
+// ----------------------------------------------------------
+//
+//    HOW WIDE IS EACH COLUMN?
+//
+//    Look at the longest thing in each column,
+//    and make the column fit it.
+//
+//       Not too skinny  (at least 6 letters wide)
+//       Not too fat     (at most 40 letters wide)
+//
+//    Too long for 40?  It gets cut off with "…"
+//    and you can hover over it to read the whole thing.
+//
+// ----------------------------------------------------------
+
+function setColumnWidths() {
+
+    const widths = [];
+
+    for (let col = 0; col < columnCount; col++) {
+
+        //  Start with the header's length...
+        let longest = (headerCells[col] || '').length;
+
+        //  ...then check every row for something longer.
+        dataRows.forEach(function (cells) {
+            longest = Math.max(longest, (cells[col] || '').length);
+        });
+
+        //  Squeeze it between 6 and 40.
+        //  (+2 extra, because some letters like "W" and "$" are wider than normal.)
+        const letters = Math.min(Math.max(longest + 2, 6), 40);
+
+        //  "ch" = the width of one letter.  +16px for the padding on both sides.
+        widths.push('calc(' + letters + 'ch + 16px)');
+    }
+
+
+    //  Hand the widths to the clothes (styleI.css) as one list:
+    //      "60px  calc(10ch + 16px)  calc(6ch + 16px)  ..."
+    //       ^^^^
+    //       the row-number column is always 60px
+    outputBox.style.setProperty('--columns', '60px ' + widths.join(' '));
+}
+
+
+
+// ----------------------------------------------------------
+//
+//    DRAW THE HEADER  (line 0)
+//
+//    Same as a normal row, but with a special label
+//    so the clothes make it bold and stick it to the top.
+//
+// ----------------------------------------------------------
+
+function drawHeader() {
+
+    headerBox.textContent = '';                         //  wipe the old one
+
+    const row = makeRow(0, headerCells, '');            //  line number 0, the column names, no search
+    row.classList.add('header-row');
+
+    headerBox.appendChild(row);
+}
+
+
+
+// ----------------------------------------------------------
+//
+//    STEP 6:  SEARCH
 //
 //    Every time you type a letter,
 //    draw the rows again, using your new word.
@@ -139,10 +287,10 @@ searchInput.addEventListener('input', render);
 
 // ----------------------------------------------------------
 //
-//    GO TO LINE
+//    GO TO ROW
 //
-//    Type a number  ->  click "Go to line"  (or press Enter)
-//    ->  that line jumps to the top of the window
+//    Type a number  ->  click "Go to row"  (or press Enter)
+//    ->  that row jumps to the top of the window  (right under the header)
 //    ->  and flashes blue so you can find it.
 //
 // ----------------------------------------------------------
@@ -161,23 +309,23 @@ function jumpToLine() {
     if (isNaN(target) || matches.length === 0) return;  //  not a number?  nothing to show?  Stop.
 
 
-    //  Find the row with that line number.
-    //  (If you're searching and that line is hidden, go to the next one that's showing.)
+    //  Find the row with that number.
+    //  (If you're searching and that row is hidden, go to the next one that's showing.)
     let index = matches.findIndex(function (line) { return line.num >= target; });
 
-    //  Number too big?  Go to the last line.
+    //  Number too big?  Go to the last row.
     if (index === -1) index = matches.length - 1;
 
 
     const row = rowsBox.children[index];
 
     if (outputBox.classList.contains('expanded')) {
-        row.scrollIntoView({ block: 'center' });        //  window is expanded?  Scroll the PAGE.
+        row.scrollIntoView({ block: 'center' });                        //  window is expanded?  Scroll the PAGE.
     } else {
-        outputBox.scrollTop = row.offsetTop;            //  window is small?  Scroll the WINDOW.
-    }
+        outputBox.scrollTop = row.offsetTop - headerBox.offsetHeight;   //  window is small?  Scroll the WINDOW.
+    }                                                                   //  (minus the header, so the row sits right under it)
 
-    updatePosition();                                   //  update the "Lines 1–15" words
+    updatePosition();                                   //  update the "Rows 1–15" words
 
 
     //  Make the row flash blue.
@@ -203,7 +351,7 @@ expandBtn.addEventListener('click', function () {
     //  "toggle" = a light switch.  On -> Off.  Off -> On.
     const expanded = outputBox.classList.toggle('expanded');
 
-    expandBtn.textContent = expanded ? 'Shrink to 15-line window' : 'Expand (show all)';
+    expandBtn.textContent = expanded ? 'Shrink to 15-row window' : 'Expand (show all)';
 
     sizeWindow();
     updatePosition();
@@ -213,9 +361,9 @@ expandBtn.addEventListener('click', function () {
 
 // ----------------------------------------------------------
 //
-//    MAKE THE WINDOW EXACTLY 15 ROWS TALL
+//    MAKE THE WINDOW EXACTLY  HEADER + 15 ROWS  TALL
 //
-//    Problem:  a really long line adds a sideways scrollbar,
+//    Problem:  lots of columns add a sideways scrollbar,
 //              and that scrollbar steals some space.
 //
 //    Fix:      measure how tall the scrollbar is,
@@ -235,15 +383,15 @@ function sizeWindow() {
     const scrollbar = outputBox.offsetHeight - outputBox.clientHeight - borders;    //  how tall the scrollbar is
     const rowHeight = rowsBox.children[0].offsetHeight;                              //  how tall one row is
 
-    //  15 rows  +  the scrollbar
-    outputBox.style.height = (WINDOW_SIZE * rowHeight + scrollbar) + 'px';
+    //  the header  +  15 rows  +  the scrollbar
+    outputBox.style.height = (headerBox.offsetHeight + WINDOW_SIZE * rowHeight + scrollbar) + 'px';
 }
 
 
 
 // ----------------------------------------------------------
 //
-//    THE "LINES 21–35 OF 100" WORDS
+//    THE "ROWS 21–35 OF 100" WORDS
 //
 //    Every time the window scrolls, figure out
 //    which rows you can see right now.
@@ -257,10 +405,12 @@ function updatePosition() {
 
     const query = searchInput.value.trim();
 
-    if (allLines.length === 0) return;                  //  no file yet?  Stop.
+    if (headerCells.length === 0) return;               //  no file yet?  Stop.
 
     if (matches.length === 0) {
-        statusText.textContent = 'No lines match "' + query + '"';
+        statusText.textContent = query === ''
+            ? 'This file only has a header row'
+            : 'No rows match "' + query + '"';
         return;
     }
 
@@ -268,19 +418,19 @@ function updatePosition() {
     //  Every row is the same height.
     //  So:   how far we scrolled  ÷  one row's height  =  which row is at the top.
     const rowHeight = rowsBox.children[0].offsetHeight;
-    const first = Math.round(outputBox.scrollTop / rowHeight);
+    const first = Math.min(Math.round(outputBox.scrollTop / rowHeight), matches.length - 1);
 
     const last = outputBox.classList.contains('expanded')
         ? matches.length - 1                                    //  expanded?  You can see them all.
         : Math.min(first + WINDOW_SIZE, matches.length) - 1;    //  small?     The top row + 14 more.
 
 
-    let message = 'Lines ' + matches[first].num + '–' + matches[last].num;
+    let message = 'Rows ' + matches[first].num + '–' + matches[last].num;
 
     if (query === '') {
-        message += ' of ' + allLines.length;
+        message += ' of ' + dataRows.length;
     } else {
-        message += ' (' + matches.length + ' matching line(s) for "' + query + '")';
+        message += ' (' + matches.length + ' matching row(s) for "' + query + '")';
     }
 
     statusText.textContent = message;
@@ -309,7 +459,7 @@ window.addEventListener('scroll', function () {
 
 // ----------------------------------------------------------
 //
-//    STEP 4:  DRAW THE ROWS   (this is called "render")
+//    STEP 5:  DRAW THE ROWS   (this is called "render")
 //
 //    This runs after you pick a file,
 //    and every time you type in the search bar.
@@ -323,17 +473,22 @@ function render() {
     const query = searchInput.value.trim().toLowerCase();
 
 
-    //  Pick which lines to show.
-    //    No search word?    Keep every line.
-    //    Search word?       Keep only lines that have it.
+    //  Pick which rows to show.
+    //    No search word?    Keep every row.
+    //    Search word?       Keep only rows where SOME cell has it.
     //
-    //  Each line also remembers its REAL line number,
+    //  Each row also remembers its number  (1, 2, 3...  because the header is 0),
     //  so you always know where it lives in the file.
     matches = [];
 
-    allLines.forEach(function (text, index) {
-        if (query === '' || text.toLowerCase().includes(query)) {
-            matches.push({ num: index + 1, text: text });
+    dataRows.forEach(function (cells, index) {
+
+        const hasWord = cells.some(function (cell) {
+            return cell.toLowerCase().includes(query);
+        });
+
+        if (query === '' || hasWord) {
+            matches.push({ num: index + 1, cells: cells });
         }
     });
 
@@ -348,16 +503,16 @@ function render() {
     const fragment = document.createDocumentFragment();
 
     matches.forEach(function (line) {
-        fragment.appendChild(makeRow(line.num, line.text, query));
+        fragment.appendChild(makeRow(line.num, line.cells, query));
     });
 
     rowsBox.appendChild(fragment);
 
 
-    controls.hidden = false;        //  show the Go-to-line + Expand buttons
-    sizeWindow();                   //  make the window 15 rows tall
+    controls.hidden = false;        //  show the Go-to-row + Expand buttons
+    sizeWindow();                   //  make the window header + 15 rows tall
     outputBox.scrollTop = 0;        //  start at the top
-    updatePosition();               //  update the "Lines 1–15" words
+    updatePosition();               //  update the "Rows 1–15" words
 }
 
 
@@ -366,71 +521,102 @@ function render() {
 //
 //    BUILD ONE ROW
 //
-//    A row has 2 parts:
+//    A row is a line of boxes, like Excel:
 //
-//         [ line number ]  [ the words from that line ]
+//         [ # ] [ cell ] [ cell ] [ cell ] ...
 //
-//    If you're searching, your word gets painted yellow.
+//    Words sit on the LEFT of their box.
+//    Numbers sit on the RIGHT  (that's what Excel does).
 //
 // ----------------------------------------------------------
 
-function makeRow(num, text, query) {
+function makeRow(num, cells, query) {
 
     //  The row itself.
     const row = document.createElement('div');
     row.className = 'line';
 
 
-    //  Part 1:  the line number.
+    //  The row number, on the far left.
     const numCell = document.createElement('span');
     numCell.className = 'line-num';
     numCell.textContent = num;
+    row.appendChild(numCell);
 
 
-    //  Part 2:  the words.
-    const textCell = document.createElement('span');
-    textCell.className = 'line-text';
+    //  One box for every column.
+    //  (If this row is missing some cells, those boxes are just empty.)
+    for (let col = 0; col < columnCount; col++) {
+
+        const text = cells[col] || '';
+
+        const cell = document.createElement('span');
+        cell.className = 'cell';
+
+        if (looksLikeNumber(text)) cell.classList.add('num');      //  numbers go on the right
+
+        if (text.length > 40) cell.title = text;                   //  too long?  hover to read it all
+
+        paintMatches(cell, text, query);
+
+        row.appendChild(cell);
+    }
+
+    return row;
+}
 
 
+
+// ----------------------------------------------------------
+//
+//    IS THIS A NUMBER?
+//
+//    Yes:   42    -7    3.14    1,200    $9.99    50%
+//    No:    Ana   22nd  hello
+//
+// ----------------------------------------------------------
+
+function looksLikeNumber(text) {
+    return /^\s*[-+]?[$€£]?\d[\d,]*(\.\d+)?%?\s*$/.test(text);
+}
+
+
+
+// ----------------------------------------------------------
+//
+//    PUT THE WORDS IN A BOX  (and paint the search word yellow)
+//
+//     "Ana,22,ana@ex.com"    searching "ana"
+//      ^^^     ^^^            <- these get wrapped in <mark>  (yellow)
+//
+// ----------------------------------------------------------
+
+function paintMatches(box, text, query) {
+
+    //  No search?  Just put the words in.
     if (query === '') {
-
-        //  No search?  Just put the words in.
-        textCell.textContent = text;
-
-    } else {
-
-        //  Search?  Walk along the line.
-        //  Every time we find your word, wrap it in <mark>  (= yellow paint).
-        //
-        //     "Ana,22,ana@ex.com"    searching "ana"
-        //      ^^^     ^^^            <- these get painted
-        //
-        const lower = text.toLowerCase();
-        let start = 0;
-        let found = lower.indexOf(query, start);
-
-        while (found !== -1) {
-
-            textCell.appendChild(document.createTextNode(text.slice(start, found)));   //  the words BEFORE your word
-
-            const mark = document.createElement('mark');
-            mark.textContent = text.slice(found, found + query.length);                //  YOUR word  (yellow)
-            textCell.appendChild(mark);
-
-            start = found + query.length;
-            found = lower.indexOf(query, start);                                       //  look for the next one
-        }
-
-        textCell.appendChild(document.createTextNode(text.slice(start)));             //  the words AFTER the last one
+        box.textContent = text;
+        return;
     }
 
 
-    //  Empty line?  Put a space in it, so the row doesn't squish flat.
-    if (text === '') textCell.textContent = ' ';
+    //  Search?  Walk along the words.
+    //  Every time we find your word, wrap it in <mark>.
+    const lower = text.toLowerCase();
+    let start = 0;
+    let found = lower.indexOf(query, start);
 
+    while (found !== -1) {
 
-    //  Snap the 2 parts into the row.  Done!
-    row.appendChild(numCell);
-    row.appendChild(textCell);
-    return row;
+        box.appendChild(document.createTextNode(text.slice(start, found)));       //  the words BEFORE your word
+
+        const mark = document.createElement('mark');
+        mark.textContent = text.slice(found, found + query.length);              //  YOUR word  (yellow)
+        box.appendChild(mark);
+
+        start = found + query.length;
+        found = lower.indexOf(query, start);                                     //  look for the next one
+    }
+
+    box.appendChild(document.createTextNode(text.slice(start)));                 //  the words AFTER the last one
 }
