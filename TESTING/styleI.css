@@ -2,23 +2,123 @@
    This file controls how the CSV reader page LOOKS. It's linked from testI.html's <head>.
    The "#" in front of a name means "find the element with this id" (e.g. #output -> id="output"). */
 
-/* The "Choose File" button
-   display: block + margin: 50px auto turns the button into a standalone centered box with 50px vertical spacing
-   - display: block  -> puts the button on its own line (by default it sits inline like a word in a sentence)
-   - margin: 50px auto -> 50px space above and below; "auto" left/right splits the leftover space evenly = centered */
-#csvFileInput {
-    display: block;
-    margin: 50px auto;
+/* Whole page: a clean font, light background, and no edge-to-edge text */
+body {
+    font-family: system-ui, Arial, sans-serif;
+    background: #f4f5f7;
+    color: #222;
+    margin: 0;
+    padding: 20px 16px 80px;   /* extra bottom space so the floating Top button never covers the last line */
 }
 
-/* The output box where the CSV text appears */
+h1 {
+    text-align: center;
+    margin: 10px 0 20px;
+}
+
+/* The "Choose File" button and the search bar
+   display: block + margin: auto turns each into a standalone centered box */
+#csvFileInput,
+#searchInput {
+    display: block;
+    margin: 0 auto 15px;
+}
+
+#searchInput {
+    width: 100%;
+    max-width: 500px;
+    padding: 10px 12px;
+    font-size: 16px;
+    border: 1px solid #bbb;
+    border-radius: 6px;
+    box-sizing: border-box;   /* makes width include the padding, so it doesn't overflow */
+}
+
+/* The "Showing X of Y lines" text */
+#status {
+    text-align: center;
+    color: #555;
+    font-size: 14px;
+}
+
+/* The box that holds all the CSV lines */
 #output {
-    width: 80%;               /* takes up 80% of the page's width... */
-    max-width: 600px;         /* ...but never grows wider than 600px on big screens */
-    margin: 20px auto;        /* 20px space above/below, centered left/right (same trick as the button) */
-    padding: 15px;            /* breathing room between the box's edge and the text inside */
-    background: #f9f9f9;      /* very light gray background */
-    border: 1px solid #ddd;   /* thin light-gray outline */
-    border-radius: 4px;       /* slightly rounded corners */
-    white-space: pre-wrap;    /* keeps the CSV's line breaks, but wraps long lines instead of scrolling sideways */
+    max-width: 900px;
+    margin: 0 auto;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-family: Consolas, "Courier New", monospace;   /* monospace = every character the same width, easier to read data */
+    font-size: 14px;
+    overflow: hidden;         /* keeps the rows inside the rounded corners */
+}
+
+#output:empty {
+    display: none;            /* hide the box entirely until there's something in it */
+}
+
+/* One row = one line from the CSV.
+   It's a grid with two columns: the line number (fixed 60px) and the text (takes the rest) */
+.line {
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    border-bottom: 1px solid #eee;
+}
+
+.line:nth-child(even) {
+    background: #fafafa;      /* every other row slightly gray ("zebra stripes") so rows are easy to follow */
+}
+
+.line-num {
+    padding: 6px 10px;
+    text-align: right;
+    color: #999;
+    background: #f0f0f0;
+    user-select: none;        /* copying text skips the line numbers */
+}
+
+.line-text {
+    padding: 6px 10px;
+    white-space: pre-wrap;    /* keeps spacing, but wraps long lines instead of scrolling sideways */
+    word-break: break-word;
+}
+
+/* Search matches get a yellow highlight. <mark> is the HTML tag for highlighted text. */
+mark {
+    background: #ffe066;
+    padding: 0 1px;
+    border-radius: 2px;
+}
+
+/* Show more / Show all / Collapse buttons */
+#controls {
+    text-align: center;
+    margin: 15px 0;
+}
+
+button {
+    padding: 8px 14px;
+    margin: 4px;
+    font-size: 14px;
+    border: 1px solid #888;
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+}
+
+button:hover {
+    background: #eaeaea;
+}
+
+/* position: fixed pins the Top button to the bottom-right corner of the screen, even while scrolling */
+#topBtn {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+/* [hidden] elements must stay hidden, even though rules above set display on some of them */
+[hidden] {
+    display: none !important;
 }
