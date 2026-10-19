@@ -232,12 +232,13 @@ The brain makes things happen. We'll build it in small pieces, then test.
 
 ### Step 2.1: Settings + find the pieces
 
-Open `scriptI.js`. First, 3 settings, then the brain finds every piece by its name tag:
+Open `scriptI.js`. First, 4 settings, then the brain finds every piece by its name tag:
 
 ```js
 const WINDOW_SIZE = 15;     // how many rows fit in the window (plus the header)
-const EXTRA_ROWS  = 10;     // extra rows to build above and below the ones you see
+const EXTRA_ROWS  = 15;     // extra rows to build above and below the ones you see (a whole window's worth)
 const BIG_FILE    = 20000;  // bigger than this? search waits until you stop typing
+const GLIDE       = 0.25;   // how fast the wheel glide catches up (bigger = snappier, smaller = floatier)
 
 const fileInput   = document.getElementById('csvFileInput');   // Choose File button
 const searchInput = document.getElementById('searchInput');    // search bar
@@ -278,8 +279,10 @@ let builtEnd    = 0;      //    from builtStart, up to (but not including) built
 
 let searchTimer = null;   // "wait until they stop typing" timer
 let snapTimer   = null;   // "wait until scrolling stops, then snap" timer
-let wheelTarget = null;   // where the mouse wheel is gliding to (null = not gliding)
+let wheelTarget = null;   // the glide's FINISH LINE (null = no glide)
 let wheelLeft   = 0;      // leftover wheel spin, not enough for a whole row yet
+let glideSpot   = 0;      // exactly where the glide is right now (can be in-between pixels)
+let gliding     = false;  // is the glide moving right now?
 ```
 
 `[]` = an empty list. `null` = "nothing yet." They're `let` because they'll change later.
@@ -548,7 +551,9 @@ This is what keeps big files from choking.
 
 **The problem:** a file with 200,000 rows × 6 columns = about **1.4 million boxes**. Building all of them freezes the browser. But you only ever SEE about 15 rows!
 
-**The trick:** only build the rows you can see, plus 10 extra above and below. About 35 rows. **Always.** Even for a million-row file.
+**The trick:** only build the rows you can see, plus 15 extra above and below. About 45 rows. **Always.** Even for a million-row file.
+
+> **Wait, is the file loaded or not?** YES, the whole file is loaded. When you pick a file, every line is read and cut into cells right away (that's `dataRows`). The trick only limits how many rows get **drawn** as boxes on the page. Drawing boxes is the slow part, so the brain only draws what you can see.
 
 Above and below those rows sit the two invisible **spacers** from Step 2.1. They're empty, but stretched as tall as all the rows that AREN'T built. So the scrollbar still looks exactly right.
 
@@ -638,7 +643,7 @@ function buildRows(from, to) {
 | `.before(x)` / `.after(x)` | Put `x` right before / right after this piece |
 | `createDocumentFragment()` | A hidden box to build things in. Dropping them in all at once is much faster than one by one. |
 
-> **Why the extra 10 rows?** So if you scroll fast, the next rows are already built and you never see a blank gap.
+> **Why the extra 15 rows?** So if you scroll fast, the next rows are already built and you never see a blank gap. 15 = a whole window's worth on each side.
 
 <br>
 
@@ -978,10 +983,25 @@ window.addEventListener('resize', function () {
 
 The window always stops on a **whole row**. Never half a row. Two parts:
 
-1. **The mouse wheel** moves by whole rows, with a smooth glide (one click ≈ 3 rows).
-2. **Any other scrolling** (dragging the scrollbar, the keyboard, a trackpad) gets a tiny glide to the nearest whole row when it stops.
+1. **The mouse wheel** picks a spot on a whole row, and the window **glides** there (one click ≈ 3 rows).
+2. **Any other scrolling** (dragging the scrollbar, the keyboard) gets a tiny glide to the nearest whole row when it stops.
 
 > **Why doesn't the browser do the snapping?** It can, but it can only snap to rows that are BUILT. Jump far away, and it would yank you back to the nearest built row. The brain knows where EVERY row is, even the ones that aren't built.
+
+<br>
+
+**How the glide stays smooth: ONE glide, moving finish line.**
+
+The wheel doesn't start a new glide every time you spin it. That would stop-and-go on every row and feel stiff. Instead, there's only ever **one** glide, and each spin just **moves the finish line**. The glide keeps going toward wherever the finish line is now.
+
+> Like a dog chasing a ball: throw the ball again, and the dog doesn't stop and restart. It just turns and keeps running.
+
+```text
+   spin, spin, spin  →   finish line:  row 4  →  row 7  →  row 10
+   the glide         →   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~>   (never stops in the middle)
+```
+
+Every time the screen redraws (about 60 times a second), the window moves **25% of the way** to the finish line (that's `GLIDE = 0.25`). Far away = big steps. Almost there = tiny steps. So it speeds off and lands gently.
 
 ```js
 outputBox.addEventListener('wheel', function (e) {
@@ -1000,21 +1020,64 @@ outputBox.addEventListener('wheel', function (e) {
 
     e.preventDefault();                     // "browser, don't scroll. I've got this."
 
-    // Not gliding yet? Start from the row we're on now.
-    if (wheelTarget === null) wheelTarget = Math.round(outputBox.scrollTop / rowHeight) * rowHeight;
+    // No finish line yet? Start from the row we're on now.
+    if (wheelTarget === null) {
+        wheelTarget = Math.round(outputBox.scrollTop / rowHeight) * rowHeight;
+        glideSpot = outputBox.scrollTop;
+    }
 
-    // Add up the wheel spin. Every full row's worth → move one row.
+    // Add up the wheel spin. Every full row's worth → move the finish line one row.
     // (Trackpads send lots of tiny spins. They add up until they make a whole row.)
     wheelLeft += pixels;
     const rows = Math.trunc(wheelLeft / rowHeight);
     if (rows === 0) return;
     wheelLeft -= rows * rowHeight;
 
-    // Glide to the new spot (but never past the top or the bottom).
+    // Move the finish line (but never past the top or the bottom).
     wheelTarget = Math.min(Math.max(wheelTarget + rows * rowHeight, 0), bottom);
-    outputBox.scrollTo({ top: wheelTarget, behavior: 'smooth' });
+
+    // Not gliding yet? Start the glide. (Already gliding? It just follows the new finish line.)
+    if (!gliding) {
+        gliding = true;
+        requestAnimationFrame(glideStep);
+    }
 
 }, { passive: false });     // "passive: false" = "I might say preventDefault, so wait for me."
+
+
+// ONE STEP of the glide. Runs once per screen redraw.
+function glideStep() {
+
+    // The finish line got cleared? Stop.
+    if (wheelTarget === null) {
+        gliding = false;
+        return;
+    }
+
+    // Someone else moved the window (like dragging the scrollbar)? Let them. Stop gliding.
+    if (Math.abs(outputBox.scrollTop - glideSpot) > 2) {
+        gliding = false;
+        wheelTarget = null;
+        wheelLeft = 0;
+        return;
+    }
+
+    const gap = wheelTarget - glideSpot;          // how far to the finish line
+
+    // Basically there? Land EXACTLY on the row, and stop.
+    if (Math.abs(gap) < 0.5) {
+        glideSpot = wheelTarget;
+        outputBox.scrollTop = wheelTarget;
+        gliding = false;
+        return;
+    }
+
+    // Move 25% of the way there.
+    glideSpot += gap * GLIDE;
+    outputBox.scrollTop = glideSpot;
+
+    requestAnimationFrame(glideStep);             // same thing again, next redraw
+}
 
 
 function snapToRow() {
@@ -1038,7 +1101,8 @@ function snapToRow() {
 | `e.preventDefault()` | "Browser, DON'T do your normal thing." |
 | `Math.trunc(x)` | Chop off the decimals. `3.7` → `3` |
 | `Math.round(x)` | Round to the nearest whole number. `3.7` → `4` |
-| `behavior: 'smooth'` | Glide there instead of jumping |
+| `requestAnimationFrame(fn)` | "Run `fn` right before the screen redraws next." Calling it again inside `fn` = a loop that runs once per redraw. |
+| `behavior: 'smooth'` | Glide there instead of jumping (used by `snapToRow`) |
 
 <br>
 
@@ -1430,6 +1494,8 @@ Refresh. Pick a file. You should have:
 | **Stop the floating** | Delete `animation: float 6s ease-in-out infinite;` in `#output` |
 | **Show 20 rows instead of 15** | Change **BOTH**: `WINDOW_SIZE = 15` → `20` (brain) AND `calc(16 * 30px)` → `calc(21 * 30px)` (clothes). Remember the +1 for the header! |
 | **Make the wheel move more/fewer rows** | The wheel moves 1 row per 30 pixels of spin. Most mice spin 100 per click (≈ 3 rows). To change it, multiply `pixels` in the wheel listener, like `e.deltaY * 2` |
+| **Make the wheel glide snappier or floatier** | Change `GLIDE`. `0.4` = snappier, `0.15` = floatier. Keep it between `0.1` and `0.5`. |
+| **Build more/fewer extra rows** | Change `EXTRA_ROWS`. More = safer for super-fast scrolling, but a little more work per scroll. |
 | **Make the glow stronger** | In `.cell:hover`, raise `14px 2px` to something like `20px 6px` |
 | **Let columns get wider** | In `setColumnWidths`, change the `40` |
 | **Change the page color** | `body` → `background` |
@@ -1451,6 +1517,7 @@ Refresh. Pick a file. You should have:
 | Header columns don't line up with the rows | `font-weight: 600` is on `.header-row` instead of `.header-row .cell`. |
 | Blank gaps while scrolling | `buildVisibleRows` isn't being called in the `scroll` listener, or the spacers weren't added in `render`. |
 | Scrolling yanks you back somewhere | A leftover `scroll-snap-type` rule in the CSS. The brain does the snapping now. Delete it. |
+| The wheel feels stiff / stutters on every row | The wheel listener is calling `scrollTo(...)` on every spin instead of just moving `wheelTarget` and letting `glideStep` follow it. |
 | Stripes jump around while scrolling | The CSS still uses `.line:nth-child(even)` instead of `.line.zebra`. |
 | The window isn't header + 15 rows | The numbers don't match in both places, or the row height isn't 30. |
 

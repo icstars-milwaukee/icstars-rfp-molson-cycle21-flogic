@@ -74,8 +74,13 @@
 const WINDOW_SIZE = 15;          //  how many rows fit in the window  (plus the header).
                                  //  If you change this, change the 15 in styleI.css too.
 
-const EXTRA_ROWS = 10;           //  how many extra rows to build above and below the ones you see,
+const EXTRA_ROWS = 15;           //  how many extra rows to build above and below the ones you see,
                                  //  so fast scrolling never shows a blank gap.
+                                 //  (A whole window's worth on each side.)
+
+const GLIDE = 0.25;              //  how fast the wheel glide catches up.
+                                 //  Each frame, the window moves 25% of the way to where it's going.
+                                 //  Bigger = snappier.  Smaller = floatier.  (Keep it between 0.1 and 0.5.)
 
 const BIG_FILE = 20000;          //  files with more rows than this wait until you stop typing to search
                                  //  (so the search bar doesn't lag on every letter).
@@ -135,6 +140,8 @@ let searchTimer = null;   //  the "wait until they stop typing" timer, for big f
 let snapTimer   = null;   //  the "wait until scrolling stops, then snap" timer
 let wheelTarget = null;   //  where the mouse wheel is gliding the window to  (null = not gliding)
 let wheelLeft   = 0;      //  leftover wheel spin that wasn't enough for a whole row yet
+let glideSpot   = 0;      //  exactly where the glide is right now  (can be in-between pixels)
+let gliding     = false;  //  is the glide moving right now?
 
 
 
@@ -544,16 +551,29 @@ outputBox.addEventListener('scroll', function () {
 //
 //    Two parts:
 //
-//      1.  The mouse wheel moves the window by whole rows,
-//          with a smooth glide.   (one click of the wheel = about 3 rows)
+//      1.  The mouse wheel picks a spot on a whole row,
+//          and the window GLIDES there.   (one click of the wheel = about 3 rows)
 //
-//      2.  Any other scrolling  (dragging the scrollbar, the keyboard, a trackpad)
+//      2.  Any other scrolling  (dragging the scrollbar, the keyboard)
 //          gets a tiny glide to the nearest whole row when it stops.
 //
 //    Why not let the browser snap?  The browser can only snap to rows
 //    that are BUILT.  Jump far away, and it would yank you back
 //    to the nearest built row.  The brain knows where EVERY row is,
 //    even the ones that aren't built.
+//
+//
+//    HOW THE GLIDE STAYS SMOOTH:
+//
+//      There's only ever ONE glide.  The wheel doesn't start a new glide
+//      every time you spin it.  It just MOVES THE FINISH LINE.
+//      The glide keeps going, smoothly, toward wherever the finish line is now.
+//
+//      Like a dog chasing a ball:  throw the ball again,
+//      the dog doesn't stop and restart.  It just turns and keeps running.
+//
+//         spin, spin, spin  ->   finish line:  row 4  ->  row 7  ->  row 10
+//         the glide         ->   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~>  (never stops in the middle)
 //
 // ----------------------------------------------------------
 
@@ -575,11 +595,14 @@ outputBox.addEventListener('wheel', function (e) {
     e.preventDefault();                     //  "browser, don't scroll.  I've got this."
 
 
-    //  Not gliding yet?  Start from the row we're on now.
-    if (wheelTarget === null) wheelTarget = Math.round(outputBox.scrollTop / rowHeight) * rowHeight;
+    //  No finish line yet?  Start from the row we're on now.
+    if (wheelTarget === null) {
+        wheelTarget = Math.round(outputBox.scrollTop / rowHeight) * rowHeight;
+        glideSpot = outputBox.scrollTop;
+    }
 
 
-    //  Add up the wheel spin.  Every full row's worth  ->  move one row.
+    //  Add up the wheel spin.  Every full row's worth  ->  move the finish line one row.
     //  (Trackpads send lots of tiny spins.  They add up until they make a whole row.)
     wheelLeft += pixels;
     const rows = Math.trunc(wheelLeft / rowHeight);
@@ -587,11 +610,67 @@ outputBox.addEventListener('wheel', function (e) {
     wheelLeft -= rows * rowHeight;
 
 
-    //  Glide to the new spot  (but never past the top or the bottom).
+    //  Move the finish line  (but never past the top or the bottom).
     wheelTarget = Math.min(Math.max(wheelTarget + rows * rowHeight, 0), bottom);
-    outputBox.scrollTo({ top: wheelTarget, behavior: 'smooth' });
+
+
+    //  Not gliding yet?  Start the glide.  (Already gliding?  It'll just follow the new finish line.)
+    if (!gliding) {
+        gliding = true;
+        requestAnimationFrame(glideStep);
+    }
 
 }, { passive: false });     //  "passive: false"  =  "I might say preventDefault, so wait for me."
+
+
+
+// ----------------------------------------------------------
+//
+//    ONE STEP OF THE GLIDE
+//
+//    The screen redraws about 60 times a second.
+//    Every redraw, the window moves 25% of the way to the finish line.
+//
+//       far away   ->  big steps    (fast)
+//       almost there  ->  tiny steps  (gentle landing)
+//
+//    "requestAnimationFrame" = "run this again right before the next redraw."
+//
+// ----------------------------------------------------------
+
+function glideStep() {
+
+    //  The finish line got cleared?  Stop.
+    if (wheelTarget === null) {
+        gliding = false;
+        return;
+    }
+
+    //  Someone else moved the window  (like dragging the scrollbar)?  Let them.  Stop gliding.
+    if (Math.abs(outputBox.scrollTop - glideSpot) > 2) {
+        gliding = false;
+        wheelTarget = null;
+        wheelLeft = 0;
+        return;
+    }
+
+
+    const gap = wheelTarget - glideSpot;          //  how far to the finish line
+
+    //  Basically there?  Land EXACTLY on the row, and stop.
+    if (Math.abs(gap) < 0.5) {
+        glideSpot = wheelTarget;
+        outputBox.scrollTop = wheelTarget;
+        gliding = false;
+        return;
+    }
+
+    //  Move 25% of the way there.
+    glideSpot += gap * GLIDE;
+    outputBox.scrollTop = glideSpot;
+
+    requestAnimationFrame(glideStep);             //  same thing again, next redraw
+}
 
 
 function snapToRow() {
