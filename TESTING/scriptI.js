@@ -1,222 +1,435 @@
-// THE NANDO NOTES - scriptI.js
-// Reads a selected CSV file and displays it line by line in a scrolling window 15 lines tall, with a search bar.
+/*
+    ==========================================================
+
+        THE NANDO NOTES  -  scriptI.js
+
+        This file is the BRAIN of the page.
+        It makes things HAPPEN when you click and type.
+
+    ==========================================================
+
+
+    THE WHOLE STORY, IN 5 STEPS:
+
+
+        1.   You pick a CSV file.
+
+        2.   The brain reads the file.
+
+        3.   The brain cuts the file into lines.
+             (one line = one row)
+
+        4.   The brain puts every row inside the window.
+             The window only shows 15 rows at a time.
+             You scroll to see the rest.
+
+        5.   When you type in the search bar,
+             the brain only keeps the rows that have your word,
+             and paints your word yellow.
+
+
+    Nothing leaves your computer.
+    The file is read right here, in your browser.
+
+*/
+
+
+
+// ----------------------------------------------------------
 //
-// How it works, start to finish:
-//   user picks a file -> FileReader reads it as text -> text gets split into lines
-//   -> render() puts every line into a scroll box that's only 15 rows tall
-//   -> scrolling the box moves through the file; the status line says which lines you're looking at
-//   -> typing in the search bar filters to only the matching lines and highlights the match
+//    HOW MANY ROWS FIT IN THE WINDOW
 //
-// FileReader is built into the browser (no install needed). It reads files the user picks
-// right on their own computer; nothing gets uploaded to a server.
+//    15 rows.
+//    If you change this, change the 15 in styleI.css too.
 //
-// WHAT CHANGED (Claude update - scrolling window):
-//   - Before: you saw 15 lines, then had to click "Show 15 more" or "Show all".
-//   - Now: ALL lines are loaded into #output, but the box is only 15 rows tall (set in styleI.css),
-//     so you scroll inside it like a window sliding over the file.
-//   - updatePosition() (section 7) reads how far the box is scrolled and shows "Lines X–Y of Z".
-//   - "Go to line" (section 5) scrolls the window so that line sits at the top, and flashes it.
-//   - "Expand" removes the 15-row height limit to see everything at once; click again to shrink back.
-//   - Show more / Show all / Collapse buttons were removed (the scroll window replaces them).
+// ----------------------------------------------------------
 
-const WINDOW_SIZE = 15; // how many lines fit in the window (must match the 15 in styleI.css)
+const WINDOW_SIZE = 15;
 
-// 1. Grab every element we need using their IDs (these match the id="..." values in testI.html)
-const fileInput   = document.getElementById('csvFileInput');
-const searchInput = document.getElementById('searchInput');
-const statusText  = document.getElementById('status');
-const outputBox   = document.getElementById('output'); // the scrolling window
-const rowsBox     = document.getElementById('rows');   // the rows inside the window
-const controls    = document.getElementById('controls');
-const jumpInput   = document.getElementById('jumpInput');
-const jumpBtn     = document.getElementById('jumpBtn');
-const expandBtn   = document.getElementById('expandBtn');
-const topBtn      = document.getElementById('topBtn');
 
-// 2. The page's "memory". "let" (instead of const) means these values change over time.
-let allLines = []; // every line in the file, e.g. ["name,age", "Ana,22", ...]
-let matches = [];  // the lines currently in the window: [{ num: 1, text: "name,age" }, ...]
 
-// 3. When a file is picked, read it
+// ----------------------------------------------------------
+//
+//    STEP 0:  FIND THE PIECES ON THE PAGE
+//
+//    Every piece in testI.html has a name tag  (id="...").
+//    Here we find each piece by its name tag,
+//    so the brain can talk to it later.
+//
+// ----------------------------------------------------------
+
+const fileInput   = document.getElementById('csvFileInput');   //  the "Choose File" button
+const searchInput = document.getElementById('searchInput');    //  the search bar
+const statusText  = document.getElementById('status');         //  the "Lines 1–15 of 100" words
+const outputBox   = document.getElementById('output');         //  the glass window
+const rowsBox     = document.getElementById('rows');           //  the rows inside the window
+const controls    = document.getElementById('controls');       //  the Go-to-line + Expand area
+const jumpInput   = document.getElementById('jumpInput');      //  the "Line #" box
+const jumpBtn     = document.getElementById('jumpBtn');        //  the "Go to line" button
+const expandBtn   = document.getElementById('expandBtn');      //  the "Expand" button
+const topBtn      = document.getElementById('topBtn');         //  the "Top" button
+
+
+
+// ----------------------------------------------------------
+//
+//    THE BRAIN'S MEMORY
+//
+//    "let" means:  this can change later.
+//
+// ----------------------------------------------------------
+
+let allLines = [];    //  EVERY line from the file.          Like:  ["name,age", "Ana,22"]
+let matches  = [];    //  ONLY the lines we are showing now.  Like:  [{ num: 2, text: "Ana,22" }]
+
+
+
+// ----------------------------------------------------------
+//
+//    STEP 1 + 2 + 3:  PICK A FILE  ->  READ IT  ->  CUT IT INTO LINES
+//
+// ----------------------------------------------------------
+
 fileInput.addEventListener('change', function (event) {
-    const file = event.target.files[0];
-    if (!file) return; // user canceled = stop here
 
-    const reader = new FileReader();
+    const file = event.target.files[0];     //  the file you picked
 
-    // Runs once the file is done reading. e.target.result = the whole file as one big string.
+    if (!file) return;                      //  you clicked "Cancel"?  Then stop.
+
+
+    const reader = new FileReader();        //  FileReader = a helper that reads files. It comes with every browser.
+
+
+    //  This part waits until the file is DONE reading.
     reader.onload = function (e) {
-        // Split the text into lines. /\r?\n/ handles both Windows (\r\n) and Mac/Linux (\n) line endings.
+
+        //  Cut the file into lines.
+        //  (Windows and Mac end lines a little differently. This handles both.)
         allLines = e.target.result.split(/\r?\n/);
 
-        // Files often end with a blank line; drop it so we don't show an empty last row
+        //  Files often end with one empty line. Throw it away.
         if (allLines[allLines.length - 1] === '') allLines.pop();
 
-        // Reset everything for the new file
+        //  Clean slate for the new file.
         searchInput.value = '';
-        searchInput.disabled = false;
+        searchInput.disabled = false;       //  turn the search bar ON
         jumpInput.value = '';
-        render();
+
+        render();                           //  draw the rows  (see STEP 4 below)
     };
 
-    reader.readAsText(file);
+
+    reader.readAsText(file);                //  GO!  Start reading.
 });
 
-// 4. Search: every time the user types, re-draw the window using the new search text
+
+
+// ----------------------------------------------------------
+//
+//    STEP 5:  SEARCH
+//
+//    Every time you type a letter,
+//    draw the rows again, using your new word.
+//
+// ----------------------------------------------------------
+
 searchInput.addEventListener('input', render);
 
-// 5. Go to line: scroll the window so the chosen line is at the top
+
+
+// ----------------------------------------------------------
+//
+//    GO TO LINE
+//
+//    Type a number  ->  click "Go to line"  (or press Enter)
+//    ->  that line jumps to the top of the window
+//    ->  and flashes blue so you can find it.
+//
+// ----------------------------------------------------------
+
 jumpBtn.addEventListener('click', jumpToLine);
+
 jumpInput.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') jumpToLine(); // pressing Enter works too
+    if (e.key === 'Enter') jumpToLine();
 });
 
-function jumpToLine() {
-    const target = parseInt(jumpInput.value, 10); // turns the typed text into a whole number
-    if (isNaN(target) || matches.length === 0) return;
 
-    // Find the first line in the window whose number is >= the target.
-    // (While searching, the exact line might be filtered out, so we land on the next one that's there.)
+function jumpToLine() {
+
+    const target = parseInt(jumpInput.value, 10);       //  the number you typed
+
+    if (isNaN(target) || matches.length === 0) return;  //  not a number?  nothing to show?  Stop.
+
+
+    //  Find the row with that line number.
+    //  (If you're searching and that line is hidden, go to the next one that's showing.)
     let index = matches.findIndex(function (line) { return line.num >= target; });
-    if (index === -1) index = matches.length - 1; // past the end = go to the last line
+
+    //  Number too big?  Go to the last line.
+    if (index === -1) index = matches.length - 1;
+
 
     const row = rowsBox.children[index];
+
     if (outputBox.classList.contains('expanded')) {
-        row.scrollIntoView({ block: 'center' }); // expanded = no window to scroll, so scroll the page instead
+        row.scrollIntoView({ block: 'center' });        //  window is expanded?  Scroll the PAGE.
     } else {
-        outputBox.scrollTop = row.offsetTop;     // scroll the window so this row is at the top
+        outputBox.scrollTop = row.offsetTop;            //  window is small?  Scroll the WINDOW.
     }
 
-    updatePosition(); // refresh the "Lines X–Y" text right away
+    updatePosition();                                   //  update the "Lines 1–15" words
 
-    // Flash the row so your eye can find it. Removing then re-adding the class restarts the animation.
+
+    //  Make the row flash blue.
+    //  (Take the flash off, then put it back on, so it plays again every time.)
     row.classList.remove('flash');
     void row.offsetWidth;
     row.classList.add('flash');
 }
 
-// 6. Expand / shrink the window
+
+
+// ----------------------------------------------------------
+//
+//    EXPAND  /  SHRINK
+//
+//    Click once   ->  show ALL the rows.
+//    Click again  ->  back to the 15-row window.
+//
+// ----------------------------------------------------------
+
 expandBtn.addEventListener('click', function () {
-    // classList.toggle adds the class if it's missing, removes it if it's there, and returns true if it added it
+
+    //  "toggle" = a light switch.  On -> Off.  Off -> On.
     const expanded = outputBox.classList.toggle('expanded');
+
     expandBtn.textContent = expanded ? 'Shrink to 15-line window' : 'Expand (show all)';
+
     sizeWindow();
     updatePosition();
 });
 
-// Sets the window to exactly 15 rows tall.
-// If a long line adds a sideways scrollbar, that scrollbar eats into the height, so we measure it
-// and add it back on. Scrollbar = full height - inside height - the top and bottom borders.
+
+
+// ----------------------------------------------------------
+//
+//    MAKE THE WINDOW EXACTLY 15 ROWS TALL
+//
+//    Problem:  a really long line adds a sideways scrollbar,
+//              and that scrollbar steals some space.
+//
+//    Fix:      measure how tall the scrollbar is,
+//              and give that space back.
+//
+// ----------------------------------------------------------
+
 function sizeWindow() {
-    outputBox.style.height = ''; // start from the CSS height (or height: auto when expanded)
+
+    outputBox.style.height = '';                        //  start fresh
+
     if (outputBox.classList.contains('expanded') || rowsBox.children.length === 0) return;
 
-    const style = getComputedStyle(outputBox); // the box's final, applied CSS values
-    const borders = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
-    const scrollbar = outputBox.offsetHeight - outputBox.clientHeight - borders;
-    const rowHeight = rowsBox.children[0].offsetHeight;
+
+    const style     = getComputedStyle(outputBox);
+    const borders   = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+    const scrollbar = outputBox.offsetHeight - outputBox.clientHeight - borders;    //  how tall the scrollbar is
+    const rowHeight = rowsBox.children[0].offsetHeight;                              //  how tall one row is
+
+    //  15 rows  +  the scrollbar
     outputBox.style.height = (WINDOW_SIZE * rowHeight + scrollbar) + 'px';
 }
 
-// 7. Status line: every time the window scrolls, figure out which lines are showing
+
+
+// ----------------------------------------------------------
+//
+//    THE "LINES 21–35 OF 100" WORDS
+//
+//    Every time the window scrolls, figure out
+//    which rows you can see right now.
+//
+// ----------------------------------------------------------
+
 outputBox.addEventListener('scroll', updatePosition);
 
+
 function updatePosition() {
+
     const query = searchInput.value.trim();
 
-    if (allLines.length === 0) return;
+    if (allLines.length === 0) return;                  //  no file yet?  Stop.
+
     if (matches.length === 0) {
         statusText.textContent = 'No lines match "' + query + '"';
         return;
     }
 
-    // Every row is the same height, so: rows scrolled past = how far we scrolled / one row's height
+
+    //  Every row is the same height.
+    //  So:   how far we scrolled  ÷  one row's height  =  which row is at the top.
     const rowHeight = rowsBox.children[0].offsetHeight;
     const first = Math.round(outputBox.scrollTop / rowHeight);
+
     const last = outputBox.classList.contains('expanded')
-        ? matches.length - 1
-        : Math.min(first + WINDOW_SIZE, matches.length) - 1;
+        ? matches.length - 1                                    //  expanded?  You can see them all.
+        : Math.min(first + WINDOW_SIZE, matches.length) - 1;    //  small?     The top row + 14 more.
+
 
     let message = 'Lines ' + matches[first].num + '–' + matches[last].num;
+
     if (query === '') {
         message += ' of ' + allLines.length;
     } else {
         message += ' (' + matches.length + ' matching line(s) for "' + query + '")';
     }
+
     statusText.textContent = message;
 }
 
-// Show the page's Top button only after the user has scrolled the page down a bit
+
+
+// ----------------------------------------------------------
+//
+//    THE "TOP" BUTTON
+//
+//    It hides until you scroll down the page.
+//    Click it  ->  glide back to the top.
+//
+// ----------------------------------------------------------
+
 topBtn.addEventListener('click', function () {
-    window.scrollTo({ top: 0, behavior: 'smooth' }); // smooth = animated scroll instead of a jump
+    window.scrollTo({ top: 0, behavior: 'smooth' });
 });
+
 window.addEventListener('scroll', function () {
     topBtn.hidden = window.scrollY < 300;
 });
 
-// 8. render() rebuilds the window. It runs after loading a file and every time the search changes.
-function render() {
-    const query = searchInput.value.trim().toLowerCase(); // lowercase = search ignores capital letters
 
-    // Build a list of lines to show. Each one remembers its ORIGINAL line number (index + 1),
-    // so when searching you still see where the match lives in the file.
+
+// ----------------------------------------------------------
+//
+//    STEP 4:  DRAW THE ROWS   (this is called "render")
+//
+//    This runs after you pick a file,
+//    and every time you type in the search bar.
+//
+// ----------------------------------------------------------
+
+function render() {
+
+    //  Your search word, in small letters.
+    //  (So "ANA" and "ana" find the same thing.)
+    const query = searchInput.value.trim().toLowerCase();
+
+
+    //  Pick which lines to show.
+    //    No search word?    Keep every line.
+    //    Search word?       Keep only lines that have it.
+    //
+    //  Each line also remembers its REAL line number,
+    //  so you always know where it lives in the file.
     matches = [];
+
     allLines.forEach(function (text, index) {
         if (query === '' || text.toLowerCase().includes(query)) {
             matches.push({ num: index + 1, text: text });
         }
     });
 
-    // Clear the old rows, then add the new ones.
-    // A DocumentFragment is an off-screen holder: we build every row in it, then add them all at once,
-    // which is much faster than adding thousands of rows to the page one by one.
+
+    //  Wipe the old rows away.
     rowsBox.textContent = '';
+
+
+    //  Build all the new rows in a hidden box first ("fragment"),
+    //  then drop them onto the page all at once.
+    //  (Much faster than one at a time.)
     const fragment = document.createDocumentFragment();
+
     matches.forEach(function (line) {
         fragment.appendChild(makeRow(line.num, line.text, query));
     });
+
     rowsBox.appendChild(fragment);
 
-    controls.hidden = false;
-    sizeWindow();
-    outputBox.scrollTop = 0; // new search = start back at the top of the window
-    updatePosition();
+
+    controls.hidden = false;        //  show the Go-to-line + Expand buttons
+    sizeWindow();                   //  make the window 15 rows tall
+    outputBox.scrollTop = 0;        //  start at the top
+    updatePosition();               //  update the "Lines 1–15" words
 }
 
-// 9. makeRow() builds one row: [line number | line text], with search matches highlighted.
+
+
+// ----------------------------------------------------------
+//
+//    BUILD ONE ROW
+//
+//    A row has 2 parts:
+//
+//         [ line number ]  [ the words from that line ]
+//
+//    If you're searching, your word gets painted yellow.
+//
+// ----------------------------------------------------------
+
 function makeRow(num, text, query) {
+
+    //  The row itself.
     const row = document.createElement('div');
     row.className = 'line';
 
+
+    //  Part 1:  the line number.
     const numCell = document.createElement('span');
     numCell.className = 'line-num';
     numCell.textContent = num;
 
+
+    //  Part 2:  the words.
     const textCell = document.createElement('span');
     textCell.className = 'line-text';
 
+
     if (query === '') {
+
+        //  No search?  Just put the words in.
         textCell.textContent = text;
+
     } else {
-        // Walk through the line, wrapping every match in a <mark> tag (yellow highlight).
-        // We build real elements instead of using innerHTML, so text from the file is never run as code.
+
+        //  Search?  Walk along the line.
+        //  Every time we find your word, wrap it in <mark>  (= yellow paint).
+        //
+        //     "Ana,22,ana@ex.com"    searching "ana"
+        //      ^^^     ^^^            <- these get painted
+        //
         const lower = text.toLowerCase();
         let start = 0;
         let found = lower.indexOf(query, start);
+
         while (found !== -1) {
-            textCell.appendChild(document.createTextNode(text.slice(start, found))); // text before the match
+
+            textCell.appendChild(document.createTextNode(text.slice(start, found)));   //  the words BEFORE your word
+
             const mark = document.createElement('mark');
-            mark.textContent = text.slice(found, found + query.length);              // the match itself
+            mark.textContent = text.slice(found, found + query.length);                //  YOUR word  (yellow)
             textCell.appendChild(mark);
+
             start = found + query.length;
-            found = lower.indexOf(query, start);
+            found = lower.indexOf(query, start);                                       //  look for the next one
         }
-        textCell.appendChild(document.createTextNode(text.slice(start)));           // text after the last match
+
+        textCell.appendChild(document.createTextNode(text.slice(start)));             //  the words AFTER the last one
     }
 
-    // Keep empty lines from collapsing to zero height
+
+    //  Empty line?  Put a space in it, so the row doesn't squish flat.
     if (text === '') textCell.textContent = ' ';
 
+
+    //  Snap the 2 parts into the row.  Done!
     row.appendChild(numCell);
     row.appendChild(textCell);
     return row;

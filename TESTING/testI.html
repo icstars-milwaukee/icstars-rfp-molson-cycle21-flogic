@@ -1,69 +1,170 @@
 <!DOCTYPE html>
-<!-- THE NANDO NOTES -->
-<!-- WHAT CHANGED (Claude update - scrolling window):
-     - #output is now a scrolling window (15 rows tall) with a #rows box inside holding every line.
-     - Removed the Show more / Show all / Collapse buttons; added "Go to line" (#jumpInput + #jumpBtn)
-       and an Expand button (#expandBtn). The controls now sit ABOVE the window so they don't move. -->
-<!-- <!DOCTYPE html> tells the browser "this is modern HTML5". It must be the very first line,
-     otherwise the browser falls back to old "quirks mode" and layouts can act strange. -->
 
-<!-- <html> wraps the whole page. lang="en" tells browsers and screen readers the page is in English. -->
+<!--
+    ==========================================================
+
+        THE NANDO NOTES  -  testI.html
+
+        This file is the SKELETON of the page.
+        It says WHAT is on the page.
+
+            testI.html   =  what's there     (skeleton)
+            styleI.css   =  how it looks     (clothes)
+            scriptI.js   =  what it does     (brain)
+
+    ==========================================================
+
+
+    The line at the very top  (<!DOCTYPE html>)  MUST stay first.
+    It tells the browser:  "this is a normal, modern web page."
+-->
+
+
 <html lang="en">
 
-<!-- <head> holds info ABOUT the page (settings, title, linked files). Nothing in here shows up on the page itself. -->
+
+
+<!--
+    ----------------------------------------------------------
+
+        THE HEAD
+
+        Stuff the browser needs to know.
+        You can't SEE any of this on the page.
+
+    ----------------------------------------------------------
+-->
+
 <head>
-    <!-- charset="UTF-8" lets the page display any character correctly (accents, symbols, emojis) -->
+
+    <!--  Lets the page show any letter or symbol  (é, ñ, ✓, 😀)  -->
     <meta charset="UTF-8">
 
-    <!-- Makes the page scale properly on phones instead of showing a tiny zoomed-out desktop view -->
+    <!--  Makes the page fit on phones  -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <!-- The text shown on the browser tab -->
+    <!--  The words on the browser tab  -->
     <title>CSV Reader Test</title>
 
-    <!-- Links the stylesheet. Styling lives in styleI.css -->
+    <!--  Put on the clothes  (styleI.css)  -->
     <link rel="stylesheet" href="styleI.css">
+
 </head>
 
-<!-- <body> holds everything the user actually sees on the page -->
+
+
+<!--
+    ----------------------------------------------------------
+
+        THE BODY
+
+        Everything you can SEE on the page.
+        It goes top to bottom, in this order.
+
+        Each piece has a name tag:   id="..."
+        The brain (scriptI.js) uses the name tag to find it.
+
+    ----------------------------------------------------------
+-->
+
 <body>
 
-    <!-- Implementation I: CSV Reader -->
+
+
+    <!--  1.  The big title  -->
+
     <h1>CSV Reader</h1>
 
-    <!-- Creates a file upload button for CSVs only.
-         - type="file"       -> makes it a "Choose File" button instead of a text box
-         - id="csvFileInput" -> the name tag JavaScript and CSS use to find this exact button
-         - accept=".csv"     -> the file picker only shows .csv files (convenience filter, not a security check) -->
+
+
+    <!--
+        2.  The "Choose File" button
+
+            type="file"    ->  makes it a "pick a file" button
+            accept=".csv"  ->  only shows CSV files when you pick
+    -->
+
     <input type="file" id="csvFileInput" accept=".csv">
 
-    <!-- Search bar. type="search" gives a text box with a little "x" to clear it in most browsers.
-         It starts "disabled" (grayed out) until a file is loaded, since there's nothing to search yet. -->
+
+
+    <!--
+        3.  The search bar
+
+            "disabled"  =  turned OFF.
+            It turns ON after you pick a file.
+            (Nothing to search yet!)
+    -->
+
     <input type="search" id="searchInput" placeholder="Search text, numbers, or characters..." disabled>
 
-    <!-- Status line: shows which lines are in the window, like "Lines 16–30 of 240" -->
+
+
+    <!--
+        4.  The little words that say where you are
+
+            Like:   "Lines 16–30 of 240"
+    -->
+
     <p id="status">Pick a CSV file to get started.</p>
 
-    <!-- Go to line + Expand. They start hidden until a file is loaded.
-         type="number" makes a box that only accepts numbers; min="1" because line numbers start at 1. -->
+
+
+    <!--
+        5.  "Go to line"  +  "Expand"
+
+            "hidden"  =  you can't see it yet.
+            It shows up after you pick a file.
+
+            type="number"  ->  the box only takes numbers
+    -->
+
     <div id="controls" hidden>
         <input type="number" id="jumpInput" min="1" placeholder="Line #">
         <button id="jumpBtn">Go to line</button>
         <button id="expandBtn">Expand (show all)</button>
     </div>
 
-    <!-- The scrolling window. #output is the window frame (15 rows tall, scrolls),
-         #rows holds every CSV line, one row per line. scriptI.js fills #rows once a file is picked. -->
+
+
+    <!--
+        6.  THE GLASS WINDOW   (the star of the show)
+
+            "output"  =  the window frame.
+            "rows"    =  the rows inside it.
+
+            It's empty for now.
+            The brain fills it in after you pick a file.
+    -->
+
     <div id="output">
         <div id="rows"></div>
     </div>
 
-    <!-- Floating button in the bottom-right corner that scrolls back to the top of the page -->
+
+
+    <!--
+        7.  The "Top" button  (bottom-right corner)
+
+            Hidden until you scroll down.
+            Click it  ->  back to the top.
+    -->
+
     <button id="topBtn" title="Back to top" hidden>&#8593; Top</button>
 
-    <!-- The CSV display / reader logic lives in scriptI.js, using JavaScript's FileReader API.
-         Loaded at the end of <body> so the elements above exist before the script runs. -->
+
+
+    <!--
+        8.  Plug in the brain  (scriptI.js)
+
+            It goes LAST, on purpose.
+            The brain needs all the pieces above to exist first,
+            so it can find them.
+    -->
+
     <script src="scriptI.js"></script>
+
+
 
 </body>
 </html>

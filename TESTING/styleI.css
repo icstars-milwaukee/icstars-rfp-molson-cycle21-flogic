@@ -1,30 +1,77 @@
-/* THE NANDO NOTES - styleI.css
-   This file controls how the CSV reader page LOOKS. It's linked from testI.html's <head>.
-   The "#" in front of a name means "find the element with this id" (e.g. #output -> id="output").
-   A "." in front of a name means "find every element with this class" (e.g. .line -> class="line").
+/*
+    ==========================================================
 
-   WHAT CHANGED (Claude update - scrolling window):
-   - #output is now a fixed-height window (15 rows x 30px) with overflow: auto, so it scrolls.
-   - Every row is locked to 30px tall and long lines no longer wrap (scroll sideways instead),
-     so the 15-row math always works. Line numbers stay pinned on the left (position: sticky).
-   - Added .expanded (Expand button), .flash (Go to line highlight), and #jumpInput styling. */
+        THE NANDO NOTES  -  styleI.css
 
-/* Whole page: a clean font, light background, and no edge-to-edge text */
+        This file is the CLOTHES of the page.
+        It says how everything LOOKS.
+        (colors, sizes, spacing, the glass window)
+
+
+    HOW TO READ THIS FILE:
+
+        #something   =  ONE piece, found by its name tag.
+                        #output  finds  id="output"
+
+        .something   =  a GROUP of pieces that share a name.
+                        .line  finds every  class="line"
+
+        Inside the { curly brackets } are the clothes for that piece.
+
+
+    COLORS THAT ARE SEE-THROUGH:
+
+        rgba(255, 255, 255, 0.4)
+             ^^^^^^^^^^^^^  ^^^
+             the color      how solid it is
+             (white)        0 = invisible
+                            1 = totally solid
+
+    ==========================================================
+*/
+
+
+
+/*  ----------------------------------------------------------
+
+        THE WHOLE PAGE
+
+        Grey background, so the glass window shows up.
+
+    ----------------------------------------------------------  */
+
 body {
     font-family: system-ui, Arial, sans-serif;
-    background: #f4f5f7;
-    color: #222;
+    background: #d6d9de;            /*  grey  */
+    color: #222;                    /*  dark text  */
     margin: 0;
-    padding: 20px 16px 80px;   /* extra bottom space so the floating Top button never covers the last line */
+    padding: 20px 16px 80px;        /*  space around the edges  (more at the bottom, for the Top button)  */
 }
+
+
+
+/*  ----------------------------------------------------------
+
+        THE TITLE
+
+    ----------------------------------------------------------  */
 
 h1 {
     text-align: center;
     margin: 10px 0 20px;
 }
 
-/* The "Choose File" button and the search bar
-   display: block + margin: auto turns each into a standalone centered box */
+
+
+/*  ----------------------------------------------------------
+
+        "CHOOSE FILE"  +  THE SEARCH BAR
+
+        "display: block"  +  "margin: auto"
+        =  put it on its own line, in the middle.
+
+    ----------------------------------------------------------  */
+
 #csvFileInput,
 #searchInput {
     display: block;
@@ -33,100 +80,268 @@ h1 {
 
 #searchInput {
     width: 100%;
-    max-width: 500px;
+    max-width: 500px;               /*  wide, but not TOO wide  */
     padding: 10px 12px;
     font-size: 16px;
     border: 1px solid #bbb;
-    border-radius: 6px;
-    box-sizing: border-box;   /* makes width include the padding, so it doesn't overflow */
+    border-radius: 6px;             /*  round corners  */
+    box-sizing: border-box;
 }
 
-/* The "Lines X–Y of Z" text */
+
+
+/*  ----------------------------------------------------------
+
+        THE "LINES 1–15 OF 100" WORDS
+
+    ----------------------------------------------------------  */
+
 #status {
     text-align: center;
-    color: #555;
+    color: #444;
     font-size: 14px;
 }
 
-/* The scrolling window that holds all the CSV lines.
-   Every row is exactly 30px tall (see .line below), so 15 rows = 15 * 30px = 450px.
-   If you change the row height or the 15, change both here AND WINDOW_SIZE in scriptI.js. */
+
+
+/*  ==========================================================
+
+        THE GLASS WINDOW   (the star of the show)
+
+        Math:   1 row = 30 tall
+                15 rows = 450 tall
+
+        If you change the 15 here,
+        change WINDOW_SIZE in scriptI.js too!
+
+    ==========================================================  */
+
 #output {
+
+    /*  SIZE  */
     max-width: 900px;
-    height: calc(15 * 30px);  /* calc() does math in CSS: exactly 15 rows tall */
-    margin: 0 auto;
-    background: #fff;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    font-family: Consolas, "Courier New", monospace;   /* monospace = every character the same width, easier to read data */
+    height: calc(15 * 30px);        /*  exactly 15 rows tall  */
+    margin: 0 auto;                 /*  in the middle  */
+
+    /*  LETTERS  */
+    font-family: Consolas, "Courier New", monospace;     /*  every letter the same width = neat columns  */
     font-size: 14px;
-    overflow: auto;           /* anything that doesn't fit gets a scrollbar (up/down, and sideways for long lines) */
-    position: relative;       /* lets scriptI.js measure where each row sits inside the window */
+
+    /*  SCROLLING  */
+    overflow: auto;                 /*  too much stuff?  add a scrollbar  */
+    position: relative;             /*  helps the brain measure where rows are  */
+
+
+    /*  ---- THE GLASS LOOK ----  */
+
+    /*  The fill:  a little white in the top-left,
+        fading to almost clear in the bottom-right.
+        That fade is what makes it look like glass.  */
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.40), rgba(255, 255, 255, 0.10));
+
+    backdrop-filter: blur(12px);                        /*  blurs whatever is behind it  (frosty)  */
+    border: 1px solid rgba(255, 255, 255, 0.7);         /*  a thin shiny edge  */
+    border-radius: 18px;                                /*  round corners  */
+
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.18),                /*  soft shadow below  =  it looks like it's floating  */
+        inset 0 1px 0 rgba(255, 255, 255, 0.9);         /*  shiny line on the top edge  =  light hitting the glass  */
+
+
+    /*  ---- SNAPPY SCROLLING ----  */
+
+    /*  The window always stops on a whole row.
+        Never half a row.  Click, click, click.  */
+    scroll-snap-type: y mandatory;
+
+
+    /*  ---- THIN SCROLLBAR ----  */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
+
+
+    /*  ---- FLOATING ----  */
+
+    /*  Bobs up and down, slowly, forever.
+        Don't like it?  Delete this one line.  */
+    animation: float 6s ease-in-out infinite;
 }
 
-/* Expand button: drop the height limit so every line shows on the page */
+
+/*  The floating move:  go up 4 pixels, then come back down.  */
+@keyframes float {
+    50% { transform: translateY(-4px); }
+}
+
+
+/*  Some people turn off motion on their computer.
+    If they did, the window stays still.  */
+@media (prefers-reduced-motion: reduce) {
+    #output { animation: none; }
+}
+
+
+
+/*  ----------------------------------------------------------
+
+        WHEN YOU CLICK "EXPAND"
+
+        No more 15-row limit.  Show everything.
+        Also:  stop snapping, stop floating.
+
+    ----------------------------------------------------------  */
+
 #output.expanded {
     height: auto;
+    scroll-snap-type: none;
+    animation: none;
 }
 
-/* Hide the window entirely until a file is loaded (:has = "the window that contains an empty #rows") */
+
+
+/*  ----------------------------------------------------------
+
+        HIDE THE WINDOW UNTIL THERE'S A FILE
+
+        No rows?  No window.
+
+    ----------------------------------------------------------  */
+
 #output:has(#rows:empty) {
     display: none;
 }
 
-/* The box of rows inside the window.
-   width: max-content = as wide as the longest line, so every row's background stretches all the way across */
+
+
+/*  ----------------------------------------------------------
+
+        THE BOX OF ROWS  (inside the window)
+
+        As wide as the longest line,
+        so every row's color goes all the way across.
+
+    ----------------------------------------------------------  */
+
 #rows {
     width: max-content;
     min-width: 100%;
 }
 
-/* One row = one line from the CSV.
-   It's a grid with two columns: the line number (fixed 60px) and the text (takes the rest).
-   29px line-height + 1px bottom border = 30px per row, so rows never change size. */
+
+
+/*  ----------------------------------------------------------
+
+        ONE ROW
+
+            [ number ]  [ words ]
+              60 wide    the rest
+
+        Every row is exactly 30 tall:
+            29  (the row)
+          +  1  (the line under it)
+          = 30
+
+    ----------------------------------------------------------  */
+
 .line {
     display: grid;
-    grid-template-columns: 60px 1fr;
+    grid-template-columns: 60px 1fr;                    /*  2 parts:  number, then words  */
     line-height: 29px;
-    border-bottom: 1px solid #eee;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.45); /*  thin white line under each row  */
+    scroll-snap-align: start;                           /*  the window snaps to the top of each row  */
+    transition: background 0.15s;                       /*  color changes fade in smoothly  */
 }
 
+
+/*  Every other row is a tiny bit lighter.  Like stripes on a zebra.
+    Makes it easy for your eyes to follow a row.  */
 .line:nth-child(even) {
-    background: #fafafa;      /* every other row slightly gray ("zebra stripes") so rows are easy to follow */
+    background: rgba(255, 255, 255, 0.15);
 }
+
+
+/*  Put your mouse on a row  ->  it lights up.  */
+.line:hover {
+    background: rgba(255, 255, 255, 0.45);
+}
+
+
+
+/*  ----------------------------------------------------------
+
+        THE LINE NUMBER  (left side of a row)
+
+    ----------------------------------------------------------  */
 
 .line-num {
     padding: 0 10px;
     text-align: right;
-    color: #999;
-    background: #f0f0f0;
-    user-select: none;        /* copying text skips the line numbers */
-    position: sticky;         /* sticky + left: 0 = the number stays put when you scroll sideways on a long line */
+    color: #666;                                        /*  grey numbers  */
+    background: rgba(225, 228, 233, 0.85);              /*  almost solid, so words slide UNDER it  */
+    border-right: 1px solid rgba(255, 255, 255, 0.6);
+    user-select: none;                                  /*  when you copy text, the numbers don't come with it  */
+
+    /*  "sticky" = the number stays stuck on the left
+        when you scroll sideways on a long line.  */
+    position: sticky;
     left: 0;
 }
 
+
+
+/*  ----------------------------------------------------------
+
+        THE WORDS  (right side of a row)
+
+    ----------------------------------------------------------  */
+
 .line-text {
     padding: 0 10px;
-    white-space: pre;         /* one line of the file = one line on screen (no wrapping), so every row stays 30px */
+    white-space: pre;           /*  one line stays ONE line.  Too long?  Scroll sideways.  */
 }
 
-/* "Go to line" flash: the row turns blue, then fades back over 1.5 seconds */
+
+
+/*  ----------------------------------------------------------
+
+        "GO TO LINE" FLASH
+
+        The row turns blue, then fades back.  (1.5 seconds)
+
+    ----------------------------------------------------------  */
+
 .line.flash {
     animation: flash 1.5s ease-out;
 }
 
 @keyframes flash {
-    from { background: #cfe3ff; }
+    from { background: rgba(120, 170, 255, 0.5); }
 }
 
-/* Search matches get a yellow highlight. <mark> is the HTML tag for highlighted text. */
+
+
+/*  ----------------------------------------------------------
+
+        SEARCH MATCHES  =  YELLOW
+
+        <mark> is the "highlighter pen" of web pages.
+
+    ----------------------------------------------------------  */
+
 mark {
     background: #ffe066;
     padding: 0 1px;
     border-radius: 2px;
 }
 
-/* Go to line + Expand controls */
+
+
+/*  ----------------------------------------------------------
+
+        "GO TO LINE"  +  "EXPAND"  AREA
+
+    ----------------------------------------------------------  */
+
 #controls {
     text-align: center;
     margin: 0 0 15px;
@@ -140,6 +355,14 @@ mark {
     border-radius: 6px;
 }
 
+
+
+/*  ----------------------------------------------------------
+
+        ALL THE BUTTONS
+
+    ----------------------------------------------------------  */
+
 button {
     padding: 8px 14px;
     margin: 4px;
@@ -147,14 +370,24 @@ button {
     border: 1px solid #888;
     border-radius: 6px;
     background: #fff;
-    cursor: pointer;
+    cursor: pointer;            /*  the mouse turns into a pointing hand  */
 }
 
 button:hover {
-    background: #eaeaea;
+    background: #eaeaea;        /*  a little darker when your mouse is on it  */
 }
 
-/* position: fixed pins the Top button to the bottom-right corner of the screen, even while scrolling */
+
+
+/*  ----------------------------------------------------------
+
+        THE "TOP" BUTTON
+
+        "fixed" = glued to the bottom-right corner of the screen.
+        It stays there, even when you scroll.
+
+    ----------------------------------------------------------  */
+
 #topBtn {
     position: fixed;
     right: 20px;
@@ -162,7 +395,17 @@ button:hover {
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
 }
 
-/* [hidden] elements must stay hidden, even though rules above set display on some of them */
+
+
+/*  ----------------------------------------------------------
+
+        "HIDDEN" MEANS HIDDEN.  ALWAYS.
+
+        Some rules above could accidentally make a hidden
+        thing show up.  This rule wins, every time.
+
+    ----------------------------------------------------------  */
+
 [hidden] {
     display: none !important;
 }
