@@ -17,7 +17,7 @@
     <!-- The text shown on the browser tab -->
     <title>CSV Reader Test</title>
 
-    <!-- Links the stylesheet. Styling lives in styleI.css (button centering + output box look) -->
+    <!-- Links the stylesheet. Styling lives in styleI.css -->
     <link rel="stylesheet" href="styleI.css">
 </head>
 
@@ -25,22 +25,37 @@
 <body>
 
     <!-- Implementation I: CSV Reader -->
+    <h1>CSV Reader</h1>
 
-    <!-- Creates a file upload button for CSVs only. The ID gives this specific button a unique name tag.
-         - type="file"    -> makes it a "Choose File" button instead of a text box
+    <!-- Creates a file upload button for CSVs only.
+         - type="file"       -> makes it a "Choose File" button instead of a text box
          - id="csvFileInput" -> the name tag JavaScript and CSS use to find this exact button
-         - accept=".csv"  -> the file picker only shows .csv files (the user can still override this,
-                             so it's a convenience filter, not a security check) -->
+         - accept=".csv"     -> the file picker only shows .csv files (convenience filter, not a security check) -->
     <input type="file" id="csvFileInput" accept=".csv">
 
-    <!-- This is the output box where the CSV's content will be displayed.
-         <pre> stands for "preformatted": it keeps the file's line breaks and spacing exactly as they are.
+    <!-- Search bar. type="search" gives a text box with a little "x" to clear it in most browsers.
+         It starts "disabled" (grayed out) until a file is loaded, since there's nothing to search yet. -->
+    <input type="search" id="searchInput" placeholder="Search text, numbers, or characters..." disabled>
+
+    <!-- Status line: shows things like "Showing 15 of 240 lines" or "12 lines match" -->
+    <p id="status">Pick a CSV file to get started.</p>
+
+    <!-- This is where the CSV lines get displayed, one row per line.
          It starts empty; scriptI.js fills it in once a file is picked. -->
-    <pre id="output"></pre>
+    <div id="output"></div>
+
+    <!-- Buttons for expanding / collapsing the list. They start hidden until there's something to show. -->
+    <div id="controls" hidden>
+        <button id="showMoreBtn">Show 15 more</button>
+        <button id="showAllBtn">Show all</button>
+        <button id="collapseBtn">Collapse to 15</button>
+    </div>
+
+    <!-- Floating button in the bottom-right corner that scrolls back to the top of the page -->
+    <button id="topBtn" title="Back to top" hidden>&#8593; Top</button>
 
     <!-- The CSV display / reader logic lives in scriptI.js, using JavaScript's FileReader API.
-         Loaded at the end of <body> so the button and output box exist before the script runs.
-         (If it were in <head>, the script would look for elements that haven't been created yet.) -->
+         Loaded at the end of <body> so the elements above exist before the script runs. -->
     <script src="scriptI.js"></script>
 
 </body>
