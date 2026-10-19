@@ -1,5 +1,9 @@
 <!DOCTYPE html>
 <!-- THE NANDO NOTES -->
+<!-- WHAT CHANGED (Claude update - scrolling window):
+     - #output is now a scrolling window (15 rows tall) with a #rows box inside holding every line.
+     - Removed the Show more / Show all / Collapse buttons; added "Go to line" (#jumpInput + #jumpBtn)
+       and an Expand button (#expandBtn). The controls now sit ABOVE the window so they don't move. -->
 <!-- <!DOCTYPE html> tells the browser "this is modern HTML5". It must be the very first line,
      otherwise the browser falls back to old "quirks mode" and layouts can act strange. -->
 
@@ -37,18 +41,21 @@
          It starts "disabled" (grayed out) until a file is loaded, since there's nothing to search yet. -->
     <input type="search" id="searchInput" placeholder="Search text, numbers, or characters..." disabled>
 
-    <!-- Status line: shows things like "Showing 15 of 240 lines" or "12 lines match" -->
+    <!-- Status line: shows which lines are in the window, like "Lines 16–30 of 240" -->
     <p id="status">Pick a CSV file to get started.</p>
 
-    <!-- This is where the CSV lines get displayed, one row per line.
-         It starts empty; scriptI.js fills it in once a file is picked. -->
-    <div id="output"></div>
-
-    <!-- Buttons for expanding / collapsing the list. They start hidden until there's something to show. -->
+    <!-- Go to line + Expand. They start hidden until a file is loaded.
+         type="number" makes a box that only accepts numbers; min="1" because line numbers start at 1. -->
     <div id="controls" hidden>
-        <button id="showMoreBtn">Show 15 more</button>
-        <button id="showAllBtn">Show all</button>
-        <button id="collapseBtn">Collapse to 15</button>
+        <input type="number" id="jumpInput" min="1" placeholder="Line #">
+        <button id="jumpBtn">Go to line</button>
+        <button id="expandBtn">Expand (show all)</button>
+    </div>
+
+    <!-- The scrolling window. #output is the window frame (15 rows tall, scrolls),
+         #rows holds every CSV line, one row per line. scriptI.js fills #rows once a file is picked. -->
+    <div id="output">
+        <div id="rows"></div>
     </div>
 
     <!-- Floating button in the bottom-right corner that scrolls back to the top of the page -->

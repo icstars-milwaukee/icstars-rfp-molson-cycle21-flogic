@@ -1,6 +1,13 @@
 /* THE NANDO NOTES - styleI.css
    This file controls how the CSV reader page LOOKS. It's linked from testI.html's <head>.
-   The "#" in front of a name means "find the element with this id" (e.g. #output -> id="output"). */
+   The "#" in front of a name means "find the element with this id" (e.g. #output -> id="output").
+   A "." in front of a name means "find every element with this class" (e.g. .line -> class="line").
+
+   WHAT CHANGED (Claude update - scrolling window):
+   - #output is now a fixed-height window (15 rows x 30px) with overflow: auto, so it scrolls.
+   - Every row is locked to 30px tall and long lines no longer wrap (scroll sideways instead),
+     so the 15-row math always works. Line numbers stay pinned on the left (position: sticky).
+   - Added .expanded (Expand button), .flash (Go to line highlight), and #jumpInput styling. */
 
 /* Whole page: a clean font, light background, and no edge-to-edge text */
 body {
@@ -34,34 +41,53 @@ h1 {
     box-sizing: border-box;   /* makes width include the padding, so it doesn't overflow */
 }
 
-/* The "Showing X of Y lines" text */
+/* The "Lines X–Y of Z" text */
 #status {
     text-align: center;
     color: #555;
     font-size: 14px;
 }
 
-/* The box that holds all the CSV lines */
+/* The scrolling window that holds all the CSV lines.
+   Every row is exactly 30px tall (see .line below), so 15 rows = 15 * 30px = 450px.
+   If you change the row height or the 15, change both here AND WINDOW_SIZE in scriptI.js. */
 #output {
     max-width: 900px;
+    height: calc(15 * 30px);  /* calc() does math in CSS: exactly 15 rows tall */
     margin: 0 auto;
     background: #fff;
     border: 1px solid #ddd;
     border-radius: 6px;
     font-family: Consolas, "Courier New", monospace;   /* monospace = every character the same width, easier to read data */
     font-size: 14px;
-    overflow: hidden;         /* keeps the rows inside the rounded corners */
+    overflow: auto;           /* anything that doesn't fit gets a scrollbar (up/down, and sideways for long lines) */
+    position: relative;       /* lets scriptI.js measure where each row sits inside the window */
 }
 
-#output:empty {
-    display: none;            /* hide the box entirely until there's something in it */
+/* Expand button: drop the height limit so every line shows on the page */
+#output.expanded {
+    height: auto;
+}
+
+/* Hide the window entirely until a file is loaded (:has = "the window that contains an empty #rows") */
+#output:has(#rows:empty) {
+    display: none;
+}
+
+/* The box of rows inside the window.
+   width: max-content = as wide as the longest line, so every row's background stretches all the way across */
+#rows {
+    width: max-content;
+    min-width: 100%;
 }
 
 /* One row = one line from the CSV.
-   It's a grid with two columns: the line number (fixed 60px) and the text (takes the rest) */
+   It's a grid with two columns: the line number (fixed 60px) and the text (takes the rest).
+   29px line-height + 1px bottom border = 30px per row, so rows never change size. */
 .line {
     display: grid;
     grid-template-columns: 60px 1fr;
+    line-height: 29px;
     border-bottom: 1px solid #eee;
 }
 
@@ -70,17 +96,27 @@ h1 {
 }
 
 .line-num {
-    padding: 6px 10px;
+    padding: 0 10px;
     text-align: right;
     color: #999;
     background: #f0f0f0;
     user-select: none;        /* copying text skips the line numbers */
+    position: sticky;         /* sticky + left: 0 = the number stays put when you scroll sideways on a long line */
+    left: 0;
 }
 
 .line-text {
-    padding: 6px 10px;
-    white-space: pre-wrap;    /* keeps spacing, but wraps long lines instead of scrolling sideways */
-    word-break: break-word;
+    padding: 0 10px;
+    white-space: pre;         /* one line of the file = one line on screen (no wrapping), so every row stays 30px */
+}
+
+/* "Go to line" flash: the row turns blue, then fades back over 1.5 seconds */
+.line.flash {
+    animation: flash 1.5s ease-out;
+}
+
+@keyframes flash {
+    from { background: #cfe3ff; }
 }
 
 /* Search matches get a yellow highlight. <mark> is the HTML tag for highlighted text. */
@@ -90,10 +126,18 @@ mark {
     border-radius: 2px;
 }
 
-/* Show more / Show all / Collapse buttons */
+/* Go to line + Expand controls */
 #controls {
     text-align: center;
-    margin: 15px 0;
+    margin: 0 0 15px;
+}
+
+#jumpInput {
+    width: 90px;
+    padding: 8px;
+    font-size: 14px;
+    border: 1px solid #bbb;
+    border-radius: 6px;
 }
 
 button {
