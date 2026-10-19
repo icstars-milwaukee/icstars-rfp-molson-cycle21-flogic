@@ -133,11 +133,6 @@ h1 {
     overflow: auto;                 /*  too much stuff?  add a scrollbar  */
     position: relative;             /*  helps the brain measure where rows are  */
 
-    /*  The header covers the top 30px.
-        This tells the snapping:  "the top starts BELOW the header."  */
-    scroll-padding-top: 30px;
-
-
     /*  ---- THE GLASS LOOK ----  */
 
     /*  The fill:  a little white in the top-left,
@@ -156,9 +151,10 @@ h1 {
 
     /*  ---- SNAPPY SCROLLING ----  */
 
-    /*  The window always stops on a whole row.
-        Never half a row.  Click, click, click.  */
-    scroll-snap-type: y mandatory;
+    /*  The window always stops on a whole row.  Never half a row.
+        The BRAIN does this now  (see "SNAPPY SCROLLING" in scriptI.js),
+        because the browser's own snapping gets confused
+        when only some of the rows are built.  */
 
 
     /*  ---- THIN SCROLLBAR ----  */
@@ -193,13 +189,12 @@ h1 {
         WHEN YOU CLICK "EXPAND"
 
         No more 15-row limit.  Show everything.
-        Also:  stop snapping, stop floating.
+        Also:  stop floating.
 
     ----------------------------------------------------------  */
 
 #output.expanded {
     height: auto;
-    scroll-snap-type: none;
     animation: none;
 }
 
@@ -268,14 +263,14 @@ h1 {
     grid-template-columns: var(--columns, 60px 1fr);   /*  the widths from the brain  */
     line-height: 29px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.45); /*  thin white line under each row  */
-    scroll-snap-align: start;                           /*  the window snaps to the top of each row  */
     transition: background 0.15s;                       /*  color changes fade in smoothly  */
 }
 
 
 /*  Every other row is a tiny bit lighter.  Like stripes on a zebra.
-    Makes it easy for your eyes to follow a row.  */
-.line:nth-child(even) {
+    Makes it easy for your eyes to follow a row.
+    (The brain puts the "zebra" label on every other row.)  */
+.line.zebra {
     background: rgba(255, 255, 255, 0.15);
 }
 

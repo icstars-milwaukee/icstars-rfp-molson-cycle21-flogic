@@ -24,13 +24,38 @@
              It holds the column names, and it stays stuck
              to the top of the window.
 
-        5.   The brain puts every other row inside the window.
+        5.   The brain shows the rows inside the window.
              The window shows 15 rows at a time.
              You scroll to see the rest.
 
         6.   When you type in the search bar,
              the brain only keeps the rows that have your word,
              and paints your word yellow.
+
+
+    THE SPEED TRICK  (why big files don't choke):
+
+        The brain only BUILDS the rows you can actually see,
+        plus a few extra above and below.  About 35 rows.  Always.
+        Even if the file has a MILLION rows.
+
+        Above and below those rows sit two invisible "spacers."
+        They're just tall empty boxes, as tall as all the rows
+        that AREN'T built.  So the scrollbar still looks right.
+
+        When you scroll, rows that leave get thrown away,
+        and rows that come in get built.  Like a treadmill.
+
+             ┌──────────────────────┐
+             │   top spacer         │  ← empty, but as tall as rows 1–4,980
+             ├──────────────────────┤
+             │   row 4,981          │
+             │   row 4,982          │  ← the ONLY rows that really exist
+             │   ...                │
+             │   row 5,015          │
+             ├──────────────────────┤
+             │   bottom spacer      │  ← empty, but as tall as all the rest
+             └──────────────────────┘
 
 
     Nothing leaves your computer.
@@ -42,14 +67,18 @@
 
 // ----------------------------------------------------------
 //
-//    HOW MANY ROWS FIT IN THE WINDOW
-//
-//    15 rows  (plus the header on top).
-//    If you change this, change the 15 in styleI.css too.
+//    SETTINGS
 //
 // ----------------------------------------------------------
 
-const WINDOW_SIZE = 15;
+const WINDOW_SIZE = 15;          //  how many rows fit in the window  (plus the header).
+                                 //  If you change this, change the 15 in styleI.css too.
+
+const EXTRA_ROWS = 10;           //  how many extra rows to build above and below the ones you see,
+                                 //  so fast scrolling never shows a blank gap.
+
+const BIG_FILE = 20000;          //  files with more rows than this wait until you stop typing to search
+                                 //  (so the search bar doesn't lag on every letter).
 
 
 
@@ -76,6 +105,11 @@ const expandBtn   = document.getElementById('expandBtn');      //  the "Expand" 
 const topBtn      = document.getElementById('topBtn');         //  the "Top" button
 
 
+//  The two invisible spacers  (see "THE SPEED TRICK" up top).
+const topSpacer    = document.createElement('div');
+const bottomSpacer = document.createElement('div');
+
+
 
 // ----------------------------------------------------------
 //
@@ -85,10 +119,22 @@ const topBtn      = document.getElementById('topBtn');         //  the "Top" but
 //
 // ----------------------------------------------------------
 
-let headerCells = [];   //  the column names  (line 0).        Like:  ["name", "age"]
-let dataRows    = [];   //  EVERY other row, cut into cells.    Like:  [["Ana", "22"], ["Bo", "31"]]
-let columnCount = 0;    //  how many columns the widest row has
-let matches     = [];   //  ONLY the rows we are showing now.   Like:  [{ num: 1, cells: ["Ana", "22"] }]
+let headerCells = [];     //  the column names  (line 0).        Like:  ["name", "age"]
+let dataRows    = [];     //  EVERY other row, cut into cells.    Like:  [["Ana", "22"], ["Bo", "31"]]
+let searchText  = null;   //  every row squished into small letters, ready to search.  (made the first time you search)
+let columnCount = 0;      //  how many columns the widest row has
+let matches     = [];     //  ALL the rows that pass the search.  Like:  [{ num: 1, cells: ["Ana", "22"] }]
+let query       = '';     //  the search word, in small letters
+
+let rowHeight   = 30;     //  how tall one row is  (measured for real once the header is drawn)
+let builtStart  = 0;      //  the rows that are BUILT right now:
+let builtEnd    = 0;      //     from builtStart, up to (but not including) builtEnd
+
+let searchTimer = null;   //  the "wait until they stop typing" timer, for big files
+
+let snapTimer   = null;   //  the "wait until scrolling stops, then snap" timer
+let wheelTarget = null;   //  where the mouse wheel is gliding the window to  (null = not gliding)
+let wheelLeft   = 0;      //  leftover wheel spin that wasn't enough for a whole row yet
 
 
 
@@ -124,6 +170,7 @@ fileInput.addEventListener('change', function (event) {
         //  Every line gets cut into cells.
         headerCells = splitIntoCells(lines[0] || '');
         dataRows    = lines.slice(1).map(splitIntoCells);
+        searchText  = null;                 //  new file  =  throw away the old search copy
 
 
         //  How many columns?  Count the cells in the widest row.
@@ -140,7 +187,7 @@ fileInput.addEventListener('change', function (event) {
 
         setColumnWidths();                  //  decide how wide each column is
         drawHeader();                       //  draw line 0
-        render();                           //  draw the rows  (see STEP 5 below)
+        render();                           //  show the rows  (see STEP 5 below)
     };
 
 
@@ -163,6 +210,11 @@ fileInput.addEventListener('change', function (event) {
 // ----------------------------------------------------------
 
 function splitIntoCells(line) {
+
+    //  SPEED TRICK:  no quotes in this line?
+    //  Then every comma is a cut.  Chop it all at once.  (Way faster.)
+    if (line.indexOf('"') === -1) return line.split(',');
+
 
     const cells = [];
     let current = '';           //  the cell we're building right now
@@ -264,10 +316,14 @@ function drawHeader() {
 
     headerBox.textContent = '';                         //  wipe the old one
 
-    const row = makeRow(0, headerCells, '');            //  line number 0, the column names, no search
+    const row = makeRow(0, headerCells, '', 0);         //  line number 0, the column names, no search
     row.classList.add('header-row');
 
     headerBox.appendChild(row);
+
+    //  The header is the same height as every row.
+    //  Measure it, so the brain knows exactly how tall one row is.
+    rowHeight = row.offsetHeight || 30;
 }
 
 
@@ -277,11 +333,23 @@ function drawHeader() {
 //    STEP 6:  SEARCH
 //
 //    Every time you type a letter,
-//    draw the rows again, using your new word.
+//    show the rows again, using your new word.
+//
+//    Big file?  Wait until you stop typing for a moment  (0.2 seconds),
+//    so the brain doesn't search a million rows for EVERY letter.
 //
 // ----------------------------------------------------------
 
-searchInput.addEventListener('input', render);
+searchInput.addEventListener('input', function () {
+
+    if (dataRows.length <= BIG_FILE) {
+        render();
+        return;
+    }
+
+    clearTimeout(searchTimer);                  //  you typed again?  Cancel the last countdown...
+    searchTimer = setTimeout(render, 200);      //  ...and start a new one.
+});
 
 
 
@@ -317,19 +385,30 @@ function jumpToLine() {
     if (index === -1) index = matches.length - 1;
 
 
-    const row = rowsBox.children[index];
-
     if (outputBox.classList.contains('expanded')) {
-        row.scrollIntoView({ block: 'center' });                        //  window is expanded?  Scroll the PAGE.
+
+        //  Window is expanded?  Scroll the PAGE so the row lands in the middle of the screen.
+        const rowsTopOnPage = rowsBox.getBoundingClientRect().top + window.scrollY;
+        window.scrollTo(0, rowsTopOnPage + index * rowHeight - window.innerHeight / 2);
+        buildVisibleRows();
+
     } else {
-        outputBox.scrollTop = row.offsetTop - headerBox.offsetHeight;   //  window is small?  Scroll the WINDOW.
-    }                                                                   //  (minus the header, so the row sits right under it)
+
+        //  Window is small?  Scroll the WINDOW so the row sits right under the header.
+        //  (Build the rows there FIRST, so the window has something to land on.)
+        const top = index * rowHeight;
+        buildVisibleRows(top);
+        outputBox.scrollTop = top;
+    }
 
     updatePosition();                                   //  update the "Rows 1–15" words
 
 
     //  Make the row flash blue.
     //  (Take the flash off, then put it back on, so it plays again every time.)
+    const row = rowsBox.querySelector('[data-index="' + index + '"]');
+    if (!row) return;
+
     row.classList.remove('flash');
     void row.offsetWidth;
     row.classList.add('flash');
@@ -344,6 +423,9 @@ function jumpToLine() {
 //    Click once   ->  show ALL the rows.
 //    Click again  ->  back to the 15-row window.
 //
+//    (Even "show all" only BUILDS the rows on your screen.
+//     The page just gets as tall as all of them.)
+//
 // ----------------------------------------------------------
 
 expandBtn.addEventListener('click', function () {
@@ -354,6 +436,7 @@ expandBtn.addEventListener('click', function () {
     expandBtn.textContent = expanded ? 'Shrink to 15-row window' : 'Expand (show all)';
 
     sizeWindow();
+    buildVisibleRows();
     updatePosition();
 });
 
@@ -375,13 +458,12 @@ function sizeWindow() {
 
     outputBox.style.height = '';                        //  start fresh
 
-    if (outputBox.classList.contains('expanded') || rowsBox.children.length === 0) return;
+    if (outputBox.classList.contains('expanded') || matches.length === 0) return;
 
 
     const style     = getComputedStyle(outputBox);
     const borders   = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
     const scrollbar = outputBox.offsetHeight - outputBox.clientHeight - borders;    //  how tall the scrollbar is
-    const rowHeight = rowsBox.children[0].offsetHeight;                              //  how tall one row is
 
     //  the header  +  15 rows  +  the scrollbar
     outputBox.style.height = (headerBox.offsetHeight + WINDOW_SIZE * rowHeight + scrollbar) + 'px';
@@ -393,31 +475,26 @@ function sizeWindow() {
 //
 //    THE "ROWS 21–35 OF 100" WORDS
 //
-//    Every time the window scrolls, figure out
-//    which rows you can see right now.
+//    Figure out which rows you can see right now.
 //
 // ----------------------------------------------------------
 
-outputBox.addEventListener('scroll', updatePosition);
-
-
 function updatePosition() {
-
-    const query = searchInput.value.trim();
 
     if (headerCells.length === 0) return;               //  no file yet?  Stop.
 
+    const word = searchInput.value.trim();
+
     if (matches.length === 0) {
-        statusText.textContent = query === ''
+        statusText.textContent = word === ''
             ? 'This file only has a header row'
-            : 'No rows match "' + query + '"';
+            : 'No rows match "' + word + '"';
         return;
     }
 
 
     //  Every row is the same height.
     //  So:   how far we scrolled  ÷  one row's height  =  which row is at the top.
-    const rowHeight = rowsBox.children[0].offsetHeight;
     const first = Math.min(Math.round(outputBox.scrollTop / rowHeight), matches.length - 1);
 
     const last = outputBox.classList.contains('expanded')
@@ -427,14 +504,117 @@ function updatePosition() {
 
     let message = 'Rows ' + matches[first].num + '–' + matches[last].num;
 
-    if (query === '') {
+    if (word === '') {
         message += ' of ' + dataRows.length;
     } else {
-        message += ' (' + matches.length + ' matching row(s) for "' + query + '")';
+        message += ' (' + matches.length + ' matching row(s) for "' + word + '")';
     }
 
     statusText.textContent = message;
 }
+
+
+
+// ----------------------------------------------------------
+//
+//    SCROLLING
+//
+//    Window scrolls  ->  build the rows coming in, update the words.
+//    Page scrolls    ->  same thing, but only matters when expanded.
+//
+// ----------------------------------------------------------
+
+outputBox.addEventListener('scroll', function () {
+    buildVisibleRows();
+    updatePosition();
+
+    //  Every time the window moves, restart the countdown.
+    //  When it's been still for 0.15 seconds  ->  snap.
+    clearTimeout(snapTimer);
+    snapTimer = setTimeout(snapToRow, 150);
+});
+
+
+
+// ----------------------------------------------------------
+//
+//    SNAPPY SCROLLING
+//
+//    The window always stops on a WHOLE row.  Never half a row.
+//
+//    Two parts:
+//
+//      1.  The mouse wheel moves the window by whole rows,
+//          with a smooth glide.   (one click of the wheel = about 3 rows)
+//
+//      2.  Any other scrolling  (dragging the scrollbar, the keyboard, a trackpad)
+//          gets a tiny glide to the nearest whole row when it stops.
+//
+//    Why not let the browser snap?  The browser can only snap to rows
+//    that are BUILT.  Jump far away, and it would yank you back
+//    to the nearest built row.  The brain knows where EVERY row is,
+//    even the ones that aren't built.
+//
+// ----------------------------------------------------------
+
+outputBox.addEventListener('wheel', function (e) {
+
+    //  Expanded?  Scrolling sideways?  Holding Shift?  Let the browser handle it.
+    if (outputBox.classList.contains('expanded')) return;
+    if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+
+
+    //  Some mice count in "lines" instead of pixels.  Turn lines into pixels.
+    const pixels = e.deltaMode === 1 ? e.deltaY * rowHeight : e.deltaY;
+
+    const bottom = outputBox.scrollHeight - outputBox.clientHeight;
+
+    //  Already at the very top or bottom?  Let the PAGE scroll instead.
+    if ((pixels < 0 && outputBox.scrollTop <= 0) || (pixels > 0 && outputBox.scrollTop >= bottom)) return;
+
+    e.preventDefault();                     //  "browser, don't scroll.  I've got this."
+
+
+    //  Not gliding yet?  Start from the row we're on now.
+    if (wheelTarget === null) wheelTarget = Math.round(outputBox.scrollTop / rowHeight) * rowHeight;
+
+
+    //  Add up the wheel spin.  Every full row's worth  ->  move one row.
+    //  (Trackpads send lots of tiny spins.  They add up until they make a whole row.)
+    wheelLeft += pixels;
+    const rows = Math.trunc(wheelLeft / rowHeight);
+    if (rows === 0) return;
+    wheelLeft -= rows * rowHeight;
+
+
+    //  Glide to the new spot  (but never past the top or the bottom).
+    wheelTarget = Math.min(Math.max(wheelTarget + rows * rowHeight, 0), bottom);
+    outputBox.scrollTo({ top: wheelTarget, behavior: 'smooth' });
+
+}, { passive: false });     //  "passive: false"  =  "I might say preventDefault, so wait for me."
+
+
+function snapToRow() {
+
+    wheelTarget = null;                     //  the glide is over
+    wheelLeft = 0;
+
+    if (outputBox.classList.contains('expanded') || matches.length === 0) return;
+
+    //  Already on a whole row?  Nothing to do.
+    const nearest = Math.round(outputBox.scrollTop / rowHeight) * rowHeight;
+    if (Math.abs(outputBox.scrollTop - nearest) < 1) return;
+
+    outputBox.scrollTo({ top: nearest, behavior: 'smooth' });
+}
+
+window.addEventListener('scroll', function () {
+    if (outputBox.classList.contains('expanded')) buildVisibleRows();
+});
+
+window.addEventListener('resize', function () {
+    buildVisibleRows();
+});
 
 
 
@@ -459,10 +639,13 @@ window.addEventListener('scroll', function () {
 
 // ----------------------------------------------------------
 //
-//    STEP 5:  DRAW THE ROWS   (this is called "render")
+//    STEP 5:  PICK THE ROWS TO SHOW   (this is called "render")
 //
 //    This runs after you pick a file,
-//    and every time you type in the search bar.
+//    and every time you search.
+//
+//    It decides WHICH rows pass the search,
+//    then hands off to buildVisibleRows() to actually build them.
 //
 // ----------------------------------------------------------
 
@@ -470,49 +653,147 @@ function render() {
 
     //  Your search word, in small letters.
     //  (So "ANA" and "ana" find the same thing.)
-    const query = searchInput.value.trim().toLowerCase();
+    query = searchInput.value.trim().toLowerCase();
+
+
+    //  The first time you search, squish every row into one small-letter string.
+    //  Then every search after that just checks those strings.  (Way faster.)
+    //
+    //      ["Ana", "22", "Chicago"]   ->   "ana␀22␀chicago"
+    //
+    //  The ␀ is an invisible "wall" between cells,
+    //  so a search can never accidentally match ACROSS two cells.
+    if (query !== '' && searchText === null) {
+        searchText = dataRows.map(function (cells) {
+            return cells.join('\u0000').toLowerCase();
+        });
+    }
 
 
     //  Pick which rows to show.
     //    No search word?    Keep every row.
-    //    Search word?       Keep only rows where SOME cell has it.
+    //    Search word?       Keep only rows that have it.
     //
     //  Each row also remembers its number  (1, 2, 3...  because the header is 0),
     //  so you always know where it lives in the file.
     matches = [];
 
-    dataRows.forEach(function (cells, index) {
-
-        const hasWord = cells.some(function (cell) {
-            return cell.toLowerCase().includes(query);
-        });
-
-        if (query === '' || hasWord) {
-            matches.push({ num: index + 1, cells: cells });
+    for (let i = 0; i < dataRows.length; i++) {
+        if (query === '' || searchText[i].includes(query)) {
+            matches.push({ num: i + 1, cells: dataRows[i] });
         }
-    });
+    }
 
 
-    //  Wipe the old rows away.
+    //  Start over:  wipe the old rows, put the 2 spacers in.
+    //  (No matches?  Leave it totally empty, and the window hides itself.)
     rowsBox.textContent = '';
+    builtStart = 0;
+    builtEnd = 0;
 
-
-    //  Build all the new rows in a hidden box first ("fragment"),
-    //  then drop them onto the page all at once.
-    //  (Much faster than one at a time.)
-    const fragment = document.createDocumentFragment();
-
-    matches.forEach(function (line) {
-        fragment.appendChild(makeRow(line.num, line.cells, query));
-    });
-
-    rowsBox.appendChild(fragment);
+    if (matches.length > 0) {
+        rowsBox.appendChild(topSpacer);
+        rowsBox.appendChild(bottomSpacer);
+    }
 
 
     controls.hidden = false;        //  show the Go-to-row + Expand buttons
     sizeWindow();                   //  make the window header + 15 rows tall
     outputBox.scrollTop = 0;        //  start at the top
+    buildVisibleRows();             //  build the rows you can see
     updatePosition();               //  update the "Rows 1–15" words
+}
+
+
+
+// ----------------------------------------------------------
+//
+//    BUILD ONLY THE ROWS YOU CAN SEE   (the treadmill)
+//
+//    1.  Figure out which rows are on screen  (+ 10 extra on each side).
+//    2.  Throw away built rows that are now off screen.
+//    3.  Build the rows that just came on screen.
+//    4.  Stretch the spacers to fill in for everything else.
+//
+//    "scrollSpot" is optional:  "pretend the window is scrolled HERE."
+//    (Go to row uses it, to build rows BEFORE jumping to them.)
+//
+// ----------------------------------------------------------
+
+function buildVisibleRows(scrollSpot) {
+
+    if (matches.length === 0) return;
+
+
+    //  1.  Where are we looking?
+    let viewTop, viewHeight;
+
+    if (outputBox.classList.contains('expanded')) {
+        viewTop    = -rowsBox.getBoundingClientRect().top;      //  how far the rows' top has scrolled above the screen
+        viewHeight = window.innerHeight;                        //  the whole screen
+    } else {
+        viewTop    = scrollSpot !== undefined ? scrollSpot : outputBox.scrollTop;
+        viewHeight = outputBox.clientHeight;                    //  the window
+    }
+
+    //  Turn that into row numbers  (+ extras),  kept inside  0 ... the last row.
+    const start = Math.max(0, Math.floor(viewTop / rowHeight) - EXTRA_ROWS);
+    const end   = Math.min(matches.length, Math.ceil((viewTop + viewHeight) / rowHeight) + EXTRA_ROWS);
+
+
+    //  2 + 3.  Swap rows in and out.
+
+    if (start >= builtEnd || end <= builtStart) {
+
+        //  Jumped somewhere totally new?  Throw ALL the built rows away, build fresh.
+        while (topSpacer.nextSibling !== bottomSpacer) topSpacer.nextSibling.remove();
+        bottomSpacer.before(buildRows(start, end));
+
+    } else {
+
+        //  Scrolled a bit?  Only fix the edges.
+
+        //  Top edge:  rows scrolled off the top  ->  throw away.   New rows above  ->  build.
+        for (let i = builtStart; i < start; i++) topSpacer.nextSibling.remove();
+        if (start < builtStart) topSpacer.after(buildRows(start, builtStart));
+
+        //  Bottom edge:  rows scrolled off the bottom  ->  throw away.   New rows below  ->  build.
+        for (let i = builtEnd; i > end; i--) bottomSpacer.previousSibling.remove();
+        if (end > builtEnd) bottomSpacer.before(buildRows(builtEnd, end));
+    }
+
+    builtStart = start;
+    builtEnd = end;
+
+
+    //  4.  Stretch the spacers.
+    //      top spacer     =  as tall as all the rows ABOVE the built ones
+    //      bottom spacer  =  as tall as all the rows BELOW the built ones
+    topSpacer.style.height    = (start * rowHeight) + 'px';
+    bottomSpacer.style.height = ((matches.length - end) * rowHeight) + 'px';
+}
+
+
+
+// ----------------------------------------------------------
+//
+//    BUILD A BUNCH OF ROWS  (from row "from" up to, but not including, row "to")
+//
+//    They're built in a hidden box first ("fragment"),
+//    then dropped onto the page all at once.
+//    (Much faster than one at a time.)
+//
+// ----------------------------------------------------------
+
+function buildRows(from, to) {
+
+    const fragment = document.createDocumentFragment();
+
+    for (let i = from; i < to; i++) {
+        fragment.appendChild(makeRow(matches[i].num, matches[i].cells, query, i));
+    }
+
+    return fragment;
 }
 
 
@@ -528,13 +809,19 @@ function render() {
 //    Words sit on the LEFT of their box.
 //    Numbers sit on the RIGHT  (that's what Excel does).
 //
+//    "index" = this row's spot in the list on screen  (0, 1, 2...).
+//    Every other row gets a "zebra" stripe.
+//
 // ----------------------------------------------------------
 
-function makeRow(num, cells, query) {
+function makeRow(num, cells, query, index) {
 
     //  The row itself.
     const row = document.createElement('div');
     row.className = 'line';
+    row.dataset.index = index;                                     //  a name tag, so Go to row can find it
+
+    if (index % 2 === 1) row.classList.add('zebra');               //  every other row:  stripe
 
 
     //  The row number, on the far left.

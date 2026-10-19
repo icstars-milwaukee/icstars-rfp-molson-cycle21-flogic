@@ -7,6 +7,7 @@ You're going to build a web page that opens a CSV file and shows it like a **min
 - Every value sits in its own box, and the columns line up
 - Search paints your word yellow
 - Go to any row, or expand to see everything
+- **It stays fast, even with hundreds of thousands of rows**
 
 You'll build it **one piece at a time**. After each part there's a **✅ Test it** step, so you always know it's working before you move on.
 
@@ -28,7 +29,7 @@ A web page is usually 3 files working together:
 
 **We build them in this order:**
 
-```
+```text
   1. Skeleton   →   2. Brain   →   3. Clothes
 ```
 
@@ -222,20 +223,21 @@ The brain makes things happen. We'll build it in small pieces, then test.
           ↓
   4.  Line 0 = the HEADER.                     (the column names, stuck on top)
           ↓
-  5.  Every other line becomes a row           (this is called "render")
-      in the window.
+  5.  The rows show up in the window.          (only the ones you can SEE get built. More on that in Step 2.9!)
           ↓
   6.  You type in the search bar   →   back to step 5, but only keeping the matches.
 ```
 
 <br>
 
-### Step 2.1: Find the pieces
+### Step 2.1: Settings + find the pieces
 
-Open `scriptI.js`. First, the brain finds every piece by its name tag:
+Open `scriptI.js`. First, 3 settings, then the brain finds every piece by its name tag:
 
 ```js
-const WINDOW_SIZE = 15;   // how many rows fit in the window (plus the header)
+const WINDOW_SIZE = 15;     // how many rows fit in the window (plus the header)
+const EXTRA_ROWS  = 10;     // extra rows to build above and below the ones you see
+const BIG_FILE    = 20000;  // bigger than this? search waits until you stop typing
 
 const fileInput   = document.getElementById('csvFileInput');   // Choose File button
 const searchInput = document.getElementById('searchInput');    // search bar
@@ -248,6 +250,10 @@ const jumpInput   = document.getElementById('jumpInput');      // "Row #" box
 const jumpBtn     = document.getElementById('jumpBtn');        // "Go to row" button
 const expandBtn   = document.getElementById('expandBtn');      // "Expand" button
 const topBtn      = document.getElementById('topBtn');         // "Top" button
+
+// Two invisible "spacers." You'll see what they're for in Step 2.9.
+const topSpacer    = document.createElement('div');
+const bottomSpacer = document.createElement('div');
 ```
 
 `document.getElementById('xyz')` = **"Find the piece with the name tag xyz."**
@@ -259,13 +265,24 @@ const topBtn      = document.getElementById('topBtn');         // "Top" button
 ### Step 2.2: The brain's memory
 
 ```js
-let headerCells = [];   // the column names (row 0).        Like: ["Name", "Age"]
-let dataRows    = [];   // EVERY other row, cut into cells.  Like: [["Ana", "22"], ["Bo", "31"]]
-let columnCount = 0;    // how many columns the widest row has
-let matches     = [];   // ONLY the rows on screen right now. Like: [{ num: 1, cells: ["Ana", "22"] }]
+let headerCells = [];     // the column names (row 0).          Like: ["Name", "Age"]
+let dataRows    = [];     // EVERY other row, cut into cells.    Like: [["Ana", "22"], ["Bo", "31"]]
+let searchText  = null;   // every row squished into small letters, ready to search (made on your first search)
+let columnCount = 0;      // how many columns the widest row has
+let matches     = [];     // ALL the rows that pass the search.  Like: [{ num: 1, cells: ["Ana", "22"] }]
+let query       = '';     // the search word, in small letters
+
+let rowHeight   = 30;     // how tall one row is (measured for real later)
+let builtStart  = 0;      // the rows that are BUILT right now:
+let builtEnd    = 0;      //    from builtStart, up to (but not including) builtEnd
+
+let searchTimer = null;   // "wait until they stop typing" timer
+let snapTimer   = null;   // "wait until scrolling stops, then snap" timer
+let wheelTarget = null;   // where the mouse wheel is gliding to (null = not gliding)
+let wheelLeft   = 0;      // leftover wheel spin, not enough for a whole row yet
 ```
 
-`[]` = an empty list. They're `let` because they'll fill up later.
+`[]` = an empty list. `null` = "nothing yet." They're `let` because they'll change later.
 
 > **A list inside a list?** `dataRows` is a list of ROWS, and each row is a list of CELLS. Just like a spreadsheet: rows going down, cells going across.
 
@@ -278,10 +295,13 @@ Easy:    Ana,22,Chicago          →   [Ana] [22] [Chicago]
 Tricky:  Ana,22,"Chicago, IL"    →   [Ana] [22] [Chicago, IL]
 ```
 
-The tricky part: **a comma inside "quotes" is NOT a cut.** So the brain walks along the line one letter at a time, remembering whether it's inside quotes.
+The tricky part: **a comma inside "quotes" is NOT a cut.** So for lines with quotes, the brain walks along one letter at a time, remembering whether it's inside quotes. Lines with NO quotes take a shortcut.
 
 ```js
 function splitIntoCells(line) {
+
+    // SPEED TRICK: no quotes in this line? Every comma is a cut. Chop it all at once.
+    if (line.indexOf('"') === -1) return line.split(',');
 
     const cells = [];
     let current = '';           // the cell we're building right now
@@ -323,6 +343,7 @@ function splitIntoCells(line) {
 
 | Code | Baby words |
 |---|---|
+| `line.split(',')` | "Chop at every comma." Super fast, but can't handle quotes. |
 | `for (let i = 0; i < line.length; i++)` | "Count from 0 up to the end of the line, one at a time." |
 | `line[i]` | The letter at spot number `i` |
 | `current += letter` | Stick this letter on the end of the cell |
@@ -383,11 +404,14 @@ A row is a line of boxes, like Excel:
 ```
 
 ```js
-function makeRow(num, cells, query) {
+function makeRow(num, cells, query, index) {
 
     // The row itself.
     const row = document.createElement('div');
     row.className = 'line';
+    row.dataset.index = index;                                     // a name tag, so Go to row can find it
+
+    if (index % 2 === 1) row.classList.add('zebra');               // every other row: stripe
 
     // The row number, on the far left.
     const numCell = document.createElement('span');
@@ -421,7 +445,9 @@ function makeRow(num, cells, query) {
 |---|---|
 | `document.createElement('div')` | Make a brand new piece (not on the page yet) |
 | `.className = 'line'` | Give it a group name, so the clothes can find it later |
-| `.classList.add('num')` | Stick on ANOTHER group name |
+| `.classList.add('zebra')` | Stick on ANOTHER group name |
+| `.dataset.index = index` | A hidden sticky note on the row: "I'm row #index on screen" |
+| `index % 2 === 1` | "Is this an odd number?" (`%` = the leftover after dividing.) So every OTHER row gets a stripe. |
 | `.title = text` | The little popup when you hover over something |
 | `.appendChild(x)` | Put `x` inside this piece |
 
@@ -497,39 +523,143 @@ function paintMatches(box, text, query) {
 
 The header is just a normal row with number **0** and a special label, so the clothes can make it bold and stick it to the top.
 
+It's also the perfect ruler: every row is the same height as the header, so the brain measures it here.
+
 ```js
 function drawHeader() {
 
     headerBox.textContent = '';                         // wipe the old one
 
-    const row = makeRow(0, headerCells, '');            // row 0, the column names, no search
+    const row = makeRow(0, headerCells, '', 0);         // row 0, the column names, no search
     row.classList.add('header-row');
 
     headerBox.appendChild(row);
+
+    // Measure it, so the brain knows exactly how tall one row is.
+    rowHeight = row.offsetHeight || 30;
 }
 ```
 
 <br>
 
-### Step 2.9: The "Rows 21–35 of 100" words (`updatePosition`)
+### Step 2.9: THE SPEED TRICK 🚀 (`buildVisibleRows` + `buildRows`)
+
+This is what keeps big files from choking.
+
+**The problem:** a file with 200,000 rows × 6 columns = about **1.4 million boxes**. Building all of them freezes the browser. But you only ever SEE about 15 rows!
+
+**The trick:** only build the rows you can see, plus 10 extra above and below. About 35 rows. **Always.** Even for a million-row file.
+
+Above and below those rows sit the two invisible **spacers** from Step 2.1. They're empty, but stretched as tall as all the rows that AREN'T built. So the scrollbar still looks exactly right.
+
+```text
+     ┌──────────────────────┐
+     │   top spacer         │  ← empty, but as tall as rows 1–4,980
+     ├──────────────────────┤
+     │   row 4,981          │
+     │   row 4,982          │  ← the ONLY rows that really exist
+     │   ...                │
+     │   row 5,015          │
+     ├──────────────────────┤
+     │   bottom spacer      │  ← empty, but as tall as all the rest
+     └──────────────────────┘
+```
+
+When you scroll, rows that leave get thrown away and rows that come in get built. **Like a treadmill.**
+
+```js
+function buildVisibleRows(scrollSpot) {
+
+    if (matches.length === 0) return;
+
+    // 1. Where are we looking?
+    let viewTop, viewHeight;
+
+    if (outputBox.classList.contains('expanded')) {
+        viewTop    = -rowsBox.getBoundingClientRect().top;      // how far the rows' top has scrolled above the screen
+        viewHeight = window.innerHeight;                        // the whole screen
+    } else {
+        viewTop    = scrollSpot !== undefined ? scrollSpot : outputBox.scrollTop;
+        viewHeight = outputBox.clientHeight;                    // the window
+    }
+
+    // Turn that into row numbers (+ extras), kept inside 0 ... the last row.
+    const start = Math.max(0, Math.floor(viewTop / rowHeight) - EXTRA_ROWS);
+    const end   = Math.min(matches.length, Math.ceil((viewTop + viewHeight) / rowHeight) + EXTRA_ROWS);
+
+    // 2 + 3. Swap rows in and out.
+    if (start >= builtEnd || end <= builtStart) {
+
+        // Jumped somewhere totally new? Throw ALL the built rows away, build fresh.
+        while (topSpacer.nextSibling !== bottomSpacer) topSpacer.nextSibling.remove();
+        bottomSpacer.before(buildRows(start, end));
+
+    } else {
+
+        // Scrolled a bit? Only fix the edges.
+
+        // Top edge: rows scrolled off the top → throw away. New rows above → build.
+        for (let i = builtStart; i < start; i++) topSpacer.nextSibling.remove();
+        if (start < builtStart) topSpacer.after(buildRows(start, builtStart));
+
+        // Bottom edge: rows scrolled off the bottom → throw away. New rows below → build.
+        for (let i = builtEnd; i > end; i--) bottomSpacer.previousSibling.remove();
+        if (end > builtEnd) bottomSpacer.before(buildRows(builtEnd, end));
+    }
+
+    builtStart = start;
+    builtEnd = end;
+
+    // 4. Stretch the spacers.
+    topSpacer.style.height    = (start * rowHeight) + 'px';
+    bottomSpacer.style.height = ((matches.length - end) * rowHeight) + 'px';
+}
+
+
+// Build rows "from" up to (but not including) "to", in a hidden box, then hand them over all at once.
+function buildRows(from, to) {
+
+    const fragment = document.createDocumentFragment();
+
+    for (let i = from; i < to; i++) {
+        fragment.appendChild(makeRow(matches[i].num, matches[i].cells, query, i));
+    }
+
+    return fragment;
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `scrollSpot` | Optional: "pretend the window is scrolled HERE." Go to row uses it to build rows BEFORE jumping there. |
+| `Math.floor` / `Math.ceil` | Round DOWN / round UP |
+| `.nextSibling` / `.previousSibling` | "The piece right after me" / "the piece right before me" |
+| `.remove()` | Throw this piece away |
+| `.before(x)` / `.after(x)` | Put `x` right before / right after this piece |
+| `createDocumentFragment()` | A hidden box to build things in. Dropping them in all at once is much faster than one by one. |
+
+> **Why the extra 10 rows?** So if you scroll fast, the next rows are already built and you never see a blank gap.
+
+<br>
+
+### Step 2.10: The "Rows 21–35 of 100" words (`updatePosition`)
 
 ```js
 function updatePosition() {
 
-    const query = searchInput.value.trim();
-
     if (headerCells.length === 0) return;               // no file yet? stop.
 
+    const word = searchInput.value.trim();
+
     if (matches.length === 0) {
-        statusText.textContent = query === ''
+        statusText.textContent = word === ''
             ? 'This file only has a header row'
-            : 'No rows match "' + query + '"';
+            : 'No rows match "' + word + '"';
         return;
     }
 
     // Every row is the same height.
     // So: how far we scrolled ÷ one row's height = which row is at the top.
-    const rowHeight = rowsBox.children[0].offsetHeight;
     const first = Math.min(Math.round(outputBox.scrollTop / rowHeight), matches.length - 1);
 
     const last = outputBox.classList.contains('expanded')
@@ -538,10 +668,10 @@ function updatePosition() {
 
     let message = 'Rows ' + matches[first].num + '–' + matches[last].num;
 
-    if (query === '') {
+    if (word === '') {
         message += ' of ' + dataRows.length;
     } else {
-        message += ' (' + matches.length + ' matching row(s) for "' + query + '")';
+        message += ' (' + matches.length + ' matching row(s) for "' + word + '")';
     }
 
     statusText.textContent = message;
@@ -551,12 +681,11 @@ function updatePosition() {
 | Code | Baby words |
 |---|---|
 | `scrollTop` | How far down the window is scrolled |
-| `offsetHeight` | How tall something is |
 | `a ? b : c` | A tiny if/else: "if `a`, use `b`. Otherwise use `c`." |
 
 <br>
 
-### Step 2.10: Keep the window exactly header + 15 rows (`sizeWindow`)
+### Step 2.11: Keep the window exactly header + 15 rows (`sizeWindow`)
 
 **Problem:** lots of columns add a sideways scrollbar, and the scrollbar steals space.
 **Fix:** measure the scrollbar and give the space back.
@@ -566,12 +695,11 @@ function sizeWindow() {
 
     outputBox.style.height = '';    // start fresh
 
-    if (outputBox.classList.contains('expanded') || rowsBox.children.length === 0) return;
+    if (outputBox.classList.contains('expanded') || matches.length === 0) return;
 
     const style     = getComputedStyle(outputBox);
     const borders   = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
     const scrollbar = outputBox.offsetHeight - outputBox.clientHeight - borders;   // how tall the scrollbar is
-    const rowHeight = rowsBox.children[0].offsetHeight;                             // how tall one row is
 
     // the header + 15 rows + the scrollbar
     outputBox.style.height = (headerBox.offsetHeight + WINDOW_SIZE * rowHeight + scrollbar) + 'px';
@@ -580,63 +708,68 @@ function sizeWindow() {
 
 <br>
 
-### Step 2.11: Draw all the rows (`render`)
+### Step 2.12: Pick the rows to show (`render`)
 
-This is the big one. It runs after you pick a file AND every time you type in the search bar.
+This runs after you pick a file AND every time you search. It decides WHICH rows pass the search, then hands off to `buildVisibleRows` (Step 2.9) to actually build them.
 
 ```js
 function render() {
 
     // Your search word, in small letters. ("ANA" and "ana" find the same thing.)
-    const query = searchInput.value.trim().toLowerCase();
+    query = searchInput.value.trim().toLowerCase();
+
+    // The first time you search, squish every row into one small-letter string.
+    // Every search after that just checks those strings. (Way faster.)
+    //     ["Ana", "22", "Chicago"]  →  "ana␀22␀chicago"
+    // The ␀ is an invisible "wall," so a search can't match ACROSS two cells.
+    if (query !== '' && searchText === null) {
+        searchText = dataRows.map(function (cells) {
+            return cells.join('\u0000').toLowerCase();
+        });
+    }
 
     // Pick which rows to show.
     //   No search word?  keep every row.
-    //   Search word?     keep only rows where SOME cell has it.
+    //   Search word?     keep only rows that have it.
     // Each row remembers its number (1, 2, 3... because the header is 0).
     matches = [];
 
-    dataRows.forEach(function (cells, index) {
-
-        const hasWord = cells.some(function (cell) {
-            return cell.toLowerCase().includes(query);
-        });
-
-        if (query === '' || hasWord) {
-            matches.push({ num: index + 1, cells: cells });
+    for (let i = 0; i < dataRows.length; i++) {
+        if (query === '' || searchText[i].includes(query)) {
+            matches.push({ num: i + 1, cells: dataRows[i] });
         }
-    });
+    }
 
-    // Wipe the old rows away.
+    // Start over: wipe the old rows, put the 2 spacers in.
+    // (No matches? Leave it totally empty, and the window hides itself.)
     rowsBox.textContent = '';
+    builtStart = 0;
+    builtEnd = 0;
 
-    // Build all the new rows in a hidden box first, then drop them in all at once. (Faster!)
-    const fragment = document.createDocumentFragment();
-
-    matches.forEach(function (line) {
-        fragment.appendChild(makeRow(line.num, line.cells, query));
-    });
-
-    rowsBox.appendChild(fragment);
+    if (matches.length > 0) {
+        rowsBox.appendChild(topSpacer);
+        rowsBox.appendChild(bottomSpacer);
+    }
 
     controls.hidden = false;      // show Go to row + Expand
     sizeWindow();                 // make the window header + 15 rows tall
     outputBox.scrollTop = 0;      // start at the top
+    buildVisibleRows();           // build the rows you can see
     updatePosition();             // update the "Rows 1–15" words
 }
 ```
 
 | Code | Baby words |
 |---|---|
-| `.forEach(function (x, index) {...})` | "Do this for every item in the list." `index` starts at **0**, so the row number is `index + 1`. |
-| `.some(...)` | "Does at least ONE cell pass the test?" yes / no |
+| `.join('\u0000')` | Glue the cells into one string, with an invisible wall (`\u0000`) between them |
+| `.toLowerCase()` | Make every letter small |
 | `.includes(query)` | "Does this have my word in it?" yes / no |
 | `\|\|` | "or" |
 | `===` | "is exactly equal to" |
 
 <br>
 
-### Step 2.12: Read the file
+### Step 2.13: Read the file
 
 Now the brain listens for you picking a file:
 
@@ -661,6 +794,7 @@ fileInput.addEventListener('change', function (event) {
         // Every line gets cut into cells.
         headerCells = splitIntoCells(lines[0] || '');
         dataRows    = lines.slice(1).map(splitIntoCells);
+        searchText  = null;               // new file = throw away the old search copy
 
         // How many columns? Count the cells in the widest row.
         columnCount = headerCells.length;
@@ -675,7 +809,7 @@ fileInput.addEventListener('change', function (event) {
 
         setColumnWidths();                // decide how wide each column is
         drawHeader();                     // draw row 0
-        render();                         // draw the rows!
+        render();                         // show the rows!
     };
 
     reader.readAsText(file);              // GO! start reading.
@@ -706,25 +840,38 @@ A listener is the brain saying: *"Hey Choose File button, when you change, tell 
 
 Refresh the page. Pick a CSV file.
 
-You should see your data with row numbers, and "Rows 1–… of …" above it. It'll look **squished together**: no columns, no window. **That's fine!** The brain did its job. The clothes in Part 3 turn it into a sheet.
+You should see the header and the first few rows with their numbers, and "Rows 1–… of …" above them. It'll look **squished together**: no columns, no window. **That's fine!** The clothes in Part 3 turn it into a sheet.
 
-> Want proof it worked? Press **F12**, click **Elements**, and look inside `<div id="rows">`. You'll see a `<div class="line">` for every row, with a `<span class="cell">` for every value.
+> Want proof it worked? Press **F12**, click **Elements**, and look inside `<div id="rows">`. You'll see the 2 spacer `<div>`s with a bunch of `<div class="line">` rows between them. Even for a huge file, there are only a few dozen. That's the speed trick working!
 
 <br>
 
-### Step 2.13: Search
+### Step 2.14: Search
 
-One line! Every time you type, draw the rows again:
+Every time you type, show the rows again. On a BIG file, wait until you stop typing for a moment first:
 
 ```js
-searchInput.addEventListener('input', render);
+searchInput.addEventListener('input', function () {
+
+    if (dataRows.length <= BIG_FILE) {
+        render();
+        return;
+    }
+
+    clearTimeout(searchTimer);                  // you typed again? cancel the last countdown...
+    searchTimer = setTimeout(render, 200);      // ...and start a new one (0.2 seconds).
+});
 ```
 
-`'input'` = "every time a letter is typed or deleted."
+| Code | Baby words |
+|---|---|
+| `'input'` | "Every time a letter is typed or deleted" |
+| `setTimeout(fn, 200)` | "Run `fn` in 200 milliseconds (0.2 seconds)" |
+| `clearTimeout(timer)` | "Never mind, cancel that" |
 
 <br>
 
-### Step 2.14: Go to row
+### Step 2.15: Go to row
 
 ```js
 jumpBtn.addEventListener('click', jumpToLine);
@@ -742,17 +889,28 @@ function jumpToLine() {
     let index = matches.findIndex(function (line) { return line.num >= target; });
     if (index === -1) index = matches.length - 1;       // number too big? go to the last row.
 
-    const row = rowsBox.children[index];
-
     if (outputBox.classList.contains('expanded')) {
-        row.scrollIntoView({ block: 'center' });                        // expanded? scroll the PAGE
+
+        // Expanded? Scroll the PAGE so the row lands in the middle of the screen.
+        const rowsTopOnPage = rowsBox.getBoundingClientRect().top + window.scrollY;
+        window.scrollTo(0, rowsTopOnPage + index * rowHeight - window.innerHeight / 2);
+        buildVisibleRows();
+
     } else {
-        outputBox.scrollTop = row.offsetTop - headerBox.offsetHeight;   // small? scroll the WINDOW
-    }                                                                   // (minus the header, so the row sits right under it)
+
+        // Small window? Scroll the WINDOW so the row sits right under the header.
+        // (Build the rows there FIRST, so the window has something to land on.)
+        const top = index * rowHeight;
+        buildVisibleRows(top);
+        outputBox.scrollTop = top;
+    }
 
     updatePosition();
 
     // Flash blue. (Take it off, then put it back on, so it plays every time.)
+    const row = rowsBox.querySelector('[data-index="' + index + '"]');
+    if (!row) return;
+
     row.classList.remove('flash');
     void row.offsetWidth;
     row.classList.add('flash');
@@ -764,10 +922,11 @@ function jumpToLine() {
 | `parseInt(x, 10)` | Turn typed text into a whole number |
 | `isNaN(x)` | "Is this NOT a number?" |
 | `.findIndex(...)` | "Which spot in the list is the first one that fits?" |
+| `querySelector('[data-index="5"]')` | "Find the row with the sticky note that says 5" (from Step 2.5) |
 
 <br>
 
-### Step 2.15: Expand / Shrink
+### Step 2.16: Expand / Shrink
 
 ```js
 expandBtn.addEventListener('click', function () {
@@ -778,26 +937,120 @@ expandBtn.addEventListener('click', function () {
     expandBtn.textContent = expanded ? 'Shrink to 15-row window' : 'Expand (show all)';
 
     sizeWindow();
+    buildVisibleRows();
     updatePosition();
 });
 ```
 
 The brain just flips the `expanded` label on and off. The **clothes** decide what "expanded" looks like.
 
+> Even "show all" only BUILDS the rows on your screen. The page just gets as tall as all of them (thanks to the spacers).
+
 <br>
 
-### Step 2.16: Scroll listeners + the Top button
+### Step 2.17: When things scroll
 
 ```js
-// When the window scrolls, update the "Rows 21–35" words
-outputBox.addEventListener('scroll', updatePosition);
+// The window scrolls → build the rows coming in, update the words,
+// and start a countdown: still for 0.15 seconds? → snap to a whole row (Step 2.18).
+outputBox.addEventListener('scroll', function () {
+    buildVisibleRows();
+    updatePosition();
 
-// Top button: click it → glide back to the top
+    clearTimeout(snapTimer);
+    snapTimer = setTimeout(snapToRow, 150);
+});
+
+// The page scrolls → only matters when expanded.
+window.addEventListener('scroll', function () {
+    if (outputBox.classList.contains('expanded')) buildVisibleRows();
+});
+
+// The browser window changes size → more or fewer rows might fit.
+window.addEventListener('resize', function () {
+    buildVisibleRows();
+});
+```
+
+<br>
+
+### Step 2.18: Snappy scrolling
+
+The window always stops on a **whole row**. Never half a row. Two parts:
+
+1. **The mouse wheel** moves by whole rows, with a smooth glide (one click ≈ 3 rows).
+2. **Any other scrolling** (dragging the scrollbar, the keyboard, a trackpad) gets a tiny glide to the nearest whole row when it stops.
+
+> **Why doesn't the browser do the snapping?** It can, but it can only snap to rows that are BUILT. Jump far away, and it would yank you back to the nearest built row. The brain knows where EVERY row is, even the ones that aren't built.
+
+```js
+outputBox.addEventListener('wheel', function (e) {
+
+    // Expanded? Scrolling sideways? Holding Shift? Let the browser handle it.
+    if (outputBox.classList.contains('expanded')) return;
+    if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+
+    // Some mice count in "lines" instead of pixels. Turn lines into pixels.
+    const pixels = e.deltaMode === 1 ? e.deltaY * rowHeight : e.deltaY;
+
+    const bottom = outputBox.scrollHeight - outputBox.clientHeight;
+
+    // Already at the very top or bottom? Let the PAGE scroll instead.
+    if ((pixels < 0 && outputBox.scrollTop <= 0) || (pixels > 0 && outputBox.scrollTop >= bottom)) return;
+
+    e.preventDefault();                     // "browser, don't scroll. I've got this."
+
+    // Not gliding yet? Start from the row we're on now.
+    if (wheelTarget === null) wheelTarget = Math.round(outputBox.scrollTop / rowHeight) * rowHeight;
+
+    // Add up the wheel spin. Every full row's worth → move one row.
+    // (Trackpads send lots of tiny spins. They add up until they make a whole row.)
+    wheelLeft += pixels;
+    const rows = Math.trunc(wheelLeft / rowHeight);
+    if (rows === 0) return;
+    wheelLeft -= rows * rowHeight;
+
+    // Glide to the new spot (but never past the top or the bottom).
+    wheelTarget = Math.min(Math.max(wheelTarget + rows * rowHeight, 0), bottom);
+    outputBox.scrollTo({ top: wheelTarget, behavior: 'smooth' });
+
+}, { passive: false });     // "passive: false" = "I might say preventDefault, so wait for me."
+
+
+function snapToRow() {
+
+    wheelTarget = null;                     // the glide is over
+    wheelLeft = 0;
+
+    if (outputBox.classList.contains('expanded') || matches.length === 0) return;
+
+    // Already on a whole row? Nothing to do.
+    const nearest = Math.round(outputBox.scrollTop / rowHeight) * rowHeight;
+    if (Math.abs(outputBox.scrollTop - nearest) < 1) return;
+
+    outputBox.scrollTo({ top: nearest, behavior: 'smooth' });
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `e.deltaY` | How far the wheel spun (down = positive, up = negative) |
+| `e.preventDefault()` | "Browser, DON'T do your normal thing." |
+| `Math.trunc(x)` | Chop off the decimals. `3.7` → `3` |
+| `Math.round(x)` | Round to the nearest whole number. `3.7` → `4` |
+| `behavior: 'smooth'` | Glide there instead of jumping |
+
+<br>
+
+### Step 2.19: The Top button
+
+```js
+// Click it → glide back to the top
 topBtn.addEventListener('click', function () {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 });
 
-// Only show the Top button after you've scrolled down 300 pixels
+// Only show it after you've scrolled down 300 pixels
 window.addEventListener('scroll', function () {
     topBtn.hidden = window.scrollY < 300;
 });
@@ -832,6 +1085,7 @@ The brain is DONE! 🧠 Now let's make it pretty.
 | `.name` | A GROUP of pieces, by group name (`class`) | `.cell` → every `class="cell"` |
 | `name` | EVERY piece of that kind | `button` → all buttons |
 | `a b` | A `b` that's INSIDE an `a` | `.header-row .cell` → cells inside the header |
+| `.a.b` | Something with BOTH group names | `.line.zebra` → rows that are also striped |
 | `:hover` | "...while the mouse is on it" | `.cell:hover` |
 
 **See-through colors:**
@@ -957,7 +1211,6 @@ This is the biggest rule. It's split into labeled sections so it's easy to follo
     /* SCROLLING */
     overflow: auto;                   /* too much stuff? add a scrollbar */
     position: relative;               /* helps the brain measure where rows are */
-    scroll-padding-top: 30px;         /* "the top starts BELOW the header" (for snapping) */
 
     /* THE GLASS LOOK */
     /* The fill: a little white top-left → almost clear bottom-right. That fade = glass. */
@@ -969,8 +1222,7 @@ This is the biggest rule. It's split into labeled sections so it's easy to follo
         0 12px 40px rgba(0, 0, 0, 0.18),              /* soft shadow below = floating */
         inset 0 1px 0 rgba(255, 255, 255, 0.9);       /* shiny line on top = light hitting glass */
 
-    /* SNAPPY SCROLLING: always stop on a whole row */
-    scroll-snap-type: y mandatory;
+    /* (No snapping rule here! The BRAIN snaps now. See Step 2.18.) */
 
     /* THIN SCROLLBAR */
     scrollbar-width: thin;
@@ -990,10 +1242,9 @@ This is the biggest rule. It's split into labeled sections so it's easy to follo
     #output { animation: none; }
 }
 
-/* When the brain flips on "expanded": no limit, no snapping, no floating */
+/* When the brain flips on "expanded": no limit, no floating */
 #output.expanded {
     height: auto;
-    scroll-snap-type: none;
     animation: none;
 }
 
@@ -1030,12 +1281,11 @@ This is the biggest rule. It's split into labeled sections so it's easy to follo
     grid-template-columns: var(--columns, 60px 1fr);
     line-height: 29px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.45);
-    scroll-snap-align: start;         /* each row is a place to snap to */
     transition: background 0.15s;     /* color changes fade in smoothly */
 }
 
-/* Zebra stripes: every other row a bit lighter */
-.line:nth-child(even) {
+/* Zebra stripes: the brain puts "zebra" on every other row */
+.line.zebra {
     background: rgba(255, 255, 255, 0.15);
 }
 
@@ -1057,6 +1307,8 @@ This is the biggest rule. It's split into labeled sections so it's easy to follo
     z-index: 2;
 }
 ```
+
+> **Why does the BRAIN pick the zebra rows?** CSS has a way to pick "every other row" by itself, but it counts the invisible spacers too, so the stripes would jump around as rows get swapped in and out. The brain knows the real row numbers, so it does the striping.
 
 <br>
 
@@ -1154,12 +1406,14 @@ Refresh. Pick a file. You should have:
 - [ ] `"Chicago, IL"` in ONE box (not split in two)
 - [ ] Really long values cut off with "…" (hover to read them)
 - [ ] A glow when your mouse is on a box
-- [ ] Scrolling that snaps one row at a time
+- [ ] Scrolling that always stops on a whole row
 - [ ] "Rows 21–35 of 100" updating as you scroll
 - [ ] Search that paints matches yellow
 - [ ] Go to row that flashes blue
 - [ ] Expand / Shrink
 - [ ] A Top button after scrolling down the page
+
+**Bonus test: the speed trick.** Make a giant CSV (a spreadsheet app can make one, or ask a teammate for one) and open it. It should pop up in under a second. Press **F12** → **Elements** → look inside `<div id="rows">`: only a few dozen rows exist, no matter how big the file is.
 
 **You built it!** 🎉
 
@@ -1175,6 +1429,7 @@ Refresh. Pick a file. You should have:
 |---|---|
 | **Stop the floating** | Delete `animation: float 6s ease-in-out infinite;` in `#output` |
 | **Show 20 rows instead of 15** | Change **BOTH**: `WINDOW_SIZE = 15` → `20` (brain) AND `calc(16 * 30px)` → `calc(21 * 30px)` (clothes). Remember the +1 for the header! |
+| **Make the wheel move more/fewer rows** | The wheel moves 1 row per 30 pixels of spin. Most mice spin 100 per click (≈ 3 rows). To change it, multiply `pixels` in the wheel listener, like `e.deltaY * 2` |
 | **Make the glow stronger** | In `.cell:hover`, raise `14px 2px` to something like `20px 6px` |
 | **Let columns get wider** | In `setColumnWidths`, change the `40` |
 | **Change the page color** | `body` → `background` |
@@ -1194,6 +1449,9 @@ Refresh. Pick a file. You should have:
 | Nothing works at all | The `<script>` tag isn't at the bottom of `<body>`, or there's a typo in the brain. Press **F12** → **Console** tab to see the error in red. |
 | Everything is squished together | The `.line` rule is missing, or `--columns` is misspelled. |
 | Header columns don't line up with the rows | `font-weight: 600` is on `.header-row` instead of `.header-row .cell`. |
+| Blank gaps while scrolling | `buildVisibleRows` isn't being called in the `scroll` listener, or the spacers weren't added in `render`. |
+| Scrolling yanks you back somewhere | A leftover `scroll-snap-type` rule in the CSS. The brain does the snapping now. Delete it. |
+| Stripes jump around while scrolling | The CSS still uses `.line:nth-child(even)` instead of `.line.zebra`. |
 | The window isn't header + 15 rows | The numbers don't match in both places, or the row height isn't 30. |
 
 <br>
@@ -1205,4 +1463,4 @@ Refresh. Pick a file. You should have:
 - **No typo help.** `Jon` won't find `John`.
 - **Whole rows only.** You can't search just one column.
 - **In Expand mode,** the header doesn't follow you down the page.
-- **Huge files** (hundreds of thousands of rows) might take a second to load.
+- **Really, REALLY huge files** (around 1 GB) may be too big for the browser to read at all. Everything up to a few hundred MB is fine.
