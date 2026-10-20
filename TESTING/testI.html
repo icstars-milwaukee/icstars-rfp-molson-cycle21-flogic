@@ -71,6 +71,39 @@
 
 
 
+    <!--
+        0.  THE THEME HEXAGON   (top-left corner)
+
+            Click it  ->  the theme menu floats down.
+            It's filled with the color of the theme
+            you're using right now, with a glowing outline.
+
+            "aria-..."  =  notes for screen readers,
+                           so they know it opens a menu.
+    -->
+
+    <button id="themeHex" title="Theme: Neo-Neutral" aria-haspopup="true" aria-expanded="false" aria-controls="themeMenu">
+        <span class="hex">
+            <span class="hex-inner"></span>
+        </span>
+    </button>
+
+
+    <!--
+        The floating theme menu.
+        Glass, like the CSV window, but brighter and glowier,
+        so you can tell them apart.
+
+        The brain fills in the list of themes.
+    -->
+
+    <div id="themeMenu" role="menu" aria-label="Themes" hidden>
+        <p class="menu-title">Theme</p>
+        <div id="themeList"></div>
+    </div>
+
+
+
     <!--  1.  The big title  -->
 
     <h1>CSV Reader</h1>
@@ -159,7 +192,24 @@
 
 
     <!--
-        8.  Plug in the brain  (scriptI.js)
+        8.  THE LOADER   (only shows up for BIG files)
+
+            The screen clouds up, and the pie circle
+            fills up all the way around while the brain works.
+
+            role="status" + aria-live  =  screen readers read the words out loud
+                                           when they change  ("Cutting it into rows...")
+    -->
+
+    <div id="loader" role="status" aria-live="polite" hidden>
+        <div id="loaderPie"></div>
+        <p id="loaderLabel">Loading...</p>
+    </div>
+
+
+
+    <!--
+        9.  Plug in the brain  (scriptI.js)
 
             It goes LAST, on purpose.
             The brain needs all the pieces above to exist first,

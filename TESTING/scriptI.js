@@ -85,6 +85,14 @@ const GLIDE = 0.25;              //  how fast the wheel glide catches up.
 const BIG_FILE = 20000;          //  files with more rows than this wait until you stop typing to search
                                  //  (so the search bar doesn't lag on every letter).
 
+const CHUNK_TIME = 12;           //  big jobs (like cutting up a huge file) are done in small BITES.
+                                 //  Each bite works for about 12 milliseconds, then lets the screen
+                                 //  breathe, so the page never freezes and the loader can move.
+
+const LOADER_DELAY = 150;        //  the loader only shows up if a job takes longer than this
+                                 //  (in milliseconds).  Small files are done before it would appear,
+                                 //  so it never flashes on and off for nothing.
+
 
 
 // ----------------------------------------------------------
@@ -108,6 +116,9 @@ const jumpInput   = document.getElementById('jumpInput');      //  the "Row #" b
 const jumpBtn     = document.getElementById('jumpBtn');        //  the "Go to row" button
 const expandBtn   = document.getElementById('expandBtn');      //  the "Expand" button
 const topBtn      = document.getElementById('topBtn');         //  the "Top" button
+const loader      = document.getElementById('loader');         //  the cloudy loading screen
+const loaderPie   = document.getElementById('loaderPie');      //  the pie circle that fills up
+const loaderLabel = document.getElementById('loaderLabel');    //  the words under the pie
 
 
 //  The two invisible spacers  (see "THE SPEED TRICK" up top).
@@ -128,7 +139,9 @@ let headerCells = [];     //  the column names  (line 0).        Like:  ["name",
 let dataRows    = [];     //  EVERY other row, cut into cells.    Like:  [["Ana", "22"], ["Bo", "31"]]
 let searchText  = null;   //  every row squished into small letters, ready to search.  (made the first time you search)
 let columnCount = 0;      //  how many columns the widest row has
-let matches     = [];     //  ALL the rows that pass the search.  Like:  [{ num: 1, cells: ["Ana", "22"] }]
+let matches     = [];     //  ALL the rows that pass the search, as their spot in dataRows.  Like:  [0, 4, 9]
+                          //  (Just numbers!  Way lighter than building a little object for every row.)
+let allRows     = null;   //  the list for "no search":  [0, 1, 2, 3 ...]  every row.  Made once, then reused.
 let query       = '';     //  the search word, in small letters
 
 let rowHeight   = 30;     //  how tall one row is  (measured for real once the header is drawn)
@@ -142,6 +155,11 @@ let wheelTarget = null;   //  where the mouse wheel is gliding the window to  (n
 let wheelLeft   = 0;      //  leftover wheel spin that wasn't enough for a whole row yet
 let glideSpot   = 0;      //  exactly where the glide is right now  (can be in-between pixels)
 let gliding     = false;  //  is the glide moving right now?
+
+let loadId         = 0;      //  counts every file you pick.  If you pick a NEW file while an old one
+                             //  is still loading, the old one sees the number changed, and quits.
+let buildingSearch = false;  //  is the brain getting the search ready right now?
+let loaderTimer    = null;   //  the "wait a moment before showing the loader" timer
 
 
 
@@ -157,44 +175,122 @@ fileInput.addEventListener('change', function (event) {
 
     if (!file) return;                      //  you clicked "Cancel"?  Then stop.
 
+    const myLoad = ++loadId;                //  this file's number.  (Pick another file?  It gets a new number.)
+
+    searchInput.disabled = true;            //  no searching while the new file loads  (it turns back on when it's done)
+    startLoading('Reading the file...');    //  the loader shows up  (if this takes a while)
+
 
     const reader = new FileReader();        //  FileReader = a helper that reads files. It comes with every browser.
+
+
+    //  While reading:  fill the first 20% of the pie.
+    reader.onprogress = function (e) {
+        if (e.lengthComputable) setProgress(0.2 * e.loaded / e.total);
+    };
+
+    //  Couldn't read it?  Put the loader away, and turn search back on  (if there's an old file to search).
+    reader.onerror = function () {
+        searchInput.disabled = headerCells.length === 0;
+        finishLoading();
+    };
 
 
     //  This part waits until the file is DONE reading.
     reader.onload = function (e) {
 
-        //  Cut the file into lines.
-        //  (Windows and Mac end lines a little differently. This handles both.)
-        const lines = e.target.result.split(/\r?\n/);
+        if (myLoad !== loadId) return;      //  you picked a newer file in the meantime?  Forget this one.
 
-        //  Files often end with one empty line. Throw it away.
-        if (lines[lines.length - 1] === '') lines.pop();
+        const text = e.target.result;       //  the whole file, as one long string
+        let spot = 0;                       //  where we are in it
+
+
+        //  Cut off the NEXT line, and move "spot" past it.
+        //  (We don't cut the whole file into lines at once.  On a huge file,
+        //   that alone freezes the page.  We cut one line at a time, in bites.)
+        //
+        //  Windows ends lines with  \r\n,  Mac and Linux with just  \n.  This handles both.
+        function nextLine() {
+
+            let lineEnd = text.indexOf('\n', spot);         //  find the next line break...
+            const found = lineEnd !== -1;
+            if (!found) lineEnd = text.length;              //  ...none left?  The line goes to the end.
+
+            let cut = lineEnd;
+            if (found && text.charCodeAt(cut - 1) === 13) cut--;     //  13 = the  \r  from Windows.  Leave it off.
+
+            const line = text.slice(spot, cut);
+            spot = lineEnd + 1;
+            return line;
+        }
 
 
         //  Line 0  =  the header  (the column names).
         //  Everything after it  =  the data rows.
         //  Every line gets cut into cells.
-        headerCells = splitIntoCells(lines[0] || '');
-        dataRows    = lines.slice(1).map(splitIntoCells);
-        searchText  = null;                 //  new file  =  throw away the old search copy
+        //  (A file that ends with a line break doesn't get an extra empty row at the end.)
+        const newHeader = splitIntoCells(spot < text.length ? nextLine() : '');
+        const newRows   = [];
+
+        //  While we cut, remember the LONGEST thing in each column.
+        //  (That's how wide each column needs to be.  Doing it now, while we're
+        //   already looking at every cell, saves a whole extra trip through the file.)
+        const longest = newHeader.map(function (name) { return name.length; });
+
+        setLoadingLabel('Cutting it into rows...');
 
 
-        //  How many columns?  Count the cells in the widest row.
-        columnCount = headerCells.length;
-        dataRows.forEach(function (cells) {
-            columnCount = Math.max(columnCount, cells.length);
-        });
+        //  Cut the rows in BITES, so the page never freezes.
+        function cutSomeRows() {
+
+            if (myLoad !== loadId) return;  //  a newer file?  Stop.
+
+            const stopAt = performance.now() + CHUNK_TIME;
+
+            //  Cut rows until this bite's time is up  (checking the clock every 500 rows).
+            while (spot < text.length && performance.now() < stopAt) {
+
+                for (let n = 0; n < 500 && spot < text.length; n++) {
+                    const cells = splitIntoCells(nextLine());
+                    newRows.push(cells);
+
+                    for (let col = 0; col < cells.length; col++) {
+                        if (longest[col] === undefined || cells[col].length > longest[col]) {
+                            longest[col] = cells[col].length;
+                        }
+                    }
+                }
+            }
+
+            //  Fill the pie:  20% (reading)  +  up to 75% more (cutting).
+            setProgress(0.2 + 0.75 * Math.min(spot / Math.max(text.length, 1), 1));
+
+            //  More to do?  Let the screen breathe, then take the next bite.
+            if (spot < text.length) {
+                setTimeout(cutSomeRows, 0);
+                return;
+            }
 
 
-        //  Clean slate for the new file.
-        searchInput.value = '';
-        searchInput.disabled = false;       //  turn the search bar ON
-        jumpInput.value = '';
+            //  ALL DONE.  Now swap in the new file.
+            headerCells = newHeader;
+            dataRows    = newRows;
+            columnCount = longest.length;       //  the widest row decides how many columns there are
+            searchText  = null;                 //  new file  =  throw away the old search copy
+            allRows     = null;                 //  ...and the old "every row" list
 
-        setColumnWidths();                  //  decide how wide each column is
-        drawHeader();                       //  draw line 0
-        render();                           //  show the rows  (see STEP 5 below)
+            //  Clean slate for the new file.
+            searchInput.value = '';
+            searchInput.disabled = false;       //  turn the search bar ON
+            jumpInput.value = '';
+
+            setColumnWidths(longest);           //  decide how wide each column is
+            drawHeader();                       //  draw line 0
+            render();                           //  show the rows  (see STEP 5 below)
+            finishLoading();                    //  the pie fills up, and the loader goes away
+        }
+
+        cutSomeRows();                          //  take the first bite
     };
 
 
@@ -267,8 +363,9 @@ function splitIntoCells(line) {
 //
 //    HOW WIDE IS EACH COLUMN?
 //
-//    Look at the longest thing in each column,
-//    and make the column fit it.
+//    Make each column fit the longest thing in it.
+//    (The longest things were measured while the file was being cut up.
+//     "longest" is that list:  [12, 3, 25]  =  12 letters, 3 letters, 25 letters.)
 //
 //       Not too skinny  (at least 6 letters wide)
 //       Not too fat     (at most 40 letters wide)
@@ -278,23 +375,15 @@ function splitIntoCells(line) {
 //
 // ----------------------------------------------------------
 
-function setColumnWidths() {
+function setColumnWidths(longest) {
 
     const widths = [];
 
     for (let col = 0; col < columnCount; col++) {
 
-        //  Start with the header's length...
-        let longest = (headerCells[col] || '').length;
-
-        //  ...then check every row for something longer.
-        dataRows.forEach(function (cells) {
-            longest = Math.max(longest, (cells[col] || '').length);
-        });
-
         //  Squeeze it between 6 and 40.
         //  (+2 extra, because some letters like "W" and "$" are wider than normal.)
-        const letters = Math.min(Math.max(longest + 2, 6), 40);
+        const letters = Math.min(Math.max(longest[col] + 2, 6), 40);
 
         //  "ch" = the width of one letter.  +16px for the padding on both sides.
         widths.push('calc(' + letters + 'ch + 16px)');
@@ -386,10 +475,27 @@ function jumpToLine() {
 
     //  Find the row with that number.
     //  (If you're searching and that row is hidden, go to the next one that's showing.)
-    let index = matches.findIndex(function (line) { return line.num >= target; });
+    //
+    //  The rows are in order, so we don't check them one by one.
+    //  We play "guess the number":  look at the MIDDLE, throw away the wrong half, repeat.
+    //  A million rows takes about 20 guesses, instead of a million checks.
+    let low  = 0;
+    let high = matches.length;
+
+    while (low < high) {
+        const middle = Math.floor((low + high) / 2);
+
+        if (matches[middle] + 1 < target) {
+            low = middle + 1;               //  too small  ->  the answer is in the top half
+        } else {
+            high = middle;                  //  big enough  ->  the answer is here, or in the bottom half
+        }
+    }
+
+    let index = low;
 
     //  Number too big?  Go to the last row.
-    if (index === -1) index = matches.length - 1;
+    if (index === matches.length) index = matches.length - 1;
 
 
     if (outputBox.classList.contains('expanded')) {
@@ -509,7 +615,8 @@ function updatePosition() {
         : Math.min(first + WINDOW_SIZE, matches.length) - 1;    //  small?     The top row + 14 more.
 
 
-    let message = 'Rows ' + matches[first].num + '–' + matches[last].num;
+    //  matches holds spots in dataRows  (0, 1, 2...).  Row numbers start at 1  (the header is 0).  So:  +1.
+    let message = 'Rows ' + (matches[first] + 1) + '–' + (matches[last] + 1);
 
     if (word === '') {
         message += ' of ' + dataRows.length;
@@ -735,31 +842,33 @@ function render() {
     query = searchInput.value.trim().toLowerCase();
 
 
-    //  The first time you search, squish every row into one small-letter string.
-    //  Then every search after that just checks those strings.  (Way faster.)
-    //
-    //      ["Ana", "22", "Chicago"]   ->   "ana␀22␀chicago"
-    //
-    //  The ␀ is an invisible "wall" between cells,
-    //  so a search can never accidentally match ACROSS two cells.
+    //  The first time you search, the search copy isn't ready yet.
+    //  Get it ready  (in bites, with the loader),  and it'll come back here when it's done.
     if (query !== '' && searchText === null) {
-        searchText = dataRows.map(function (cells) {
-            return cells.join('\u0000').toLowerCase();
-        });
+        buildSearchText();
+        return;
     }
 
 
     //  Pick which rows to show.
-    //    No search word?    Keep every row.
+    //    No search word?    Keep every row.   (Use the "every row" list.  Make it the first time.)
     //    Search word?       Keep only rows that have it.
     //
-    //  Each row also remembers its number  (1, 2, 3...  because the header is 0),
-    //  so you always know where it lives in the file.
-    matches = [];
+    //  Each match is just the row's spot in dataRows  (0, 1, 2...).
+    //  Its row NUMBER is that  +1,  because the header is row 0.
+    if (query === '') {
 
-    for (let i = 0; i < dataRows.length; i++) {
-        if (query === '' || searchText[i].includes(query)) {
-            matches.push({ num: i + 1, cells: dataRows[i] });
+        if (allRows === null) {
+            allRows = dataRows.map(function (cells, i) { return i; });
+        }
+        matches = allRows;
+
+    } else {
+
+        matches = [];
+
+        for (let i = 0; i < dataRows.length; i++) {
+            if (searchText[i].includes(query)) matches.push(i);
         }
     }
 
@@ -781,6 +890,76 @@ function render() {
     outputBox.scrollTop = 0;        //  start at the top
     buildVisibleRows();             //  build the rows you can see
     updatePosition();               //  update the "Rows 1–15" words
+}
+
+
+
+// ----------------------------------------------------------
+//
+//    GET THE SEARCH READY   (only once per file, the first time you search)
+//
+//    Squish every row into one small-letter string.
+//    Then every search after that just checks those strings.  (Way faster.)
+//
+//        ["Ana", "22", "Chicago"]   ->   "ana␀22␀chicago"
+//
+//    The ␀ is an invisible "wall" between cells,
+//    so a search can never accidentally match ACROSS two cells.
+//
+//    Big file?  This is done in BITES, with the loader,
+//    so the page doesn't freeze.  When it's done, it runs render() again.
+//
+// ----------------------------------------------------------
+
+function buildSearchText() {
+
+    if (buildingSearch) return;             //  already on it?  (You typed more while it works.)  Don't start twice.
+    buildingSearch = true;
+
+    const myLoad = loadId;                  //  which file this is for
+    const rows   = dataRows;                //  hold on to THIS file's rows
+    const built  = [];
+    let i = 0;
+
+    startLoading('Getting search ready...');
+
+
+    function squishSomeRows() {
+
+        //  You picked a new file in the meantime?  This copy is for the old one.  Stop.
+        if (myLoad !== loadId) {
+            buildingSearch = false;
+            return;
+        }
+
+        const stopAt = performance.now() + CHUNK_TIME;
+
+        while (i < rows.length && performance.now() < stopAt) {
+
+            const last = Math.min(i + 500, rows.length);
+
+            for (; i < last; i++) {
+                built.push(rows[i].join('\u0000').toLowerCase());
+            }
+        }
+
+        setProgress(i / Math.max(rows.length, 1));
+
+        //  More to do?  Let the screen breathe, then take the next bite.
+        if (i < rows.length) {
+            setTimeout(squishSomeRows, 0);
+            return;
+        }
+
+
+        //  Done!  Keep it, put the loader away, and search for real.
+        searchText = built;
+        buildingSearch = false;
+        finishLoading();
+        render();
+    }
+
+    squishSomeRows();                       //  take the first bite
 }
 
 
@@ -869,7 +1048,8 @@ function buildRows(from, to) {
     const fragment = document.createDocumentFragment();
 
     for (let i = from; i < to; i++) {
-        fragment.appendChild(makeRow(matches[i].num, matches[i].cells, query, i));
+        const spot = matches[i];                //  where this row lives in dataRows
+        fragment.appendChild(makeRow(spot + 1, dataRows[spot], query, i));
     }
 
     return fragment;
@@ -986,3 +1166,190 @@ function paintMatches(box, text, query) {
 
     box.appendChild(document.createTextNode(text.slice(start)));                 //  the words AFTER the last one
 }
+
+
+
+// ----------------------------------------------------------
+//
+//    THE LOADER
+//
+//    A big job starts         ->  startLoading()
+//    The job gets further     ->  setProgress(0.5)      (0 = nothing done,  1 = all done)
+//    The job is finished      ->  finishLoading()
+//
+//    The screen clouds up, and a pie circle fills up all the way around
+//    into a solid color, then the cloud clears.
+//
+//    It WAITS a moment before showing up  (LOADER_DELAY).
+//    Quick jobs are done before then, so you never see it flash.
+//
+// ----------------------------------------------------------
+
+function startLoading(words) {
+
+    setLoadingLabel(words);
+    setProgress(0);
+    loader.classList.remove('done');
+
+    //  Only show it if the job is still going after a moment.
+    clearTimeout(loaderTimer);
+    loaderTimer = setTimeout(function () {
+        loader.hidden = false;
+        void loader.offsetWidth;            //  (a trick:  make the browser notice it's there, so the cloud can FADE in)
+        loader.classList.add('show');
+    }, LOADER_DELAY);
+}
+
+
+//  Fill the pie.  0.25 = a quarter of the way around.  1 = all the way.
+//  The clothes turn this number into degrees  (see "--done" in styleI.css).
+function setProgress(amount) {
+    loaderPie.style.setProperty('--done', amount);
+}
+
+
+function setLoadingLabel(words) {
+    loaderLabel.textContent = words;
+}
+
+
+function finishLoading() {
+
+    clearTimeout(loaderTimer);              //  not shown yet?  Then it never will be.
+
+    if (!loader.classList.contains('show')) {
+        loader.hidden = true;
+        return;
+    }
+
+    //  It's showing:  fill the pie all the way  (solid!),  let you see that for a moment,
+    //  then clear the cloud.
+    setProgress(1);
+    loader.classList.add('done');
+
+    loaderTimer = setTimeout(function () {
+        loader.classList.remove('show');                    //  the cloud fades away...
+        loaderTimer = setTimeout(function () {
+            loader.hidden = true;                           //  ...then it's gone for real.
+        }, 250);
+    }, 300);
+}
+
+
+
+// ----------------------------------------------------------
+//
+//    THE THEME HEXAGON  (top-left corner)
+//
+//    Click the hexagon  ->  the theme menu floats down.
+//    Click a theme      ->  the whole page changes colors.
+//    Click anywhere else, or press Escape  ->  the menu goes away.
+//
+//    The colors live in styleI.css  (look for  [data-theme="..."]).
+//    This list just says which themes exist,
+//    and what color each one's name glows.
+//
+//    Want a new theme?  Add one line here,
+//    plus a color block in styleI.css with the same id.
+//
+// ----------------------------------------------------------
+
+const THEMES = [
+    { id: 'neo-neutral', name: 'Neo-Neutral', color: '#4a5260', glow: 'rgba(165, 175, 190, 0.95)' },
+];
+
+const themeHex  = document.getElementById('themeHex');      //  the hexagon button
+const themeMenu = document.getElementById('themeMenu');     //  the floating menu
+const themeList = document.getElementById('themeList');     //  the list of themes inside it
+
+let currentTheme = THEMES[0];                               //  Neo-Neutral is the default
+
+
+//  Put on a theme.
+function setTheme(theme) {
+    currentTheme = theme;
+    document.documentElement.dataset.theme = theme.id;      //  <html data-theme="neo-neutral">  ->  styleI.css picks the colors
+    themeHex.title = 'Theme: ' + theme.name;
+    buildThemeList();                                       //  move the check mark
+}
+
+
+//  Build one button per theme:    [⬢]  Neo-Neutral  ✓
+function buildThemeList() {
+    themeList.innerHTML = '';
+
+    for (const theme of THEMES) {
+        const option = document.createElement('button');
+        option.className = 'theme-option';
+        option.setAttribute('role', 'menuitemradio');
+        option.setAttribute('aria-checked', theme === currentTheme);
+
+        //  Hand the colors to the clothes  (see ".theme-name" in styleI.css)
+        option.style.setProperty('--c', theme.color);
+        option.style.setProperty('--c-glow', theme.glow);
+
+        const swatch = document.createElement('span');
+        swatch.className = 'theme-swatch';
+        swatch.appendChild(document.createElement('span'));     //  the solid color, inside the outline
+
+        const name = document.createElement('span');
+        name.className = 'theme-name';
+        name.textContent = theme.name;
+
+        const check = document.createElement('span');
+        check.className = 'theme-check';
+        check.textContent = '✓';
+
+        option.append(swatch, name, check);
+
+        option.addEventListener('click', function () {
+            setTheme(theme);
+            closeThemeMenu();
+        });
+
+        themeList.appendChild(option);
+    }
+}
+
+
+function openThemeMenu() {
+    themeMenu.hidden = false;
+    themeHex.setAttribute('aria-expanded', 'true');
+    themeList.querySelector('[aria-checked="true"]').focus();   //  so the keyboard is ready to pick
+}
+
+function closeThemeMenu() {
+    themeMenu.hidden = true;
+    themeHex.setAttribute('aria-expanded', 'false');
+}
+
+
+//  Click the hexagon  ->  open.  Click it again  ->  close.
+themeHex.addEventListener('click', function () {
+    if (themeMenu.hidden) {
+        openThemeMenu();
+    } else {
+        closeThemeMenu();
+    }
+});
+
+
+//  Click somewhere that's NOT the menu or the hexagon  ->  close.
+document.addEventListener('click', function (event) {
+    if (!themeMenu.hidden && !themeMenu.contains(event.target) && !themeHex.contains(event.target)) {
+        closeThemeMenu();
+    }
+});
+
+
+//  Press Escape  ->  close, and go back to the hexagon.
+document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && !themeMenu.hidden) {
+        closeThemeMenu();
+        themeHex.focus();
+    }
+});
+
+
+//  Start with the default.
+setTheme(currentTheme);

@@ -32,6 +32,42 @@
 
 
 
+/*  ==========================================================
+
+        THE THEME:  NEO-NEUTRAL   (the default)
+
+        A theme is just a box of colors with names.
+        Everything below uses these names, like  var(--page),
+        instead of the color itself.
+
+        Want a new theme later?  Copy this block,
+        change  neo-neutral  to the new name, and pick new colors.
+        Then add it to THEMES in scriptI.js.
+
+        Neo-Neutral  =  a stronger grey, so the glass pops more.
+
+    ==========================================================  */
+
+:root,
+[data-theme="neo-neutral"] {
+    --page:         #b8bcc3;                        /*  the page  (a deeper grey than before)  */
+    --text:         #1f2228;                        /*  dark text  */
+    --text-soft:    #3b4048;                        /*  the not-as-important words  */
+
+    --glass-top:    rgba(238, 240, 244, 0.42);      /*  the glass fill, top-left  ...  */
+    --glass-bottom: rgba(170, 176, 186, 0.16);      /*  ...  fading to this, bottom-right  (a little grey in the glass)  */
+    --glass-edge:   rgba(255, 255, 255, 0.6);       /*  the thin shiny edge  */
+
+    --line-num-bg:  rgba(206, 210, 217, 0.9);       /*  the row-number column  */
+    --header-bg:    rgba(218, 221, 227, 0.94);      /*  the header row  */
+    --corner-bg:    rgba(198, 203, 211, 0.96);      /*  the top-left "0" box  */
+
+    --theme-color:  #4a5260;                        /*  the theme's own color  (the hexagon + its glowing name)  */
+    --theme-glow:   rgba(165, 175, 190, 0.95);      /*  the glow around it  */
+}
+
+
+
 /*  ----------------------------------------------------------
 
         THE WHOLE PAGE
@@ -42,8 +78,8 @@
 
 body {
     font-family: system-ui, Arial, sans-serif;
-    background: #d6d9de;            /*  grey  */
-    color: #222;                    /*  dark text  */
+    background: var(--page);        /*  grey  */
+    color: var(--text);             /*  dark text  */
     margin: 0;
     padding: 20px 16px 80px;        /*  space around the edges  (more at the bottom, for the Top button)  */
 }
@@ -98,7 +134,7 @@ h1 {
 
 #status {
     text-align: center;
-    color: #444;
+    color: var(--text-soft);
     font-size: 14px;
 }
 
@@ -138,10 +174,10 @@ h1 {
     /*  The fill:  a little white in the top-left,
         fading to almost clear in the bottom-right.
         That fade is what makes it look like glass.  */
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.40), rgba(255, 255, 255, 0.10));
+    background: linear-gradient(135deg, var(--glass-top), var(--glass-bottom));
 
     backdrop-filter: blur(12px);                        /*  blurs whatever is behind it  (frosty)  */
-    border: 1px solid rgba(255, 255, 255, 0.7);         /*  a thin shiny edge  */
+    border: 1px solid var(--glass-edge);                /*  a thin shiny edge  */
     border-radius: 18px;                                /*  round corners  */
 
     box-shadow:
@@ -291,8 +327,8 @@ h1 {
 .line-num {
     padding: 0 10px;
     text-align: right;
-    color: #666;                                        /*  grey numbers  */
-    background: rgba(225, 228, 233, 0.85);              /*  almost solid, so words slide UNDER it  */
+    color: #555;                                        /*  grey numbers  */
+    background: var(--line-num-bg);                     /*  almost solid, so words slide UNDER it  */
     border-right: 1px solid rgba(255, 255, 255, 0.6);
     user-select: none;                                  /*  when you copy text, the numbers don't come with it  */
 
@@ -349,7 +385,7 @@ h1 {
 
 .header-row,
 .header-row:hover {
-    background: rgba(235, 238, 242, 0.92);              /*  almost solid, so rows slide UNDER it  */
+    background: var(--header-bg);                       /*  almost solid, so rows slide UNDER it  */
     border-bottom-color: rgba(0, 0, 0, 0.15);
 }
 
@@ -370,7 +406,7 @@ h1 {
 
 /*  The top-left corner box  (the "0")  */
 .header-row .line-num {
-    background: rgba(220, 224, 230, 0.95);
+    background: var(--corner-bg);
 }
 
 
@@ -466,6 +502,364 @@ button:hover {
     right: 20px;
     bottom: 20px;
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+
+
+/*  ==========================================================
+
+        THE THEME HEXAGON   (top-left corner)
+
+        A hexagon is a box with its corners cut off.
+        "clip-path" is the scissors:  it cuts the box
+        along the 6 points below.
+
+                 (50% 0)
+            ┌───/───\───┐
+            │  /       \│    (100% 25%)
+            │ |         |
+            │ |         |
+            │  \       /│    (100% 75%)
+            └───\───/───┘
+                 (50% 100%)
+
+        The scissors also cut off shadows  (and glows!).
+        So the GLOW + SHADOW go on the outside piece  (the button),
+        and the scissors go on the inside pieces.
+
+    ==========================================================  */
+
+#themeHex {
+    position: fixed;            /*  glued to the screen, even when you scroll  */
+    top: 24px;                  /*  a little spaced down  */
+    left: 28px;                 /*  a little spaced over  */
+    z-index: 10;                /*  on top of everything  */
+
+    width: 50px;
+    height: 58px;               /*  a hexagon is a bit taller than it is wide  */
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: none;
+
+    /*  "drop-shadow" follows the hexagon shape, not the square box.
+        Stack 3 of them:  a white rim glow,  the theme's glow,  then a floating shadow.  */
+    filter:
+        drop-shadow(0 0 2px rgba(255, 255, 255, 0.9))
+        drop-shadow(0 0 8px var(--theme-glow))
+        drop-shadow(0 6px 12px rgba(0, 0, 0, 0.25));
+    transition: transform 0.35s ease, filter 0.35s ease;
+}
+
+#themeHex:hover {
+    background: none;           /*  undo the grey hover from "ALL THE BUTTONS"  */
+    transform: scale(1.07);
+    filter:                     /*  glow a little brighter  */
+        drop-shadow(0 0 3px #fff)
+        drop-shadow(0 0 14px var(--theme-glow))
+        drop-shadow(0 6px 12px rgba(0, 0, 0, 0.25));
+}
+
+/*  Menu open?  The hexagon turns 1/6 of the way around.
+    (A hexagon turned 60 degrees looks the same, so it just "clicks" into place.)  */
+#themeHex[aria-expanded="true"] {
+    transform: rotate(60deg);
+}
+
+/*  The keyboard ring  (when you Tab to it)  */
+#themeHex:focus-visible {
+    outline: none;
+    filter:
+        drop-shadow(0 0 3px #fff)
+        drop-shadow(0 0 4px #fff)
+        drop-shadow(0 6px 12px rgba(0, 0, 0, 0.25));
+}
+
+
+/*  The 2 layers, outside to inside:
+        .hex         =  the bright outline
+        .hex-inner   =  the solid theme color  */
+
+.hex,
+.hex-inner {
+    display: grid;
+    place-items: center;        /*  whatever's inside sits in the middle  */
+    clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+}
+
+.hex {
+    width: 100%;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.92);
+}
+
+.hex-inner {
+    width: calc(100% - 4px);    /*  a bit smaller, so 2px of the outline shows around it  */
+    height: calc(100% - 4px);
+    background: var(--theme-color);     /*  solid  */
+}
+
+
+
+/*  ----------------------------------------------------------
+
+        THE FLOATING THEME MENU
+
+        Same glass as the CSV window,
+        but turned UP so your eyes find it first:
+
+            -  brighter glass
+            -  a soft glowing ring all the way around
+            -  a bigger shadow  =  it looks CLOSER to you
+            -  a glowing line across the top
+            -  it doesn't bob.  It pops in.
+
+    ----------------------------------------------------------  */
+
+#themeMenu {
+    position: fixed;
+    top: 94px;                  /*  just under the hexagon  */
+    left: 20px;
+    z-index: 10;
+    min-width: 210px;
+    padding: 10px 8px 8px;
+
+    font-family: "Segoe UI", system-ui, Arial, sans-serif;
+
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.24));
+    backdrop-filter: blur(16px) saturate(1.3);
+    border: 1px solid rgba(255, 255, 255, 0.95);
+    border-radius: 18px;
+
+    box-shadow:
+        0 0 0 4px rgba(255, 255, 255, 0.25),            /*  the glowing ring  */
+        0 20px 50px rgba(0, 0, 0, 0.3),                 /*  big shadow  =  closer to you  */
+        inset 0 1px 0 #fff,                             /*  shiny top edge  */
+        inset 0 0 20px rgba(255, 255, 255, 0.35);       /*  light glowing inside the glass  */
+
+    transform-origin: 30px 0;   /*  grow out from under the hexagon  */
+    animation: menu-pop 0.18s ease-out;
+}
+
+/*  The glowing line across the top  */
+#themeMenu::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 18px;
+    right: 18px;
+    height: 2px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, transparent, var(--theme-glow), transparent);
+    box-shadow: 0 0 8px var(--theme-glow);
+}
+
+@keyframes menu-pop {
+    from { opacity: 0; transform: translateY(-6px) scale(0.96); }
+}
+
+
+/*  The little "THEME" word on top  */
+.menu-title {
+    margin: 0 10px 6px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-soft);
+}
+
+
+/*  One theme in the list  */
+#themeMenu .theme-option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    margin: 0;
+    padding: 9px 10px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: none;
+    text-align: left;
+    font: inherit;
+    font-size: 15px;
+}
+
+#themeMenu .theme-option:hover,
+#themeMenu .theme-option:focus-visible {
+    outline: none;
+    background: rgba(255, 255, 255, 0.45);
+    border-color: rgba(255, 255, 255, 0.9);
+}
+
+/*  The theme you're using right now  */
+#themeMenu .theme-option[aria-checked="true"] {
+    background: rgba(255, 255, 255, 0.35);
+}
+
+
+/*  The tiny hexagon next to the name:  solid color with a white outline.
+    (Too tiny for a glow.  It would just look blurry.)
+    Same 2 layers as the big hexagon:  the swatch is the outline,
+    the span inside it is the solid color.  */
+.theme-swatch,
+.theme-swatch span {
+    display: grid;
+    place-items: center;
+    clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+}
+
+.theme-swatch {
+    width: 16px;
+    height: 18px;
+    flex-shrink: 0;
+    background: #fff;
+}
+
+.theme-swatch span {
+    width: calc(100% - 3px);
+    height: calc(100% - 3px);
+    background: var(--c);
+}
+
+
+/*  The GLOWING name, in the theme's own color.
+    The brain hands over the colors as  --c  and  --c-glow.  */
+.theme-name {
+    flex-grow: 1;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--c);
+    text-shadow:
+        0 0 2px #fff,                                   /*  a bright white rim, so the letters stay sharp  */
+        0 0 10px var(--c-glow),                         /*  the colored glow  */
+        0 0 20px var(--c-glow);                         /*  the glow fading out  */
+}
+
+
+/*  The check mark  (only on the theme you're using)  */
+.theme-check {
+    color: var(--c);
+    visibility: hidden;
+}
+
+.theme-option[aria-checked="true"] .theme-check {
+    visibility: visible;
+}
+
+
+/*  Turned off motion?  No spinning, no popping.  */
+@media (prefers-reduced-motion: reduce) {
+    #themeHex  { transition: none; }
+    #themeMenu { animation: none; }
+}
+
+
+
+/*  ==========================================================
+
+        THE LOADER   (only for BIG files)
+
+        1.  The screen CLOUDS UP:  everything behind it goes blurry.
+        2.  A pie circle FILLS UP, all the way around,
+            into a solid color  (the same color as the hexagon).
+        3.  The cloud clears.
+
+        The pie, in a picture:
+
+             ◔   →   ◑   →   ◕   →   ●
+            25%     50%     75%    done!  (solid)
+
+    ==========================================================  */
+
+/*  The cloud:  the whole screen, on top of everything.  */
+#loader {
+    position: fixed;
+    inset: 0;                       /*  fill the whole screen  */
+    z-index: 20;                    /*  above everything  (even the hexagon)  */
+
+    display: grid;
+    place-content: center;          /*  the pie + the words sit in the middle  */
+    justify-items: center;
+    gap: 14px;
+
+    background: rgba(255, 255, 255, 0);     /*  starts clear  ...  */
+    backdrop-filter: blur(0);
+    transition: background 0.25s ease, backdrop-filter 0.25s ease;
+}
+
+/*  ...  then clouds up.  */
+#loader.show {
+    background: rgba(255, 255, 255, 0.18);
+    backdrop-filter: blur(8px);
+}
+
+
+/*  "--done" is how much of the pie is filled:  0 = none,  1 = all of it.
+    The brain changes it.  This "@property" line tells the browser it's a NUMBER,
+    so the pie can GLIDE from one amount to the next, instead of jumping.  */
+@property --done {
+    syntax: "<number>";
+    inherits: false;
+    initial-value: 0;
+}
+
+
+/*  The pie  */
+#loaderPie {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;             /*  a circle  */
+
+    /*  "conic-gradient" = colors that go AROUND the middle, like a clock hand.
+        From 12 o'clock, the theme color for  (--done × 360 degrees),
+        then see-through white for the rest.  */
+    background: conic-gradient(
+        var(--theme-color) calc(var(--done) * 360deg),
+        rgba(255, 255, 255, 0.45) 0
+    );
+
+    box-shadow:
+        0 0 0 3px rgba(255, 255, 255, 0.9),         /*  a white outline  (like the hexagon)  */
+        0 0 18px var(--theme-glow),                 /*  a soft glow around it  */
+        0 8px 20px rgba(0, 0, 0, 0.2);              /*  a floating shadow  */
+
+    opacity: 0;
+    transform: scale(0.8);
+    transition: --done 0.15s linear, opacity 0.25s ease, transform 0.25s ease;
+}
+
+#loader.show #loaderPie {
+    opacity: 1;
+    transform: scale(1);            /*  pops in  */
+}
+
+/*  Done!  The pie is solid now.  A little "pulse" to say so.  */
+#loader.done #loaderPie {
+    animation: pie-done 0.3s ease-out;
+}
+
+@keyframes pie-done {
+    50% { transform: scale(1.1); }
+}
+
+
+/*  The words under the pie  */
+#loaderLabel {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-soft);
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.9);  /*  a white glow, so they're easy to read on the cloud  */
+}
+
+
+/*  Turned off motion?  No fading, no popping, no gliding.  */
+@media (prefers-reduced-motion: reduce) {
+    #loader,
+    #loaderPie { transition: none; }
+    #loader.done #loaderPie { animation: none; }
 }
 
 
