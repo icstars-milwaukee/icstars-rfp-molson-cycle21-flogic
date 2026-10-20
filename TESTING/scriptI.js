@@ -74,6 +74,20 @@
 const WINDOW_SIZE = 15;          //  how many rows fit in the window  (plus the header).
                                  //  If you change this, change the 15 in styleI.css too.
 
+const EXTRA_COLUMNS = 8;         //  the SIDEWAYS treadmill:  how many extra columns to build
+                                 //  to the left and right of the ones you see.
+
+const MAX_SCROLL_WIDTH = 4000000;    //  browsers stop DRAWING text past about 8 million pixels
+                                     //  (sooner on sharp, high-resolution screens).
+                                     //  A sheet wider than THIS gets a "scaled" sideways scrollbar:
+                                     //  one pixel of scrollbar moves you more than one pixel of sheet.
+
+const MAX_SCROLL_HEIGHT = 4000000;   //  same thing, up and down.  4 million pixels  =  about 133,000 rows.
+                                     //  More rows than that?  The up-and-down scrollbar gets "scaled" too,
+                                     //  but the wheel still moves exactly 3 rows per click.
+
+const NUM_WIDTH = 60;            //  how wide the row-number column is  (in pixels)
+
 const EXTRA_ROWS = 15;           //  how many extra rows to build above and below the ones you see,
                                  //  so fast scrolling never shows a blank gap.
                                  //  (A whole window's worth on each side.)
@@ -147,6 +161,21 @@ let query       = '';     //  the search word, in small letters
 let rowHeight   = 30;     //  how tall one row is  (measured for real once the header is drawn)
 let builtStart  = 0;      //  the rows that are BUILT right now:
 let builtEnd    = 0;      //     from builtStart, up to (but not including) builtEnd
+
+let rowsScaled  = false;  //  too many rows to draw at full height?  (then the up-and-down scrollbar is "scaled")
+let rowsHeight  = 0;      //  how tall the rows area REALLY is on the page  (never more than MAX_SCROLL_HEIGHT)
+let viewY       = 0;      //  where you're looking, in "full height" pixels:  row 500,000 is at 500,000 x 30.
+                          //  This is the brain's own exact number.  (The scrollbar only knows a squeezed one.)
+let expectedTop = 0;      //  where the brain last PUT the scrollbar.  If it's somewhere else, YOU moved it.
+
+let columnWidths  = null; //  how wide each column is, in pixels.             Like:  [96, 64, 150]
+let columnStarts  = null; //  where each column STARTS  (a running total).   Like:  [0, 96, 160, 310]
+                          //  (one extra at the end  =  where the last column ends  =  the whole sheet's width)
+let sheetWidth    = 0;    //  how wide ALL the columns are, added up
+let scrollWidth   = 0;    //  how wide the scrollable area is  (the sheet, or MAX_SCROLL_WIDTH if the sheet is wider)
+let builtColStart = 0;    //  the columns that are BUILT right now:
+let builtColEnd   = 0;    //     from builtColStart, up to (but not including) builtColEnd
+let lastColumns   = '';   //  the last column list we handed the clothes  (so we don't hand over the same one twice)
 
 let searchTimer = null;   //  the "wait until they stop typing" timer, for big files
 
@@ -377,7 +406,11 @@ function splitIntoCells(line) {
 
 function setColumnWidths(longest) {
 
-    const widths = [];
+    const letter = measureLetterWidth();                //  how many pixels one letter takes up
+
+    columnWidths = new Float64Array(columnCount);
+    columnStarts = new Float64Array(columnCount + 1);   //  (a "Float64Array" is a list of numbers that's
+                                                        //   super fast and light.  Good for a million of them.)
 
     for (let col = 0; col < columnCount; col++) {
 
@@ -385,16 +418,183 @@ function setColumnWidths(longest) {
         //  (+2 extra, because some letters like "W" and "$" are wider than normal.)
         const letters = Math.min(Math.max(longest[col] + 2, 6), 40);
 
-        //  "ch" = the width of one letter.  +16px for the padding on both sides.
-        widths.push('calc(' + letters + 'ch + 16px)');
+        //  The letters  +16px for the padding on both sides.
+        columnWidths[col] = letters * letter + 16;
+
+        //  This column starts where the last one started, plus the last one's width.
+        columnStarts[col + 1] = columnStarts[col] + columnWidths[col];
+    }
+
+    sheetWidth  = columnStarts[columnCount];
+    scrollWidth = Math.min(sheetWidth, MAX_SCROLL_WIDTH);
+
+    builtColStart = 0;                                  //  no columns built yet
+    builtColEnd   = 0;
+    lastColumns   = '';
+}
+
+
+//  How wide is one letter, in pixels?  Write 100 zeros in the sheet's letters, measure, divide by 100.
+//  (It's measured off to the side, invisible, so you never see it.)
+function measureLetterWidth() {
+
+    const probe = document.createElement('span');
+    probe.style.cssText = 'position: absolute; visibility: hidden; white-space: pre; font: ' + getComputedStyle(outputBox).font;
+    probe.textContent = '0'.repeat(100);
+
+    document.body.appendChild(probe);
+    const width = probe.getBoundingClientRect().width / 100;
+    probe.remove();
+
+    return width || 8;                                  //  (couldn't measure?  8 pixels is a good guess)
+}
+
+
+
+// ----------------------------------------------------------
+//
+//    THE SIDEWAYS TREADMILL   (only build the columns you can SEE)
+//
+//    Same idea as the rows:  a file with a million columns only ever
+//    builds the 30 or so you can see, plus a few extra on each side.
+//    Two invisible spacers fill in for everything else:
+//
+//      [#] [left spacer] [C501] [C502] ... [C530] [right spacer]
+//           as wide as    only these get BUILT     as wide as
+//           columns 1-500                          all the rest
+//
+//    Scroll sideways  ->  columns that leave get thrown away,
+//                         columns that come in get built.
+//
+//    SUPER-wide sheets:  browsers can't make anything wider than about
+//    33 million pixels.  A million columns would be ~80 million.
+//    So past MAX_SCROLL_WIDTH, the scrollbar is "scaled":
+//    one pixel of scrollbar  =  several pixels of sheet.
+//
+// ----------------------------------------------------------
+
+//  Where in the SHEET are we looking, for this much scrolling?
+//  Normal sheet:  the same number.  Scaled sheet:  further along.
+function sheetSpot(scrolled, viewWidth) {
+
+    if (scrollWidth === sheetWidth) return scrolled;    //  not scaled?  1 pixel  =  1 pixel.
+
+    //  The first 400 pixels stay 1-to-1  (so the start of the sheet lines up perfectly),
+    //  then everything after is stretched, so the END of the scrollbar  =  the END of the sheet.
+    const easy = 400;
+    const scrollEnd = scrollWidth - viewWidth;
+    const sheetEnd  = sheetWidth - viewWidth;
+
+    if (scrolled <= easy || scrollEnd <= easy) return scrolled;
+
+    return easy + (scrolled - easy) * (sheetEnd - easy) / (scrollEnd - easy);
+}
+
+
+//  Which column is at this spot in the sheet?
+//  "Guess the number" again  (just like Go to row):  look in the middle, throw away the wrong half.
+function columnAt(spot) {
+
+    let low  = 0;
+    let high = columnCount;
+
+    while (low < high) {
+        const middle = Math.floor((low + high) / 2);
+
+        if (columnStarts[middle + 1] <= spot) {
+            low = middle + 1;               //  that column ends before the spot  ->  look to the right
+        } else {
+            high = middle;                  //  that column reaches the spot  ->  it's this one, or to the left
+        }
+    }
+
+    return low;
+}
+
+
+//  Figure out which columns should be built, and hand the clothes the column list.
+//  "force" = rebuild even if nothing moved  (for a new file, or a new search).
+function updateColumns(force) {
+
+    if (columnStarts === null || columnCount === 0) return;
+
+
+    //  1.  Where are we looking?
+    const viewWidth = Math.max(outputBox.clientWidth - NUM_WIDTH, 0);   //  how much sheet fits beside the row numbers
+    const scrolled  = outputBox.scrollLeft;
+    const spot      = sheetSpot(scrolled, viewWidth);
+
+    const first = Math.min(columnAt(spot), columnCount - 1);            //  the first column you can see
+    const last  = Math.min(columnAt(spot + viewWidth) + 1, columnCount); //  one past the last column you can see
+
+
+    //  How wide the left spacer has to be, if we start building at column "from".
+    //  (Put column "from" exactly where it needs to be, so the column at "spot" lands at the left edge.)
+    function leftSpace(from) {
+        return scrolled - (spot - columnStarts[from]);
+    }
+
+    function fits(from, to) {
+        const space = leftSpace(from);
+        return space >= 0 && space + (columnStarts[to] - columnStarts[from]) <= scrollWidth + 0.5;
     }
 
 
-    //  Hand the widths to the clothes (styleI.css) as one list:
-    //      "60px  calc(10ch + 16px)  calc(6ch + 16px)  ..."
-    //       ^^^^
-    //       the row-number column is always 60px
-    outputBox.style.setProperty('--columns', '60px ' + widths.join(' '));
+    //  2.  Do the columns we already built still cover what you can see?
+    let from = builtColStart;
+    let to   = builtColEnd;
+
+    if (force || from > first || to < last || !fits(from, to)) {
+
+        //  No.  Pick new ones:  the ones you can see, plus extras on each side.
+        from = Math.max(0, first - EXTRA_COLUMNS);
+        to   = Math.min(columnCount, last + EXTRA_COLUMNS);
+
+        //  (Scaled sheet near the start, or near the end?  Drop extras that wouldn't fit.)
+        while (from < first && leftSpace(from) < 0) from++;
+        while (to > last && !fits(from, to)) to--;
+    }
+
+    const changed = from !== builtColStart || to !== builtColEnd;
+    builtColStart = from;
+    builtColEnd   = to;
+
+
+    //  3.  Hand the clothes the column list:
+    //      row numbers,  left spacer,  the built columns,  right spacer.
+    const left  = Math.max(0, leftSpace(from));
+    const right = Math.max(0, scrollWidth - left - (columnStarts[to] - columnStarts[from]));
+
+    const widths = [];
+    for (let col = from; col < to; col++) widths.push(columnWidths[col] + 'px');
+
+    const columns = NUM_WIDTH + 'px ' + left + 'px ' + widths.join(' ') + ' ' + right + 'px';
+
+    if (columns !== lastColumns) {
+        outputBox.style.setProperty('--columns', columns);
+        lastColumns = columns;
+    }
+
+    //  Handing over new columns can change how wide the WINDOW is  (it fits the sheet, up to 900px).
+    //  Wider window  =  more columns fit.  So check again, once, with the new width.
+    if (outputBox.clientWidth - NUM_WIDTH > viewWidth + 1 && !updateColumns.again) {
+        updateColumns.again = true;
+        updateColumns(force);
+        updateColumns.again = false;
+        return;
+    }
+
+
+    //  4.  New columns?  Rebuild the header and the rows that are showing  (only ~45 rows, so it's quick).
+    if (changed || force) {
+
+        drawHeader();
+
+        if (builtEnd > builtStart) {
+            while (topSpacer.nextSibling !== bottomSpacer) topSpacer.nextSibling.remove();
+            bottomSpacer.before(buildRows(builtStart, builtEnd));
+        }
+    }
 }
 
 
@@ -502,7 +702,7 @@ function jumpToLine() {
 
         //  Window is expanded?  Scroll the PAGE so the row lands in the middle of the screen.
         const rowsTopOnPage = rowsBox.getBoundingClientRect().top + window.scrollY;
-        window.scrollTo(0, rowsTopOnPage + index * rowHeight - window.innerHeight / 2);
+        window.scrollTo(0, rowsTopOnPage + pageSpotFor(index * rowHeight - window.innerHeight / 2));
         buildVisibleRows();
 
     } else {
@@ -511,7 +711,7 @@ function jumpToLine() {
         //  (Build the rows there FIRST, so the window has something to land on.)
         const top = index * rowHeight;
         buildVisibleRows(top);
-        outputBox.scrollTop = top;
+        setViewY(top);
     }
 
     updatePosition();                                   //  update the "Rows 1–15" words
@@ -549,6 +749,7 @@ expandBtn.addEventListener('click', function () {
     expandBtn.textContent = expanded ? 'Shrink to 15-row window' : 'Expand (show all)';
 
     sizeWindow();
+    updateColumns();
     buildVisibleRows();
     updatePosition();
 });
@@ -558,12 +759,17 @@ expandBtn.addEventListener('click', function () {
 // ----------------------------------------------------------
 //
 //    MAKE THE WINDOW EXACTLY  HEADER + 15 ROWS  TALL
+//    (or shorter, if there are fewer than 15 rows to show)
 //
 //    Problem:  lots of columns add a sideways scrollbar,
 //              and that scrollbar steals some space.
 //
 //    Fix:      measure how tall the scrollbar is,
 //              and give that space back.
+//
+//    Only 10 rows?  The window is only 10 rows tall.
+//    No empty glass at the bottom, and the sideways scrollbar
+//    sits right under the last row, where you can reach it.
 //
 // ----------------------------------------------------------
 
@@ -578,8 +784,11 @@ function sizeWindow() {
     const borders   = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
     const scrollbar = outputBox.offsetHeight - outputBox.clientHeight - borders;    //  how tall the scrollbar is
 
-    //  the header  +  15 rows  +  the scrollbar
-    outputBox.style.height = (headerBox.offsetHeight + WINDOW_SIZE * rowHeight + scrollbar) + 'px';
+    //  15 rows  (or fewer, if that's all there is)
+    const rowsToShow = Math.min(WINDOW_SIZE, matches.length);
+
+    //  the header  +  the rows  +  the scrollbar
+    outputBox.style.height = (headerBox.offsetHeight + rowsToShow * rowHeight + scrollbar) + 'px';
 }
 
 
@@ -608,7 +817,7 @@ function updatePosition() {
 
     //  Every row is the same height.
     //  So:   how far we scrolled  ÷  one row's height  =  which row is at the top.
-    const first = Math.min(Math.round(outputBox.scrollTop / rowHeight), matches.length - 1);
+    const first = Math.min(Math.round(readViewY() / rowHeight), matches.length - 1);
 
     const last = outputBox.classList.contains('expanded')
         ? matches.length - 1                                    //  expanded?  You can see them all.
@@ -639,7 +848,8 @@ function updatePosition() {
 // ----------------------------------------------------------
 
 outputBox.addEventListener('scroll', function () {
-    buildVisibleRows();
+    updateColumns();                //  scrolled sideways?  swap columns in and out
+    buildVisibleRows();             //  scrolled up or down?  swap rows in and out
     updatePosition();
 
     //  Every time the window moves, restart the countdown.
@@ -694,18 +904,19 @@ outputBox.addEventListener('wheel', function (e) {
     //  Some mice count in "lines" instead of pixels.  Turn lines into pixels.
     const pixels = e.deltaMode === 1 ? e.deltaY * rowHeight : e.deltaY;
 
-    const bottom = outputBox.scrollHeight - outputBox.clientHeight;
+    const bottom = lowestViewY();
+    const now    = readViewY();             //  where you're looking right now
 
     //  Already at the very top or bottom?  Let the PAGE scroll instead.
-    if ((pixels < 0 && outputBox.scrollTop <= 0) || (pixels > 0 && outputBox.scrollTop >= bottom)) return;
+    if ((pixels < 0 && now <= 0) || (pixels > 0 && now >= bottom)) return;
 
     e.preventDefault();                     //  "browser, don't scroll.  I've got this."
 
 
     //  No finish line yet?  Start from the row we're on now.
     if (wheelTarget === null) {
-        wheelTarget = Math.round(outputBox.scrollTop / rowHeight) * rowHeight;
-        glideSpot = outputBox.scrollTop;
+        wheelTarget = Math.round(now / rowHeight) * rowHeight;
+        glideSpot = now;
     }
 
 
@@ -754,7 +965,7 @@ function glideStep() {
     }
 
     //  Someone else moved the window  (like dragging the scrollbar)?  Let them.  Stop gliding.
-    if (Math.abs(outputBox.scrollTop - glideSpot) > 2) {
+    if (Math.abs(outputBox.scrollTop - scrollbarSpotFor(glideSpot)) > 2) {
         gliding = false;
         wheelTarget = null;
         wheelLeft = 0;
@@ -767,14 +978,14 @@ function glideStep() {
     //  Basically there?  Land EXACTLY on the row, and stop.
     if (Math.abs(gap) < 0.5) {
         glideSpot = wheelTarget;
-        outputBox.scrollTop = wheelTarget;
+        setViewY(wheelTarget);
         gliding = false;
         return;
     }
 
     //  Move 25% of the way there.
     glideSpot += gap * GLIDE;
-    outputBox.scrollTop = glideSpot;
+    setViewY(glideSpot);
 
     requestAnimationFrame(glideStep);             //  same thing again, next redraw
 }
@@ -788,10 +999,125 @@ function snapToRow() {
     if (outputBox.classList.contains('expanded') || matches.length === 0) return;
 
     //  Already on a whole row?  Nothing to do.
-    const nearest = Math.round(outputBox.scrollTop / rowHeight) * rowHeight;
-    if (Math.abs(outputBox.scrollTop - nearest) < 1) return;
+    const now = readViewY();
+    const nearest = Math.round(now / rowHeight) * rowHeight;
+    if (Math.abs(now - nearest) < 1) return;
 
-    outputBox.scrollTo({ top: nearest, behavior: 'smooth' });
+    if (!rowsScaled) {
+        outputBox.scrollTo({ top: nearest, behavior: 'smooth' });    //  normal file:  the browser glides there
+        return;
+    }
+
+    //  Scaled file:  the browser can't land on an exact row  (its scrollbar is squeezed),
+    //  so use our own glide instead.
+    wheelTarget = nearest;
+    glideSpot = now;
+
+    if (!gliding) {
+        gliding = true;
+        requestAnimationFrame(glideStep);
+    }
+}
+
+
+
+// ----------------------------------------------------------
+//
+//    THE SCALED UP-AND-DOWN SCROLLBAR   (only for HUGE files)
+//
+//    Browsers stop drawing text past about 8 million pixels.
+//    A million rows x 30 pixels  =  30 million.  Way past it:
+//    the rows would scroll by with NO WORDS in them.
+//
+//    So past MAX_SCROLL_HEIGHT, the rows area is never taller than that,
+//    and the scrollbar is "squeezed":  one pixel of scrollbar  =  several pixels of rows.
+//
+//    The brain keeps its OWN exact number for where you are  (viewY),
+//    in full-height pixels.  The wheel, the glide, Go to row, and the
+//    "Rows 1–15" words all use viewY, so they stay exact:
+//    3 rows per wheel click, landing on whole rows, on ANY size file.
+//
+//    Normal-size files  (not scaled):  viewY is just the scrollbar's number.
+//    Nothing changes.
+//
+// ----------------------------------------------------------
+
+//  Stretch a squeezed scrollbar number into a full-height one  (or the other way).
+//  The first 2,000 pixels stay 1-to-1, so the top of the file lines up perfectly.
+//  After that, everything is stretched, so the END of the scrollbar  =  the END of the file.
+function stretch(spot, squeezedEnd, fullEnd) {
+    const easy = 2000;
+    if (spot <= easy || squeezedEnd <= easy) return spot;
+    return easy + (spot - easy) * (fullEnd - easy) / (squeezedEnd - easy);
+}
+
+function squeeze(spot, squeezedEnd, fullEnd) {
+    const easy = 2000;
+    if (spot <= easy || squeezedEnd <= easy) return spot;
+    return easy + (spot - easy) * (squeezedEnd - easy) / (fullEnd - easy);
+}
+
+
+//  The furthest the window can scroll:  squeezed  (what the scrollbar knows)  and full  (the real thing).
+function squeezedEnd() { return headerBox.offsetHeight + rowsHeight - outputBox.clientHeight; }
+function fullEnd()     { return headerBox.offsetHeight + matches.length * rowHeight - outputBox.clientHeight; }
+
+//  The lowest viewY can go  (the bottom of the file).
+function lowestViewY() {
+    return rowsScaled ? fullEnd() : outputBox.scrollHeight - outputBox.clientHeight;
+}
+
+//  Where the scrollbar should be, for this viewY.
+function scrollbarSpotFor(y) {
+    return rowsScaled ? squeeze(y, squeezedEnd(), fullEnd()) : y;
+}
+
+
+//  Where are you looking?  (Read it fresh from the scrollbar, if YOU moved the scrollbar.)
+function readViewY() {
+
+    const scrolled = outputBox.scrollTop;
+
+    if (!rowsScaled) {                      //  normal file:  the scrollbar's number IS the answer
+        viewY = scrolled;
+        expectedTop = scrolled;
+        return viewY;
+    }
+
+    //  Scrollbar is where the brain put it?  Keep the brain's exact number.
+    //  Somewhere else?  You dragged it  ->  stretch the scrollbar's number.
+    if (Math.abs(scrolled - expectedTop) > 1.5) {
+        viewY = stretch(scrolled, squeezedEnd(), fullEnd());
+        expectedTop = scrolled;
+    }
+
+    return viewY;
+}
+
+
+//  Go look HERE  (in full-height pixels).
+function setViewY(y) {
+
+    if (!rowsScaled) {                      //  normal file:  just move the scrollbar
+        outputBox.scrollTop = y;
+        viewY = y;
+        expectedTop = y;
+        return;
+    }
+
+    viewY = Math.min(Math.max(y, 0), fullEnd());
+    expectedTop = scrollbarSpotFor(viewY);
+    outputBox.scrollTop = expectedTop;
+}
+
+
+//  Expand mode  (the whole page scrolls instead of the window):  the same squeeze, using the screen's height.
+function pageSpotFor(y) {
+    return rowsScaled ? squeeze(y, rowsHeight - window.innerHeight, matches.length * rowHeight - window.innerHeight) : y;
+}
+
+function pageViewFor(spot) {
+    return rowsScaled ? stretch(spot, rowsHeight - window.innerHeight, matches.length * rowHeight - window.innerHeight) : spot;
 }
 
 window.addEventListener('scroll', function () {
@@ -799,6 +1125,7 @@ window.addEventListener('scroll', function () {
 });
 
 window.addEventListener('resize', function () {
+    updateColumns();                //  wider screen  =  more columns fit
     buildVisibleRows();
 });
 
@@ -886,8 +1213,14 @@ function render() {
 
 
     controls.hidden = false;        //  show the Go-to-row + Expand buttons
+    updateColumns(true);            //  pick the columns to build  (and draw the header with them)
+
+    //  Too many rows to draw at full height?  Then the up-and-down scrollbar gets "scaled".
+    rowsScaled = matches.length * rowHeight > MAX_SCROLL_HEIGHT;
+    rowsHeight = rowsScaled ? MAX_SCROLL_HEIGHT : matches.length * rowHeight;
+
     sizeWindow();                   //  make the window header + 15 rows tall
-    outputBox.scrollTop = 0;        //  start at the top
+    setViewY(0);                    //  start at the top
     buildVisibleRows();             //  build the rows you can see
     updatePosition();               //  update the "Rows 1–15" words
 }
@@ -984,19 +1317,41 @@ function buildVisibleRows(scrollSpot) {
 
 
     //  1.  Where are we looking?
-    let viewTop, viewHeight;
+    //      viewTop     =  in full-height pixels  (which rows)
+    //      scrolledTop =  in REAL pixels on the page  (where to put them)
+    //      (Normal files:  the same number.  Huge files:  see "THE SCALED UP-AND-DOWN SCROLLBAR".)
+    let viewTop, viewHeight, scrolledTop;
 
     if (outputBox.classList.contains('expanded')) {
-        viewTop    = -rowsBox.getBoundingClientRect().top;      //  how far the rows' top has scrolled above the screen
-        viewHeight = window.innerHeight;                        //  the whole screen
+        scrolledTop = -rowsBox.getBoundingClientRect().top;     //  how far the rows' top has scrolled above the screen
+        viewTop     = pageViewFor(scrolledTop);
+        viewHeight  = window.innerHeight;                       //  the whole screen
+    } else if (scrollSpot !== undefined) {
+        viewTop     = scrollSpot;
+        scrolledTop = scrollbarSpotFor(scrollSpot);
+        viewHeight  = outputBox.clientHeight;                   //  the window
     } else {
-        viewTop    = scrollSpot !== undefined ? scrollSpot : outputBox.scrollTop;
-        viewHeight = outputBox.clientHeight;                    //  the window
+        viewTop     = readViewY();
+        scrolledTop = outputBox.scrollTop;
+        viewHeight  = outputBox.clientHeight;
     }
 
     //  Turn that into row numbers  (+ extras),  kept inside  0 ... the last row.
-    const start = Math.max(0, Math.floor(viewTop / rowHeight) - EXTRA_ROWS);
-    const end   = Math.min(matches.length, Math.ceil((viewTop + viewHeight) / rowHeight) + EXTRA_ROWS);
+    let start = Math.max(0, Math.floor(viewTop / rowHeight) - EXTRA_ROWS);
+    let end   = Math.min(matches.length, Math.ceil((viewTop + viewHeight) / rowHeight) + EXTRA_ROWS);
+
+    //  How far the rows have to slide so the right row lands at the top of the window.
+    //  (Normal files:  0.  Huge files:  the difference between the real and the full-height spot.)
+    const slide = scrolledTop - viewTop;
+    const area  = rowsScaled ? rowsHeight : matches.length * rowHeight;     //  how tall the rows area really is
+
+    //  Huge file, near the very top or bottom?  Drop extra rows that wouldn't fit in the rows area.
+    if (rowsScaled) {
+        const firstSeen = Math.floor(viewTop / rowHeight);
+        const lastSeen  = Math.ceil((viewTop + viewHeight) / rowHeight);
+        while (start < firstSeen && slide + start * rowHeight < 0) start++;
+        while (end > lastSeen && slide + end * rowHeight > area) end--;
+    }
 
 
     //  2 + 3.  Swap rows in and out.
@@ -1027,8 +1382,10 @@ function buildVisibleRows(scrollSpot) {
     //  4.  Stretch the spacers.
     //      top spacer     =  as tall as all the rows ABOVE the built ones
     //      bottom spacer  =  as tall as all the rows BELOW the built ones
-    topSpacer.style.height    = (start * rowHeight) + 'px';
-    bottomSpacer.style.height = ((matches.length - end) * rowHeight) + 'px';
+    //      (Huge file?  Squeezed to fit, and slid so the right rows land in the window.)
+    const above = Math.max(0, slide + start * rowHeight);
+    topSpacer.style.height    = above + 'px';
+    bottomSpacer.style.height = Math.max(0, area - above - (end - start) * rowHeight) + 'px';
 }
 
 
@@ -1090,9 +1447,13 @@ function makeRow(num, cells, query, index) {
     row.appendChild(numCell);
 
 
-    //  One box for every column.
+    //  The LEFT spacer  (stands in for all the columns to the left that aren't built).
+    row.appendChild(document.createElement('span'));
+
+
+    //  One box for every column that's BUILT right now  (the sideways treadmill decides which).
     //  (If this row is missing some cells, those boxes are just empty.)
-    for (let col = 0; col < columnCount; col++) {
+    for (let col = builtColStart; col < builtColEnd; col++) {
 
         const text = cells[col] || '';
 
@@ -1107,6 +1468,10 @@ function makeRow(num, cells, query, index) {
 
         row.appendChild(cell);
     }
+
+
+    //  The RIGHT spacer  (stands in for all the columns to the right).
+    row.appendChild(document.createElement('span'));
 
     return row;
 }
