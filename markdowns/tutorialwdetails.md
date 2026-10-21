@@ -286,10 +286,23 @@ const bottomSpacer = document.createElement('div');
 
 ```js
 let headerCells = [];     // the column names (row 0).          Like: ["Name", "Age"]
-let dataRows    = [];     // EVERY other row, cut into cells.    Like: [["Ana", "22"], ["Bo", "31"]]
+
+// THE ROWS. They're NOT cut into cells and kept. (Every cell as its own little string
+// took about 4 times the file's size in memory.) Instead: the whole file stays as ONE string,
+// plus a list of where each row STARTS. A row only gets cut into cells when it's on screen.
+//
+//     fileText:   "name,age\nAna,22\nBo,31\n"
+//     rowStart:   [9, 16, 22]      <- row 0 starts at letter 9, row 1 at 16... (+1 extra: where the last row ENDS)
+//
+let fileText    = '';                   // the whole file, as one long string
+let rowStart    = new Uint32Array(1);   // where each row starts in fileText (4 bytes per row. Super light.)
+let rowCount    = 0;                    // how many rows (not counting the header)
+let rowCache    = new Map();            // rows looked at lately: where their commas are (so cutting out a few columns is quick)
+let cacheCells  = 0;                    // how many cells are in rowCache, all together (too many? it gets emptied)
+
 let searchText  = null;   // every row squished into small letters, ready to search (made on your first search)
 let columnCount = 0;      // how many columns the widest row has
-let matches     = [];     // ALL the rows that pass the search, as their spot in dataRows.  Like: [0, 4, 9]
+let matches     = [];     // ALL the rows that pass the search, as their row number (0, 1, 2...).  Like: [0, 4, 9]
 let allRows     = null;   // the list for "no search": [0, 1, 2, 3 ...] every row. Made once, then reused.
 let query       = '';     // the search word, in small letters
 
@@ -327,9 +340,14 @@ let loaderTimer    = null;   // "wait a moment before showing the loader" timer
 
 `[]` = an empty list. `null` = "nothing yet." They're `let` because they'll change later.
 
-> **Why is `matches` just numbers?** Each match is the row's **spot** in `dataRows` (`0`, `1`, `2`...). Its row **number** is that `+ 1`, because the header is row 0. A million plain numbers is MUCH lighter for the browser than a million little `{ num, cells }` objects.
+> **Why is `matches` just numbers?** Each match is the row's number in the file, counting from `0`. On screen it's that `+ 1`, because the header is row 0. A million plain numbers is MUCH lighter for the browser than a million little `{ num, cells }` objects.
 
-> **A list inside a list?** `dataRows` is a list of ROWS, and each row is a list of CELLS. Just like a spreadsheet: rows going down, cells going across.
+> **Why not keep every row cut into cells?** We used to! It was a list of rows, and each row was a list of cells, like a spreadsheet. Simple, but every cell was its own little string, and each one costs ~20 bytes of "wrapping" even if it's only "42". A 489 MB file took **2 GB** that way. Now it's ONE string (the file, 489 MB) plus 4 bytes per row. Rows get cut up only when they're on screen (Step 2.3b).
+
+| Word | Baby words |
+|---|---|
+| `Uint32Array` | A list of whole numbers that's super light: exactly 4 bytes each, nothing else. Perfect for a million "where does this row start" numbers. |
+| `new Map()` | A list you look things up in by a key. Here: "row 5" → what we remember about row 5. |
 
 <br>
 
@@ -396,6 +414,160 @@ function splitIntoCells(line) {
 | `true` / `false` | Yes / no. `insideQuotes` is like a light switch. |
 
 > **What about a line break inside quotes?** Like `"123 Main St` ⏎ `Apt 4"`. That's ONE cell. This function already keeps it (a line break is just another letter inside quotes). The hard part is making sure the line it gets isn't cut in half first. That's `nextLine`'s job, in Step 2.15.
+
+<br>
+
+### Step 2.3b: Keep the file, not the cells (`measureCells`, `rowText`, `getCells`)
+
+The rows stay inside the file (`fileText`), and `rowStart` says where each one starts (Step 2.2). These 4 helpers get what we need out of it, **without** cutting up every row:
+
+```text
+   measureCells   ->  how LONG is each cell?          (for the column widths, while loading)
+   rowText(5)     ->  "Fy,Miami,FL"                   (row 5, as it is in the file)
+   getCells(5)    ->  ["Fy", "Miami", "FL"]           (row 5 cut into cells: just the columns being built right now)
+   rowInfo(5)     ->  where row 5's commas are        (found once, then remembered)
+```
+
+```js
+// HOW LONG IS EACH CELL? (without cutting the line up)
+// No quotes? Then the cells are just the bits between the commas,
+// so count the letters between commas. No new strings at all. (Fast + light.)
+//     Ana,22,Chicago    ->    3, 2, 7
+// Quotes? Then really cut it up (the quotes don't count as letters).
+// "longest" is the list of the longest so far, per column. This makes it longer where needed.
+function measureCells(line, longest) {
+
+    if (line.indexOf('"') === -1) {
+
+        let col  = 0;
+        let from = 0;                       // where this cell starts
+
+        while (true) {
+            const comma = line.indexOf(',', from);
+            const size  = (comma === -1 ? line.length : comma) - from;
+
+            if (longest[col] === undefined || size > longest[col]) longest[col] = size;
+
+            if (comma === -1) return;       // no more commas? That was the last cell.
+            from = comma + 1;
+            col++;
+        }
+    }
+
+    const cells = splitIntoCells(line);
+
+    for (let col = 0; col < cells.length; col++) {
+        if (longest[col] === undefined || cells[col].length > longest[col]) {
+            longest[col] = cells[col].length;
+        }
+    }
+}
+
+
+// GET ONE ROW BACK OUT OF THE FILE
+// Row 5 starts at rowStart[5]. It ends just before the line break,
+// and the next row starts just AFTER that line break (rowStart[6]).
+function rowText(i) {
+
+    const start = rowStart[i];
+    let end = rowStart[i + 1] - 1;          // the line break that ends this row
+
+    // A Windows \r just before that line break? Leave it off.
+    // (The very last row might have no line break at all. Then there's nothing to leave off.)
+    if (end < fileText.length && end > start && fileText.charCodeAt(end - 1) === 13) end--;
+
+    return fileText.slice(start, end);
+}
+
+
+// Only the columns being BUILT right now get cut out (builtColStart up to builtColEnd: the sideways treadmill).
+// A row with a MILLION columns still only makes about 30 little strings.
+//
+//     row:      Ana,22,Chicago,IL,60601
+//     commas:      3  6       14 17          <- found once, then remembered (4 bytes each)
+//     column 2  =  from just after comma 1 (7) to comma 2 (14)  =  "Chicago"
+//
+// The result only has the built columns in it. (The rest are empty, and nobody looks at them.)
+function getCells(i) {
+
+    const info = rowInfo(i);
+
+    if (info.cells) return info.cells;      // a row with quotes: already cut up, all of it
+
+    const cells = [];
+    const stop  = Math.min(builtColEnd, info.count);
+
+    for (let col = builtColStart; col < stop; col++) {
+        const from = col === 0 ? 0 : info.commas[col - 1] + 1;                 // just after the comma before it
+        const to   = col < info.count - 1 ? info.commas[col] : info.line.length;  // up to the comma after it
+        cells[col] = info.line.slice(from, to);
+    }
+
+    return cells;
+}
+
+
+// Look at a row once, and remember what we need to cut it up fast.
+//   No quotes? Remember where every comma is.
+//   Quotes?    Cut it all up for real (commas inside quotes don't count, so we can't just use the commas).
+function rowInfo(i) {
+
+    let info = rowCache.get(i);
+    if (info !== undefined) return info;
+
+    const line = rowText(i);
+
+    if (line.indexOf('"') === -1) {
+
+        let commas = new Uint32Array(16);
+        let n = 0;
+        let at = line.indexOf(',');
+
+        while (at !== -1) {
+            if (n === commas.length) {                      // full? Twice as big.
+                const bigger = new Uint32Array(n * 2);
+                bigger.set(commas);
+                commas = bigger;
+            }
+            commas[n++] = at;
+            at = line.indexOf(',', at + 1);
+        }
+
+        info = { line: line, commas: commas, count: n + 1 };   // 3 commas = 4 cells
+
+    } else {
+        const cells = splitIntoCells(line);
+        info = { cells: cells, count: cells.length };
+    }
+
+    // Keep the last rows we looked at (so scrolling back and forth, or sideways, is free).
+    // But not TOO many: 1,000 rows, or 20 million cells (very wide rows), whichever comes first.
+    // Too many? Start over. (Simple. The rows on screen get looked at again right away.)
+    if (rowCache.size >= 1000 || cacheCells + info.count > 20000000) {
+        rowCache.clear();
+        cacheCells = 0;
+    }
+    rowCache.set(i, info);
+    cacheCells += info.count;
+
+    return info;
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `line.indexOf(',', from)` | "Starting at `from`, where's the next comma?" (`-1` = there isn't one) |
+| `while (true) { ... return; }` | "Keep going forever... until a `return` says stop." |
+| `rowStart[i + 1] - 1` | The next row starts just after this row's line break. So 1 back = the line break itself. |
+| `{ line: line, commas: commas, count: n + 1 }` | A little bundle of 3 things about the row, with names. |
+| `info.cells` | "Does the bundle have `cells` in it?" Only rows with quotes do. |
+| `rowCache.get(i)` / `.set(i, info)` | Look up row `i` / remember `info` for row `i`. |
+
+> **Why does it only cut out the BUILT columns?** A row with a million columns would be a million little strings, just to show the ~30 you can see. Remembering where the commas are (4 bytes each) means any column can be cut out instantly, and only the ones on screen ever are.
+
+> **Why does the cache empty itself?** So it can never grow forever. 1,000 rows is way more than fit on screen (about 45), so normal scrolling is always free. The 20 million cell limit is for super-wide rows: 20 rows × 1,000,000 columns would be too much to keep.
+
+> **Did this change what you SEE?** No. We checked: the old way and the new way store exactly the same cells and column widths for 10 messy test files, and draw exactly the same cells at 8 different scroll spots. Only the memory changed: a 489 MB file went from **2 GB → 0.5 GB** after loading.
 
 <br>
 
@@ -663,7 +835,7 @@ This is what keeps big files from choking.
 
 **The trick:** only build the rows you can see, plus 15 extra above and below. About 45 rows. **Always.** Even for a million-row file.
 
-> **Wait, is the file loaded or not?** YES, the whole file is loaded. When you pick a file, every line is read and cut into cells right away (that's `dataRows`). The trick only limits how many rows get **drawn** as boxes on the page. Drawing boxes is the slow part, so the brain only draws what you can see.
+> **Wait, is the file loaded or not?** YES, the whole file is loaded. When you pick a file, it's read into one long string (`fileText`), and the brain writes down where every row starts (Step 2.3b). The trick only limits how many rows get **drawn** as boxes on the page (and cut into cells). Drawing boxes is the slow part, so the brain only draws what you can see.
 
 Above and below those rows sit the two invisible **spacers** from Step 2.1. They're empty, but stretched as tall as all the rows that AREN'T built. So the scrollbar still looks exactly right.
 
@@ -761,8 +933,8 @@ function buildRows(from, to) {
     const fragment = document.createDocumentFragment();
 
     for (let i = from; i < to; i++) {
-        const spot = matches[i];                // where this row lives in dataRows
-        fragment.appendChild(makeRow(spot + 1, dataRows[spot], query, i));
+        const spot = matches[i];                // which row this is (in the file)
+        fragment.appendChild(makeRow(spot + 1, getCells(spot), query, i));
     }
 
     return fragment;
@@ -977,11 +1149,11 @@ function updatePosition() {
         ? matches.length - 1                                    // expanded? you see them all
         : Math.min(first + WINDOW_SIZE, matches.length) - 1;    // small? the top row + 14 more
 
-    // matches holds spots in dataRows (0, 1, 2...). Row numbers start at 1 (the header is 0). So: +1.
+    // matches holds row numbers (0, 1, 2...). Row numbers start at 1 (the header is 0). So: +1.
     let message = 'Rows ' + (matches[first] + 1) + '–' + (matches[last] + 1);
 
     if (word === '') {
-        message += ' of ' + dataRows.length;
+        message += ' of ' + rowCount;
     } else {
         message += ' (' + matches.length + ' matching row(s) for "' + word + '")';
     }
@@ -1049,11 +1221,12 @@ function render() {
     // Pick which rows to show.
     //   No search word?  keep every row. (Use the "every row" list. Make it the first time.)
     //   Search word?     keep only rows that have it.
-    // Each match is just the row's spot in dataRows (0, 1, 2...).
+    // Each match is just the row's number (0, 1, 2...).
     if (wanted === '') {
 
         if (allRows === null) {
-            allRows = dataRows.map(function (cells, i) { return i; });
+            allRows = new Uint32Array(rowCount);    // [0, 1, 2, 3 ...] (a light list of numbers: 4 bytes each)
+            for (let i = 0; i < rowCount; i++) allRows[i] = i;
         }
         doneQuery   = null;
         doneMatches = null;
@@ -1065,7 +1238,7 @@ function render() {
     // Then only rows that had "chi" can have "chic". Only check THOSE.
     // (Same answer as checking every row. Just way less checking.)
     const pool  = doneQuery !== null && wanted.includes(doneQuery) ? doneMatches : null;    // null = check every row
-    const total = pool === null ? dataRows.length : pool.length;
+    const total = pool === null ? rowCount : pool.length;
     const texts = searchText;               // hold on to THIS file's search copy
     const found = [];
     let i = 0;
@@ -1177,16 +1350,29 @@ The first time you search, every row gets squished into one small-letter string.
 
 The `␀` is an invisible "wall," so a search can never match ACROSS two cells.
 
+> **`replaceAll(',', '\u0000')`?** For a row with no quotes, cutting it at the commas and gluing it back with walls = just swapping every comma for a wall. Same string, but no cutting at all. (Rows WITH quotes still get cut properly: the commas inside quotes aren't walls.)
+
 On a huge file, squishing a million rows at once would **freeze** the page. So the brain does it in **bites**: work for a moment, let the screen breathe, work again. The loader (Step 2.14) shows how far along it is. When it's done, it runs `render()` again, and the search happens for real.
 
 ```js
+// One row, ready to search: small letters, with a ␀ wall between the cells.
+// No quotes? The cells are just the bits between commas, so swap every comma for a wall.
+// (Same answer as cutting it up and gluing it back together. Just no cutting.)
+function searchLine(line) {
+
+    if (line.indexOf('"') === -1) return line.replaceAll(',', '\u0000').toLowerCase();
+
+    return splitIntoCells(line).join('\u0000').toLowerCase();
+}
+
+
 function buildSearchText() {
 
     if (buildingSearch) return;             // already on it? (You typed more while it works.) Don't start twice.
     buildingSearch = true;
 
     const myLoad = loadId;                  // which file this is for
-    const rows   = dataRows;                // hold on to THIS file's rows
+    const total  = rowCount;                // how many rows THIS file has
     const built  = [];
     let i = 0;
 
@@ -1203,20 +1389,20 @@ function buildSearchText() {
 
         const stopAt = performance.now() + CHUNK_TIME;
 
-        while (i < rows.length && performance.now() < stopAt) {
+        while (i < total && performance.now() < stopAt) {
 
-            const last = Math.min(i + 50, rows.length);     // (checking the clock every 50 rows: squishing a WIDE row is slow.
+            const last = Math.min(i + 50, total);           // (checking the clock every 50 rows: squishing a WIDE row is slow.
                                                              //  500 of square_10000's rows = 25 MB in one go = a freeze.)
 
             for (; i < last; i++) {
-                built.push(rows[i].join('\u0000').toLowerCase());
+                built.push(searchLine(rowText(i)));
             }
         }
 
-        setProgress(i / Math.max(rows.length, 1));
+        setProgress(i / Math.max(total, 1));
 
         // More to do? Let the screen breathe, then take the next bite.
-        if (i < rows.length) {
+        if (i < total) {
             setTimeout(squishSomeRows, 0);
             return;
         }
@@ -1479,36 +1665,40 @@ fileInput.addEventListener('change', function (event) {
         }
 
 
-        // Line 0 = the header. Everything after it = the data rows.
+        // Line 0 = the header (the column names). It gets cut into cells.
+        // Everything after it = the data rows. For those, we just write down where each one STARTS.
         // (A file that ends with a line break doesn't get an extra empty row at the end.)
         const newHeader = splitIntoCells(spot < text.length ? nextLine() : '');
-        const newRows   = [];
+        let   starts    = new Uint32Array(1024);    // where each row starts (it grows as we go)
+        let   count     = 0;                        // how many rows so far
 
-        // While we cut, remember the LONGEST thing in each column (for Step 2.4).
+        // While we go, remember the LONGEST thing in each column (for Step 2.4).
         const longest = newHeader.map(function (name) { return name.length; });
 
         setLoadingLabel('Cutting it into rows...');
 
 
-        // Cut the rows in BITES, so the page never freezes.
+        // Go through the rows in BITES, so the page never freezes.
         function cutSomeRows() {
 
             if (myLoad !== loadId) return;  // a newer file? stop.
 
             const stopAt = performance.now() + CHUNK_TIME;
 
-            // Cut rows until this bite's time is up (checking the clock every 500 rows).
+            // Go until this bite's time is up (checking the clock every 500 rows).
             while (spot < text.length && performance.now() < stopAt) {
 
                 for (let n = 0; n < 500 && spot < text.length; n++) {
-                    const cells = splitIntoCells(nextLine());
-                    newRows.push(cells);
 
-                    for (let col = 0; col < cells.length; col++) {
-                        if (longest[col] === undefined || cells[col].length > longest[col]) {
-                            longest[col] = cells[col].length;
-                        }
+                    // The list is full? Make a new one, twice as big, and copy the old one in.
+                    if (count + 1 >= starts.length) {
+                        const bigger = new Uint32Array(starts.length * 2);
+                        bigger.set(starts);
+                        starts = bigger;
                     }
+
+                    starts[count++] = spot;             // write down where this row starts...
+                    measureCells(nextLine(), longest);  // ...and how long its cells are
                 }
             }
 
@@ -1523,8 +1713,19 @@ fileInput.addEventListener('change', function (event) {
 
 
             // ALL DONE. Now swap in the new file.
+            if (count + 1 > starts.length) {   // (room for 1 more: where the LAST row ends)
+                const bigger = new Uint32Array(count + 1);
+                bigger.set(starts);
+                starts = bigger;
+            }
+            starts[count] = spot;               // where the last row ends (+1, just past its line break)
+
             headerCells = newHeader;
-            dataRows    = newRows;
+            fileText    = text;                 // keep the whole file...
+            rowStart    = starts;               // ...and where each row starts in it
+            rowCount    = count;
+            rowCache    = new Map();            // new file = forget the old file's rows
+            cacheCells  = 0;
             columnCount = longest.length;       // the widest row decides how many columns there are
             searchText  = null;                 // new file = throw away the old search copy
             allRows     = null;                 // ...and the old "every row" list
@@ -1561,6 +1762,10 @@ fileInput.addEventListener('change', function (event) {
 | `quotes % 2 === 0` | "Is the number of quotes EVEN?" (`% 2` = the leftover after dividing by 2. Even numbers leave 0.) |
 | `while (...) { ... }` | "Keep doing this, over and over, as long as `...` is true." |
 | `break` | "Stop the loop RIGHT NOW, and carry on after it." |
+
+> **Why does the list of row starts double when it's full?** A `Uint32Array` can't grow. So when it's full, make one twice as big and copy everything over. Doubling means it only happens about 20 times even for a million rows. (Growing by 1 each time would copy a million times!)
+
+> **Why write down `starts[count] = spot` at the very end?** That's where the LAST row ends. `rowText` (Step 2.3b) finds a row's end by looking at where the NEXT row starts. The last row has no next row, so we write down a pretend one.
 
 > **Why not just cut the whole file into lines at once?** On a giant file, that one step freezes the page by itself. Finding one line break at a time, in bites, keeps the page alive the whole way.
 
@@ -1649,7 +1854,7 @@ Every time you type, show the rows again. On a BIG file, wait until you stop typ
 ```js
 searchInput.addEventListener('input', function () {
 
-    if (dataRows.length <= BIG_FILE) {
+    if (rowCount <= BIG_FILE) {
         render();
         return;
     }
@@ -3417,6 +3622,12 @@ Refresh. You should have:
 | Stripes jump around while scrolling | The CSS still uses `.line:nth-child(even)` instead of `.line.zebra`. |
 | The window isn't header + 15 rows | The numbers don't match in both places, or the row height isn't 30. |
 | Picking a file does nothing, and the Console says `startLoading is not defined` | Step 2.14 (the loader) is missing from the brain. |
+| Every row shows the NEXT row's first letter, or loses its last letter | `rowText` is off by one. The row ends at `rowStart[i + 1] - 1` (the line break), not `rowStart[i + 1]`. |
+| The last row is missing, or shows up empty | `starts[count] = spot;` is missing from the "ALL DONE" part of Step 2.15, so the last row has no end. |
+| Cells end with a weird invisible character (Windows files) | `rowText` isn't leaving off the `\r` (the `charCodeAt(end - 1) === 13` line). |
+| Scrolling sideways shows the WRONG columns' words | `getCells` loops from 0 instead of `builtColStart`, or `rowInfo`'s `commas` are counted wrong (`col - 1` for the start, `col` for the end). |
+| A new file shows rows from the OLD file | `rowCache = new Map();` is missing from the "ALL DONE" part of Step 2.15. |
+| Super-wide files eat all the memory | The cache limit (`rowCache.size >= 1000 \|\| cacheCells + info.count > 20000000`) is missing from `rowInfo`. |
 | Search results flicker, or OLD results show up after you typed a new word | `searchSome` is missing `if (mySearch !== searchId) return;` at the top, so old searches keep running and landing. |
 | Yellow paints the wrong word for a moment while searching | `query = ...` is set at the top of `render` instead of inside `showMatches`. The word and the rows have to change together. |
 | Backspacing gives too FEW results | Narrowing is used when the new word is SHORTER. It must only narrow when `wanted.includes(doneQuery)`. |

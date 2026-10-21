@@ -158,10 +158,23 @@ const bottomSpacer = document.createElement('div');
 // ----------------------------------------------------------
 
 let headerCells = [];     //  the column names  (line 0).        Like:  ["name", "age"]
-let dataRows    = [];     //  EVERY other row, cut into cells.    Like:  [["Ana", "22"], ["Bo", "31"]]
+
+//  THE ROWS.  They're NOT cut into cells and kept.  (Every cell as its own little string
+//  took about 4 times the file's size in memory.)  Instead:  the whole file stays as ONE string,
+//  plus a list of where each row STARTS.  A row only gets cut into cells when it's on screen.
+//
+//      fileText:   "name,age\nAna,22\nBo,31\n"
+//      rowStart:   [9, 16, 22]      <-  row 0 starts at letter 9, row 1 at 16...  (+1 extra:  where the last row ENDS)
+//
+let fileText    = '';                   //  the whole file, as one long string
+let rowStart    = new Uint32Array(1);   //  where each row starts in fileText  (4 bytes per row.  Super light.)
+let rowCount    = 0;                    //  how many rows  (not counting the header)
+let rowCache    = new Map();            //  rows looked at lately:  where their commas are  (so cutting out a few columns is quick)
+let cacheCells  = 0;                    //  how many cells are in rowCache, all together  (too many?  it gets emptied)
+
 let searchText  = null;   //  every row squished into small letters, ready to search.  (made the first time you search)
 let columnCount = 0;      //  how many columns the widest row has
-let matches     = [];     //  ALL the rows that pass the search, as their spot in dataRows.  Like:  [0, 4, 9]
+let matches     = [];     //  ALL the rows that pass the search, as their row number  (0, 1, 2...).  Like:  [0, 4, 9]
                           //  (Just numbers!  Way lighter than building a little object for every row.)
 let allRows     = null;   //  the list for "no search":  [0, 1, 2, 3 ...]  every row.  Made once, then reused.
 let query       = '';     //  the search word, in small letters
@@ -349,40 +362,42 @@ fileInput.addEventListener('change', function (event) {
         }
 
 
-        //  Line 0  =  the header  (the column names).
-        //  Everything after it  =  the data rows.
-        //  Every line gets cut into cells.
+        //  Line 0  =  the header  (the column names).  It gets cut into cells.
+        //  Everything after it  =  the data rows.  For those, we just write down where each one STARTS.
         //  (A file that ends with a line break doesn't get an extra empty row at the end.)
         const newHeader = splitIntoCells(spot < text.length ? nextLine() : '');
-        const newRows   = [];
+        let   starts    = new Uint32Array(1024);    //  where each row starts  (it grows as we go)
+        let   count     = 0;                        //  how many rows so far
 
-        //  While we cut, remember the LONGEST thing in each column.
+        //  While we go, remember the LONGEST thing in each column.
         //  (That's how wide each column needs to be.  Doing it now, while we're
-        //   already looking at every cell, saves a whole extra trip through the file.)
+        //   already looking at every row, saves a whole extra trip through the file.)
         const longest = newHeader.map(function (name) { return name.length; });
 
         setLoadingLabel('Cutting it into rows...');
 
 
-        //  Cut the rows in BITES, so the page never freezes.
+        //  Go through the rows in BITES, so the page never freezes.
         function cutSomeRows() {
 
             if (myLoad !== loadId) return;  //  a newer file?  Stop.
 
             const stopAt = performance.now() + CHUNK_TIME;
 
-            //  Cut rows until this bite's time is up  (checking the clock every 500 rows).
+            //  Go until this bite's time is up  (checking the clock every 500 rows).
             while (spot < text.length && performance.now() < stopAt) {
 
                 for (let n = 0; n < 500 && spot < text.length; n++) {
-                    const cells = splitIntoCells(nextLine());
-                    newRows.push(cells);
 
-                    for (let col = 0; col < cells.length; col++) {
-                        if (longest[col] === undefined || cells[col].length > longest[col]) {
-                            longest[col] = cells[col].length;
-                        }
+                    //  The list is full?  Make a new one, twice as big, and copy the old one in.
+                    if (count + 1 >= starts.length) {
+                        const bigger = new Uint32Array(starts.length * 2);
+                        bigger.set(starts);
+                        starts = bigger;
                     }
+
+                    starts[count++] = spot;             //  write down where this row starts...
+                    measureCells(nextLine(), longest);  //  ...and how long its cells are
                 }
             }
 
@@ -397,8 +412,19 @@ fileInput.addEventListener('change', function (event) {
 
 
             //  ALL DONE.  Now swap in the new file.
+            if (count + 1 > starts.length) {   //  (room for 1 more:  where the LAST row ends)
+                const bigger = new Uint32Array(count + 1);
+                bigger.set(starts);
+                starts = bigger;
+            }
+            starts[count] = spot;               //  where the last row ends  (+1, just past its line break)
+
             headerCells = newHeader;
-            dataRows    = newRows;
+            fileText    = text;                 //  keep the whole file...
+            rowStart    = starts;               //  ...and where each row starts in it
+            rowCount    = count;
+            rowCache    = new Map();            //  new file  =  forget the old file's rows
+            cacheCells  = 0;
             columnCount = longest.length;       //  the widest row decides how many columns there are
             searchText  = null;                 //  new file  =  throw away the old search copy
             allRows     = null;                 //  ...and the old "every row" list
@@ -481,6 +507,152 @@ function splitIntoCells(line) {
 
     cells.push(current);                    //  don't forget the last cell
     return cells;
+}
+
+
+
+// ----------------------------------------------------------
+//
+//    HOW LONG IS EACH CELL?   (without cutting the line up)
+//
+//    For the column widths, we only need each cell's LENGTH.
+//    No quotes?  Then the cells are just the bits between the commas,
+//    so count the letters between commas.  No new strings at all.  (Fast + light.)
+//
+//        Ana,22,Chicago    ->    3, 2, 7
+//
+//    Quotes?  Then really cut it up  (the quotes don't count as letters).
+//
+//    "longest" is the list of the longest so far, per column.  This makes it longer where needed.
+//
+// ----------------------------------------------------------
+
+function measureCells(line, longest) {
+
+    if (line.indexOf('"') === -1) {
+
+        let col  = 0;
+        let from = 0;                       //  where this cell starts
+
+        while (true) {
+            const comma = line.indexOf(',', from);
+            const size  = (comma === -1 ? line.length : comma) - from;
+
+            if (longest[col] === undefined || size > longest[col]) longest[col] = size;
+
+            if (comma === -1) return;       //  no more commas?  That was the last cell.
+            from = comma + 1;
+            col++;
+        }
+    }
+
+    const cells = splitIntoCells(line);
+
+    for (let col = 0; col < cells.length; col++) {
+        if (longest[col] === undefined || cells[col].length > longest[col]) {
+            longest[col] = cells[col].length;
+        }
+    }
+}
+
+
+
+// ----------------------------------------------------------
+//
+//    GET ONE ROW BACK OUT OF THE FILE
+//
+//    rowText(5)   ->  "Fy,Miami,FL"            (the row, as it is in the file)
+//    getCells(5)  ->  ["Fy", "Miami", "FL"]    (cut into cells:  just the columns being built right now)
+//
+//    Row 5 starts at rowStart[5].  It ends just before the line break,
+//    and the next row starts just AFTER that line break  (rowStart[6]).
+//
+// ----------------------------------------------------------
+
+function rowText(i) {
+
+    const start = rowStart[i];
+    let end = rowStart[i + 1] - 1;          //  the line break that ends this row
+
+    //  A Windows  \r  just before that line break?  Leave it off.
+    //  (The very last row might have no line break at all.  Then there's nothing to leave off.)
+    if (end < fileText.length && end > start && fileText.charCodeAt(end - 1) === 13) end--;
+
+    return fileText.slice(start, end);
+}
+
+
+//  Only the columns being BUILT right now get cut out  (builtColStart up to builtColEnd:  the sideways treadmill).
+//  A row with a MILLION columns still only makes about 30 little strings.
+//
+//      row:      Ana,22,Chicago,IL,60601
+//      commas:      3  6       14 17          <-  found once, then remembered  (4 bytes each)
+//      column 2  =  from just after comma 1  (7)  to comma 2  (14)  =  "Chicago"
+//
+//  The result only has the built columns in it.  (The rest are empty, and nobody looks at them.)
+function getCells(i) {
+
+    const info = rowInfo(i);
+
+    if (info.cells) return info.cells;      //  a row with quotes:  already cut up, all of it
+
+    const cells = [];
+    const stop  = Math.min(builtColEnd, info.count);
+
+    for (let col = builtColStart; col < stop; col++) {
+        const from = col === 0 ? 0 : info.commas[col - 1] + 1;                 //  just after the comma before it
+        const to   = col < info.count - 1 ? info.commas[col] : info.line.length;  //  up to the comma after it
+        cells[col] = info.line.slice(from, to);
+    }
+
+    return cells;
+}
+
+
+//  Look at a row once, and remember what we need to cut it up fast.
+//    No quotes?  Remember where every comma is.
+//    Quotes?     Cut it all up for real  (commas inside quotes don't count, so we can't just use the commas).
+function rowInfo(i) {
+
+    let info = rowCache.get(i);
+    if (info !== undefined) return info;
+
+    const line = rowText(i);
+
+    if (line.indexOf('"') === -1) {
+
+        let commas = new Uint32Array(16);
+        let n = 0;
+        let at = line.indexOf(',');
+
+        while (at !== -1) {
+            if (n === commas.length) {                      //  full?  Twice as big.
+                const bigger = new Uint32Array(n * 2);
+                bigger.set(commas);
+                commas = bigger;
+            }
+            commas[n++] = at;
+            at = line.indexOf(',', at + 1);
+        }
+
+        info = { line: line, commas: commas, count: n + 1 };   //  3 commas  =  4 cells
+
+    } else {
+        const cells = splitIntoCells(line);
+        info = { cells: cells, count: cells.length };
+    }
+
+    //  Keep the last rows we looked at  (so scrolling back and forth, or sideways, is free).
+    //  But not TOO many:  1,000 rows,  or 20 million cells  (very wide rows),  whichever comes first.
+    //  Too many?  Start over.  (Simple.  The rows on screen get looked at again right away.)
+    if (rowCache.size >= 1000 || cacheCells + info.count > 20000000) {
+        rowCache.clear();
+        cacheCells = 0;
+    }
+    rowCache.set(i, info);
+    cacheCells += info.count;
+
+    return info;
 }
 
 
@@ -735,7 +907,7 @@ function drawHeader() {
 
 searchInput.addEventListener('input', function () {
 
-    if (dataRows.length <= BIG_FILE) {
+    if (rowCount <= BIG_FILE) {
         render();
         return;
     }
@@ -921,11 +1093,11 @@ function updatePosition() {
         : Math.min(first + WINDOW_SIZE, matches.length) - 1;    //  small?     The top row + 14 more.
 
 
-    //  matches holds spots in dataRows  (0, 1, 2...).  Row numbers start at 1  (the header is 0).  So:  +1.
+    //  matches holds row numbers  (0, 1, 2...).  Row numbers start at 1  (the header is 0).  So:  +1.
     let message = 'Rows ' + (matches[first] + 1) + '–' + (matches[last] + 1);
 
     if (word === '') {
-        message += ' of ' + dataRows.length;
+        message += ' of ' + rowCount;
     } else {
         message += ' (' + matches.length + ' matching row(s) for "' + word + '")';
     }
@@ -1280,12 +1452,13 @@ function render() {
     //    No search word?    Keep every row.   (Use the "every row" list.  Make it the first time.)
     //    Search word?       Keep only rows that have it.
     //
-    //  Each match is just the row's spot in dataRows  (0, 1, 2...).
+    //  Each match is just the row's number  (0, 1, 2...).
     //  Its row NUMBER is that  +1,  because the header is row 0.
     if (wanted === '') {
 
         if (allRows === null) {
-            allRows = dataRows.map(function (cells, i) { return i; });
+            allRows = new Uint32Array(rowCount);    //  [0, 1, 2, 3 ...]  (a light list of numbers:  4 bytes each)
+            for (let i = 0; i < rowCount; i++) allRows[i] = i;
         }
         doneQuery   = null;
         doneMatches = null;
@@ -1298,7 +1471,7 @@ function render() {
     //  Then only rows that had "chi" can have "chic".  Only check THOSE.
     //  (Same answer as checking every row.  Just way less checking.)
     const pool  = doneQuery !== null && wanted.includes(doneQuery) ? doneMatches : null;    //  null  =  check every row
-    const total = pool === null ? dataRows.length : pool.length;
+    const total = pool === null ? rowCount : pool.length;
     const texts = searchText;               //  hold on to THIS file's search copy
     const found = [];
     let i = 0;
@@ -1405,13 +1578,24 @@ function showMatches(wanted, list) {
 //
 // ----------------------------------------------------------
 
+//  One row, ready to search:  small letters, with a ␀ wall between the cells.
+//  No quotes?  The cells are just the bits between commas, so swap every comma for a wall.
+//  (Same answer as cutting it up and gluing it back together.  Just no cutting.)
+function searchLine(line) {
+
+    if (line.indexOf('"') === -1) return line.replaceAll(',', '\u0000').toLowerCase();
+
+    return splitIntoCells(line).join('\u0000').toLowerCase();
+}
+
+
 function buildSearchText() {
 
-    if (buildingSearch) return;             //  already on it?  (You typed more while it works.)  Don't start twice.
+    if (buildingSearch) return;            //  already on it?  (You typed more while it works.)  Don't start twice.
     buildingSearch = true;
 
     const myLoad = loadId;                  //  which file this is for
-    const rows   = dataRows;                //  hold on to THIS file's rows
+    const total  = rowCount;                //  how many rows THIS file has
     const built  = [];
     let i = 0;
 
@@ -1428,20 +1612,20 @@ function buildSearchText() {
 
         const stopAt = performance.now() + CHUNK_TIME;
 
-        while (i < rows.length && performance.now() < stopAt) {
+        while (i < total && performance.now() < stopAt) {
 
-            const last = Math.min(i + 50, rows.length);     //  (checking the clock every 50 rows:  squishing a WIDE row is slow.
+            const last = Math.min(i + 50, total);           //  (checking the clock every 50 rows:  squishing a WIDE row is slow.
                                                              //   500 of square_10000's rows  =  25 MB in one go  =  a freeze.)
 
             for (; i < last; i++) {
-                built.push(rows[i].join('\u0000').toLowerCase());
+                built.push(searchLine(rowText(i)));
             }
         }
 
-        setProgress(i / Math.max(rows.length, 1));
+        setProgress(i / Math.max(total, 1));
 
         //  More to do?  Let the screen breathe, then take the next bite.
-        if (i < rows.length) {
+        if (i < total) {
             setTimeout(squishSomeRows, 0);
             return;
         }
@@ -1567,8 +1751,8 @@ function buildRows(from, to) {
     const fragment = document.createDocumentFragment();
 
     for (let i = from; i < to; i++) {
-        const spot = matches[i];                //  where this row lives in dataRows
-        fragment.appendChild(makeRow(spot + 1, dataRows[spot], query, i));
+        const spot = matches[i];                //  which row this is  (in the file)
+        fragment.appendChild(makeRow(spot + 1, getCells(spot), query, i));
     }
 
     return fragment;
