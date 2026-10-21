@@ -127,7 +127,23 @@ const QUOTE_LIMIT = 32767;       //  a quote that's still open this many letters
 //
 // ----------------------------------------------------------
 
-const fileInput   = document.getElementById('csvFileInput');   //  the "Choose File" button
+const fileInput   = document.getElementById('csvFileInput');   //  the real file picker  (out of sight)
+const chooseBtn   = document.getElementById('chooseBtn');      //  the "Choose File" button  (it opens the picker)
+const aimbot      = document.getElementById('aimbot');         //  the snap menu's window  ("the aimbot")
+const aimCount    = document.getElementById('aimCount');       //  its "3 / 128"
+const aimWhere    = document.getElementById('aimWhere');       //  its "Row 42 · City"
+const aimScope    = document.getElementById('aimScope');       //  its 3 × 3 "scope"
+const aimPrev     = document.getElementById('aimPrev');        //  its  ◀
+const aimNext     = document.getElementById('aimNext');        //  its  ▶
+const aimRowBtn   = document.getElementById('aimRowBtn');      //  its  "Details ▾"  button
+const aimRow      = document.getElementById('aimRow');         //  the "details" panel  (under the bar)
+const aimRowTitle = document.getElementById('aimRowTitle');    //  its  "Row 151 · 40 columns"
+const aimFocusName = document.getElementById('aimFocusName');  //  its focus card's  "NOTES · 214 letters"
+const aimFocusText = document.getElementById('aimFocusText');  //  its focus card's full text
+const aimRowList  = document.getElementById('aimRowList');     //  its list of  [name] [value]
+const aimRowClose = document.getElementById('aimRowClose');    //  its  ×
+const readingFrom = document.getElementById('readingFrom');    //  the "Reading from...  sales.csv" line
+const readingName = document.getElementById('readingName');    //  the file's name in it
 const searchInput = document.getElementById('searchInput');    //  the search bar
 const statusText  = document.getElementById('status');         //  the "Rows 1–15 of 100" words
 const outputBox   = document.getElementById('output');         //  the glass window
@@ -289,6 +305,13 @@ function isUtf8(file, howMuch, done) {
 //   editing a file in Excel and picking it again would do nothing.)
 fileInput.addEventListener('click', function () {
     fileInput.value = '';
+});
+
+
+//  The "Choose File" button just opens the real file picker.
+//  (The picker itself is out of sight:  its spot in the bar is the aimbot window's now.)
+chooseBtn.addEventListener('click', function () {
+    fileInput.click();
 });
 
 
@@ -541,6 +564,8 @@ function loadFile(file, sheet) {
                 ? '  ·  read as Windows-1252  (an older Excel format)'
                 : '';
             showBadge();                        //  "XLSX SPREADSHEET"  (or nothing, for a CSV)
+            readingName.textContent = file.name;
+            readingFrom.hidden = false;         //  "Reading from...  sales.csv"
             columnCount = longest.length;       //  the widest row decides how many columns there are
             searchText  = null;                 //  new file  =  throw away the old search copy
             allRows     = null;                 //  ...and the old "every row" list
@@ -553,7 +578,7 @@ function loadFile(file, sheet) {
             jumpInput.value = '';
 
             setColumnWidths(longest);           //  decide how wide each column is
-            drawHeader();                       //  draw line 0
+            drawHeader(true);                   //  draw line 0  (and measure how tall a row is)
             render();                           //  show the rows  (see STEP 5 below)
             finishLoading();                    //  the pie fills up, and the loader goes away
         }
@@ -872,6 +897,20 @@ function getCells(i) {
 }
 
 
+//  ONE cell of one row,  any column  (built or not).   For the snap menu's scope.
+function cellAt(i, col) {
+
+    const info = rowInfo(i);
+
+    if (info.cells) return info.cells[col] || '';      //  a row with quotes:  already cut up
+    if (col >= info.count) return '';                  //  this row is shorter than that
+
+    const from = col === 0 ? 0 : info.commas[col - 1] + 1;
+    const to   = col < info.count - 1 ? info.commas[col] : info.line.length;
+    return info.line.slice(from, to);
+}
+
+
 //  Look at a row once, and remember what we need to cut it up fast.
 //    No quotes?  Remember where every comma is.
 //    Quotes?     Cut it all up for real  (commas inside quotes don't count, so we can't just use the commas).
@@ -1023,6 +1062,22 @@ function sheetSpot(scrolled, viewWidth) {
 }
 
 
+//  The other way around:  to look at THIS spot in the sheet,  how far should the sideways scrollbar go?
+//  (The snap menu uses it to scroll right to a cell.)
+function scrollSpotFor(spot, viewWidth) {
+
+    if (scrollWidth === sheetWidth) return spot;        //  not scaled?  1 pixel  =  1 pixel.
+
+    const easy = 400;
+    const scrollEnd = scrollWidth - viewWidth;
+    const sheetEnd  = sheetWidth - viewWidth;
+
+    if (spot <= easy || scrollEnd <= easy) return spot;
+
+    return easy + (spot - easy) * (scrollEnd - easy) / (sheetEnd - easy);
+}
+
+
 //  Which column is at this spot in the sheet?
 //  "Guess the number" again  (just like Go to row):  look in the middle, throw away the wrong half.
 function columnAt(spot) {
@@ -1107,9 +1162,14 @@ function updateColumns(force) {
         lastColumns = columns;
     }
 
-    //  Handing over new columns can change how wide the WINDOW is  (it fits the sheet, up to 900px).
+    //  Handing over new columns can change how wide the WINDOW is  (it fits the sheet, up to its max-width).
     //  Wider window  =  more columns fit.  So check again, once, with the new width.
-    if (outputBox.clientWidth - NUM_WIDTH > viewWidth + 1 && !updateColumns.again) {
+    //  But only for a sheet NARROWER than the window can get:  a wider one already fills it, so nothing can change.
+    //  (Checking makes the browser lay out the whole sheet RIGHT NOW,  in the middle of scrolling.  Skip it when we can.)
+    const widest = parseFloat(getComputedStyle(outputBox).maxWidth);       //  (from the clothes:  900px)
+    const couldGrow = !(widest > 0) || NUM_WIDTH + sheetWidth < widest + 2;
+
+    if (couldGrow && !updateColumns.again && outputBox.clientWidth - NUM_WIDTH > viewWidth + 1) {
         updateColumns.again = true;
         updateColumns(force);
         updateColumns.again = false;
@@ -1140,7 +1200,7 @@ function updateColumns(force) {
 //
 // ----------------------------------------------------------
 
-function drawHeader() {
+function drawHeader(measure) {
 
     headerBox.textContent = '';                         //  wipe the old one
 
@@ -1150,8 +1210,10 @@ function drawHeader() {
     headerBox.appendChild(row);
 
     //  The header is the same height as every row.
-    //  Measure it, so the brain knows exactly how tall one row is.
-    rowHeight = row.offsetHeight || 30;
+    //  Measure it  (only for a NEW file:  "measure" = true),  so the brain knows exactly how tall one row is.
+    //  (Measuring makes the browser lay out the whole sheet RIGHT NOW.  Doing that every time you
+    //   scroll sideways was most of the cost of scrolling sideways.  The height never changes, so once is enough.)
+    if (measure) rowHeight = row.offsetHeight || 30;
 }
 
 
@@ -1258,6 +1320,348 @@ function jumpToLine() {
     void row.offsetWidth;
     row.classList.add('flash');
 }
+
+
+
+// ----------------------------------------------------------
+//
+//    THE SNAP MENU   ("the aimbot")
+//
+//    Search for something  ->  the window next to "Choose File" LOCKS ON to the first match:
+//    which match it is,  where it is,  and a "scope" of the 9 cells around it.
+//
+//    ▶  (or Enter in the search bar)   ->  SNAP:  the sheet scrolls so that cell is in the middle
+//                                          (down AND sideways),  and the cell pulses.
+//                                          The first press snaps to the match you SEE.  Then:  the next one.
+//    ◀  (or Shift + Enter)             ->  the one before.
+//    Click the scope                   ->  snap to the match you see.
+//
+//    A row can have the word in more than one cell.  ▶ visits each one  ("hit 2 of 3"),  then the next row.
+//    At the end?  It wraps around to the start.
+//
+// ----------------------------------------------------------
+
+let aimAt   = -1;       //  which match the window is locked onto  (its spot in "matches").   -1  =  no target
+let aimHits = [];       //  the columns in that row that have the word.   Like:  [2, 7]
+let aimHit  = 0;        //  which one of those
+let aimed   = false;    //  has the sheet snapped to it yet?  (Then the first press snaps to THIS one, not the next.)
+
+
+//  New search results  ->  lock onto the first match.   No search  (or no matches)?  "Ready"  /  "No matches".
+function aimReset() {
+
+    aimed = false;
+
+    if (query === '' || matches.length === 0) {
+        aimAt = -1;
+        drawAim();
+        return;
+    }
+
+    aimOn(0, 0);
+}
+
+
+//  Lock onto match number "at",  hit number "hit"  (-1  =  that row's LAST hit).
+function aimOn(at, hit) {
+    aimAt   = at;
+    aimHits = hitsIn(matches[at]);
+    aimHit  = hit < 0 ? aimHits.length - 1 : hit;
+    drawAim();
+}
+
+
+//  Which columns of this row have the search word?   (Check the row's search copy, one cell at a time.)
+function hitsIn(row) {
+
+    const cells = searchText[row].split('\u0000');
+    const hits  = [];
+
+    for (let col = 0; col < cells.length; col++) {
+        if (cells[col].includes(query)) hits.push(col);
+    }
+
+    return hits.length > 0 ? hits : [0];        //  (the row matched, so there's always one.  But never leave it empty.)
+}
+
+
+//  ▶  (way = 1)   or   ◀  (way = -1):   move to the next  (or the one before),  then snap.
+function aimStep(way) {
+
+    if (aimAt === -1) return;
+
+    if (aimed) {
+        if (way > 0) {
+            if (aimHit + 1 < aimHits.length) aimHit++;                          //  the next hit in this row...
+            else aimOn((aimAt + 1) % matches.length, 0);                        //  ...or the first hit of the next row
+        } else {
+            if (aimHit > 0) aimHit--;                                           //  the hit before, in this row...
+            else aimOn((aimAt - 1 + matches.length) % matches.length, -1);      //  ...or the LAST hit of the row before
+        }
+        drawAim();
+    }
+
+    snapToTarget();
+}
+
+
+//  SNAP:  scroll the sheet so the target cell is in the middle,  and make it pulse.
+function snapToTarget() {
+
+    if (aimAt === -1) return;
+
+    aimed = true;
+    const col = aimHits[aimHit];
+
+
+    //  1.  Up and down:  the row in the middle of the window  (or of the screen, when it's expanded).
+    if (outputBox.classList.contains('expanded')) {
+        const rowsTopOnPage = rowsBox.getBoundingClientRect().top + window.scrollY;
+        window.scrollTo(0, rowsTopOnPage + pageSpotFor(aimAt * rowHeight - window.innerHeight / 2));
+    } else {
+        const top = Math.max(0, (aimAt - Math.floor(WINDOW_SIZE / 2)) * rowHeight);
+        buildVisibleRows(top);
+        setViewY(top);
+    }
+
+
+    //  2.  Sideways:  the column in the middle.
+    const viewWidth = Math.max(outputBox.clientWidth - NUM_WIDTH, 0);
+    const spot      = columnStarts[col] - (viewWidth - columnWidths[col]) / 2;
+
+    outputBox.scrollLeft = scrollSpotFor(Math.max(0, spot), viewWidth);
+    updateColumns();
+    buildVisibleRows();
+    updatePosition();
+
+
+    //  3.  LOCK ON:  the cell pulses.
+    //      (A row is:  [number] [left spacer] [the built cells ...] [right spacer].   So the cell is child  2 + its spot.)
+    const line = rowsBox.querySelector('[data-index="' + aimAt + '"]');
+    if (line === null || col < builtColStart || col >= builtColEnd) return;
+
+    const cell = line.children[2 + col - builtColStart];
+    cell.classList.remove('locked');
+    void cell.offsetWidth;                                  //  (take it off and put it back, so it plays again)
+    cell.classList.add('locked');
+    cell.addEventListener('animationend', function () { cell.classList.remove('locked'); }, { once: true });
+}
+
+
+//  Draw the window:   ⌖  3 / 128  ·  hit 1 of 2          Row 42  ·  City   +   the scope.
+function drawAim() {
+
+    aimScope.textContent = '';
+
+    if (aimAt === -1) {                                     //  NOTHING TO SHOW:  "Ready"  (or "nothing matches")
+        aimCount.textContent = query !== '' ? 'No matches' : 'No search';
+        aimWhere.textContent = '';
+        aimPrev.disabled = true;
+        aimNext.disabled = true;
+        aimRowBtn.disabled = true;
+        aimRowBtn.classList.remove('more');
+        toldAbout = '';
+        showRow(false);                                     //  no match  =  no row to show
+
+
+
+        const hint = document.createElement('div');
+        hint.className = query !== '' ? 'scope-hint' : 'scope-hint ready';
+        hint.textContent = query !== '' ? 'nothing matches "' + searchInput.value.trim() + '"' : 'Ready';
+        aimScope.appendChild(hint);
+        return;
+    }
+
+    const row = matches[aimAt];
+    const col = aimHits[aimHit];
+
+    aimPrev.disabled = false;
+    aimNext.disabled = false;
+    aimRowBtn.disabled = false;
+    if (!aimRow.hidden) drawRow();                          //  the details are open?  They follow the target.
+
+    aimCount.textContent = (aimAt + 1) + ' / ' + matches.length +
+        (aimHits.length > 1 ? '  ·  hit ' + (aimHit + 1) + ' of ' + aimHits.length : '');
+
+    //  Where:  the row number  (like the sheet's),  and the column's name.
+    //  An Excel file?  Its own address too, like  K43.   (Excel's row 1 is our header,  so Excel's row  =  ours + 1.)
+    aimWhere.textContent = 'Row ' + (row + 1) + '  ·  ' + (headerCells[col] || 'column ' + (col + 1)) +
+        (xlsxInfo !== null ? '  (' + columnName(col) + (row + 2) + ')' : '');
+
+    //  The scope:  the 3 × 3 cells around the target,  straight from the file  (so you see its real neighbors).
+    let target = null;
+
+    for (let r = row - 1; r <= row + 1; r++) {
+        for (let c = col - 1; c <= col + 1; c++) {
+
+            const box = document.createElement('div');
+            box.className = 'scope-cell';
+
+            if (c < 0 || r >= rowCount) {
+                box.classList.add('scope-edge');                                //  off the edge of the sheet
+            } else if (r < 0) {
+                box.classList.add('scope-header');                              //  above row 1:  the column names
+                box.textContent = headerCells[c] || '';
+            } else {
+                const text = cellAt(r, c).slice(0, 200).replace(/\r\n|\r|\n/g, '↵');
+                if (r === row && c === col) {
+                    box.classList.add('scope-target');                          //  THE TARGET  (your word in yellow)
+                    paintMatches(box, text, query);
+                    target = box;
+                } else {
+                    box.textContent = text;
+                }
+            }
+
+            aimScope.appendChild(box);
+        }
+    }
+
+    tellMore(target, cellAt(row, col), row + ':' + col);
+}
+
+
+//  Is the target CUT OFF in its little box?   ("Customer cal...":  too wide,  a line break in it,  or past 200 letters.)
+//  Then SAY so:   a  ▾  in its corner,  and the "Details ▾" button turns into a dark square like the target.
+//  A NEW cut-off target  (and the details are closed)?  The button pulses twice too,  so you notice it.
+let toldAbout = '';         //  the last target the button pulsed for  ("row:col"),  so it doesn't pulse again for the same one
+
+function tellMore(target, full, which) {
+
+    const cut = target !== null &&
+        (full.length > 200 || /[\r\n]/.test(full) || target.scrollWidth > target.clientWidth + 1);
+
+    if (target !== null) target.classList.toggle('cut', cut);
+
+    if (!cut) {
+        aimRowBtn.classList.remove('more');
+        return;
+    }
+
+    if (which !== toldAbout && aimRow.hidden) {
+        aimRowBtn.classList.remove('more');
+        void aimRowBtn.offsetWidth;                         //  (take it off and put it back, so the pulse plays again)
+    }
+    aimRowBtn.classList.add('more');
+    toldAbout = which;
+}
+
+
+//  THE DETAILS  ("Details ▾"):   for when the scope's little boxes are too small to read it all.
+//    1.  The FOCUS card:  the target's full text,  big,  scrolled to your word.
+//    2.  The whole row:  every column's name and value.
+//  It stays open as you press ▶ / ◀,  following the target.
+//
+//  A row with THOUSANDS of columns?  Only the 200 around the target are listed  (so it stays quick),
+//  with a note saying which ones.   A giant cell?  The card shows its first 20,000 letters.
+const ROW_LIMIT     = 200;
+const FOCUS_LETTERS = 20000;
+
+function showRow(open) {
+    aimRow.hidden = !open;
+    aimRowBtn.setAttribute('aria-expanded', open);
+    if (open) drawRow();
+}
+
+
+function drawRow() {
+
+    if (aimAt === -1) return;
+
+    const row   = matches[aimAt];
+    const col   = aimHits[aimHit];
+    const count = Math.max(headerCells.length, rowInfo(row).count);
+
+    //  Which columns:  all of them,  or the ROW_LIMIT around the target.
+    const from = Math.max(0, Math.min(col - ROW_LIMIT / 2, count - ROW_LIMIT));
+    const to   = Math.min(count, from + ROW_LIMIT);
+
+    aimRowTitle.textContent = 'Row ' + (row + 1) + '  ·  ' + count + ' column' + (count === 1 ? '' : 's');
+
+    //  1.  The FOCUS card:   "NOTES  ·  214 letters"   and the full text,  your word in yellow.
+    const full = cellAt(row, col);
+
+    aimFocusName.textContent = (headerCells[col] || 'column ' + (col + 1)) +
+        (xlsxInfo !== null ? '  ·  ' + columnName(col) + (row + 2) : '') +
+        '  ·  ' + full.length.toLocaleString() + ' letter' + (full.length === 1 ? '' : 's');
+
+    aimFocusText.textContent = '';
+    paintMatches(aimFocusText, full.length > FOCUS_LETTERS ? full.slice(0, FOCUS_LETTERS) + '…' : full, query);
+
+    //  A long text?  Scroll the card to your word  (a line above it,  so you see what comes before).
+    const word = aimFocusText.querySelector('mark');
+    aimFocusText.scrollTop = word === null ? 0 : Math.max(0, word.offsetTop - aimFocusText.offsetTop - 24);
+
+    //  2.  The whole row.
+    aimRowList.textContent = '';
+
+    const list = document.createDocumentFragment();         //  (build it off to the side, then drop it in all at once)
+
+    if (from > 0 || to < count) {
+        const note = document.createElement('div');
+        note.className = 'row-note';
+        note.textContent = 'showing columns ' + (from + 1) + '–' + to + ' of ' + count + '  (around the match)';
+        list.appendChild(note);
+    }
+
+    let target = null;
+
+    for (let c = from; c < to; c++) {
+
+        const name = document.createElement('div');
+        name.className = 'row-name';
+        name.textContent = (headerCells[c] || 'column ' + (c + 1)) + (xlsxInfo !== null ? '  ·  ' + columnName(c) : '');
+        name.title = name.textContent;
+
+        const text  = cellAt(row, c);
+        const value = document.createElement('div');
+        value.className = 'row-value';
+
+        const shown = text.length > 2000 ? text.slice(0, 2000) + '…' : text;     //  (a giant cell:  just its start)
+
+        if (c === col) {
+            value.classList.add('row-target');
+            paintMatches(value, shown, query);              //  your word in yellow
+            target = value;
+        } else {
+            value.textContent = shown;
+        }
+
+        list.append(name, value);
+    }
+
+    aimRowList.appendChild(list);
+
+    //  Scroll the list so the target is in view  (a third of the way down).
+    //  ("offsetTop" counts from the top of the whole panel,  so take off where the list starts.)
+    if (target !== null) aimRowList.scrollTop = Math.max(0, target.offsetTop - aimRowList.offsetTop - aimRowList.clientHeight / 3);
+}
+
+
+aimRowBtn.addEventListener('click', function () { showRow(aimRow.hidden); });
+aimRowClose.addEventListener('click', function () { showRow(false); aimRowBtn.focus(); });
+
+//  Escape closes the details  (if they're open).
+document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !aimRow.hidden) {
+        showRow(false);
+        aimRowBtn.focus();
+    }
+});
+
+
+aimNext.addEventListener('click', function () { aimStep(1); });
+aimPrev.addEventListener('click', function () { aimStep(-1); });
+aimScope.addEventListener('click', function () { snapToTarget(); });
+
+//  Enter in the search bar  =  ▶.     Shift + Enter  =  ◀.
+searchInput.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    aimStep(e.shiftKey ? -1 : 1);
+});
+
+drawAim();                          //  start out "Ready"
 
 
 
@@ -1820,6 +2224,7 @@ function showMatches(wanted, list) {
     setViewY(0);                    //  start at the top
     buildVisibleRows();             //  build the rows you can see
     updatePosition();               //  update the "Rows 1–15" words
+    aimReset();                     //  the snap menu locks onto the first match  (or "Ready")
 }
 
 
@@ -2233,11 +2638,11 @@ function finishLoading() {
 
 // ----------------------------------------------------------
 //
-//    THE THEME HEXAGON  (top-left corner)
+//    THE THEME CHIP  (top-left corner)
 //
-//    Click the hexagon  ->  the theme menu floats down.
+//    Click the chip     ->  it UNFOLDS into the theme menu  (a tiny glass chessboard).
 //    Click a theme      ->  the whole page changes colors.
-//    Click anywhere else, or press Escape  ->  the menu goes away.
+//    Click anywhere else, or press Escape  ->  the menu folds back down into the chip.
 //
 //    The colors live in styleI.css  (look for  [data-theme="..."]).
 //    This list just says which themes exist,
@@ -2252,23 +2657,24 @@ const THEMES = [
     { id: 'neo-neutral', name: 'Neo-Neutral', color: '#2a2e35', glow: 'rgba(165, 175, 190, 0.95)' },
 ];
 
-const themeHex  = document.getElementById('themeHex');      //  the hexagon button
-const themeMenu = document.getElementById('themeMenu');     //  the floating menu
+const themeChip = document.getElementById('themeChip');     //  the chip  (the small dark rectangle)
+const themeMenu = document.getElementById('themeMenu');     //  the menu it unfolds into
 const themeList = document.getElementById('themeList');     //  the list of themes inside it
 
 let currentTheme = THEMES[0];                               //  Neo-Neutral is the default
+let foldTimer    = null;                                    //  "hide it once it's done folding" timer
 
 
 //  Put on a theme.
 function setTheme(theme) {
     currentTheme = theme;
     document.documentElement.dataset.theme = theme.id;      //  <html data-theme="neo-neutral">  ->  styleI.css picks the colors
-    themeHex.title = 'Theme: ' + theme.name;
+    themeChip.title = 'Theme: ' + theme.name;
     buildThemeList();                                       //  move the check mark
 }
 
 
-//  Build one button per theme:    [⬢]  Neo-Neutral  ✓
+//  Build one button per theme:    [▬]  Neo-Neutral  ✓
 function buildThemeList() {
     themeList.innerHTML = '';
 
@@ -2306,44 +2712,77 @@ function buildThemeList() {
 }
 
 
+//  Is the menu open?  (Not closed, and not folded up.)
+function themeMenuOpen() {
+    return !themeMenu.classList.contains('closed') && !themeMenu.classList.contains('folded');
+}
+
+
+//  How small is "folded"?  Exactly the chip's size:  chip width ÷ menu width,  chip height ÷ menu height.
+//  The clothes shrink the menu by that much  (--fold-x,  --fold-y).
+function measureFold() {
+    themeMenu.style.setProperty('--fold-x', themeChip.offsetWidth  / themeMenu.offsetWidth);
+    themeMenu.style.setProperty('--fold-y', themeChip.offsetHeight / themeMenu.offsetHeight);
+}
+
+
+//  UNFOLD:  it's already there, folded up  (chip-sized and dark),  just out of sight.
+//  Bring it into sight,  then let it grow.
+//  (The clothes do the rest:  grow,  THEN the dark cover fades and the chessboard shows.)
 function openThemeMenu() {
-    themeMenu.hidden = false;
-    themeHex.setAttribute('aria-expanded', 'true');
+
+    clearTimeout(foldTimer);                                //  it was folding up?  Never mind:  grow back.
+
+    if (themeMenu.classList.contains('closed')) {
+        measureFold();                                      //  (the right fold size, in case the menu changed)
+        themeMenu.classList.remove('closed');               //  into sight,  still folded...
+        void themeMenu.offsetWidth;                         //  (make the browser notice that first)
+    }
+
+    themeMenu.classList.remove('folded');                   //  ...and grow
+    themeChip.setAttribute('aria-expanded', 'true');
     themeList.querySelector('[aria-checked="true"]').focus();   //  so the keyboard is ready to pick
 }
 
+
+//  FOLD UP:  dark cover first,  then shrink back down into the chip.  Then out of sight.
 function closeThemeMenu() {
-    themeMenu.hidden = true;
-    themeHex.setAttribute('aria-expanded', 'false');
+
+    if (!themeMenuOpen()) return;
+
+    measureFold();
+    themeMenu.classList.add('folded');
+    themeChip.setAttribute('aria-expanded', 'false');
+
+    //  Out of sight once the folding is done  (0.14s wait + 0.3s to shrink).
+    clearTimeout(foldTimer);
+    foldTimer = setTimeout(function () { themeMenu.classList.add('closed'); }, 480);
 }
 
 
-//  Click the hexagon  ->  open.  Click it again  ->  close.
-themeHex.addEventListener('click', function () {
-    if (themeMenu.hidden) {
-        openThemeMenu();
-    } else {
-        closeThemeMenu();
-    }
+//  Click the chip  ->  unfold.   (When it's open, the menu is ON TOP of the chip, so it can't be clicked.)
+themeChip.addEventListener('click', function () {
+    openThemeMenu();
 });
 
 
-//  Click somewhere that's NOT the menu or the hexagon  ->  close.
+//  Click somewhere that's NOT the menu or the chip  ->  fold up.
 document.addEventListener('click', function (event) {
-    if (!themeMenu.hidden && !themeMenu.contains(event.target) && !themeHex.contains(event.target)) {
+    if (themeMenuOpen() && !themeMenu.contains(event.target) && !themeChip.contains(event.target)) {
         closeThemeMenu();
     }
 });
 
 
-//  Press Escape  ->  close, and go back to the hexagon.
+//  Press Escape  ->  fold up, and go back to the chip.
 document.addEventListener('keydown', function (event) {
-    if (event.key === 'Escape' && !themeMenu.hidden) {
+    if (event.key === 'Escape' && themeMenuOpen()) {
         closeThemeMenu();
-        themeHex.focus();
+        themeChip.focus();
     }
 });
 
 
-//  Start with the default.
+//  Start with the default.  (Then measure how small "folded" is, now that the menu has its theme list.)
 setTheme(currentTheme);
+measureFold();

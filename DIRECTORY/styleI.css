@@ -62,7 +62,7 @@
     --header-bg:    rgba(218, 221, 227, 0.94);      /*  the header row  */
     --corner-bg:    rgba(198, 203, 211, 0.96);      /*  the top-left "0" box  */
 
-    --theme-color:  #2a2e35;                        /*  the theme's own color  (the hexagon + its name)  */
+    --theme-color:  #2a2e35;                        /*  the theme's own color  (the theme chip + its name)  */
     --theme-glow:   rgba(165, 175, 190, 0.95);      /*  the glow around it  */
 
     --square-light: rgba(255, 255, 255, 0.5);       /*  the theme menu's chessboard:  the light squares  (frosted, glowing)  */
@@ -127,15 +127,13 @@ h1 {
 
     ----------------------------------------------------------  */
 
-#csvFileInput,
 #searchInput {
     display: block;
     margin: 0 auto 15px;
 }
 
 
-/*  The light squares  (where you type, and the file name)  */
-#csvFileInput,
+/*  The light squares  (where you type)  */
 #searchInput,
 #jumpInput {
     box-sizing: border-box;
@@ -152,8 +150,7 @@ h1 {
 
 /*  Clicked into it  (or Tabbed to it)  ->  it GLOWS, like a cell you hover in the sheet  */
 #searchInput:focus,
-#jumpInput:focus,
-#csvFileInput:focus-visible {
+#jumpInput:focus {
     outline: none;
     box-shadow:
         inset 0 0 0 1px rgba(255, 255, 255, 0.95),
@@ -167,35 +164,449 @@ h1 {
 }
 
 
-/*  "Choose File"  =  ONE bar, two squares:   [▓ Choose File] [░ the file's name]
-    The input itself is the light square.  Its button is the accent square.  */
-#csvFileInput {
+/*  ---- THE FILE BAR:   [▓ Choose File] [░ the aimbot window] ----
+
+    ONE bar, two squares.  The accent square opens a file.
+    The light square is the SNAP MENU's window  ("the aimbot"):  it locks onto
+    a search match, and snaps the sheet right to it.
+
+         ┌─────────────┬────────────────────────────────────┐
+         │             │ ⌖  3 / 128          Row 42 · City   │
+         │ Choose File │ ◀ ┌────────┬────────┬────────┐  ▶   │
+         │             │   │Denver  │ CO     │ 980    │      │   <-  the "scope":  the 9 cells
+         │             │   │Ana     │▓North ▓│ IL     │      │       around the match
+         │             │   │Bo      │ Austin │ TX     │      │
+         └─────────────┴───└────────┴────────┴────────┘──────┘
+                          Reading from... sales.csv
+*/
+/*  The bar  +  the "whole row" panel that drops down under it.
+    (The panel can't live INSIDE the bar:  the bar cuts off anything that sticks out of it.)  */
+#fileArea {
+    position: relative;             /*  the panel hangs from here  */
+    width: fit-content;
     max-width: 100%;
-    padding: 0 14px 0 0;
-    line-height: 34px;              /*  34  +  the 2px edge  =  36 tall,  like every control  */
-    border-radius: 12px;
-    overflow: hidden;               /*  keep the button's square corners inside the round ones  */
-    cursor: pointer;
+    margin: 0 auto 6px;
 }
 
-/*  "::file-selector-button"  =  the "Choose File" button INSIDE the file input  */
-#csvFileInput::file-selector-button {
-    margin: 0 12px 0 0;
-    padding: 0 16px;
-    height: 34px;
+#fileBar {
+    display: flex;
+    max-width: 100%;
+    border: 1px solid var(--glass-edge);
+    border-radius: 12px;
+    overflow: hidden;               /*  keep the squares' corners inside the round ones  */
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+}
+
+/*  The real file picker is still here  (the brain listens to it),  just out of sight.
+    The "Choose File" button opens it.  */
+#csvFileInput {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/*  The accent square:  as tall as the whole bar  */
+#chooseBtn {
+    margin: 0;
+    padding: 0 18px;
     border: none;
     border-right: 1px solid rgba(255, 255, 255, 0.6);  /*  the white line between the 2 squares  */
-    background: var(--control-accent);
+    border-radius: 0;
     box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.55);
-    font: inherit;
-    font-weight: 600;
-    color: #333;
-    cursor: pointer;
-    transition: filter 0.15s;
 }
 
-#csvFileInput:hover::file-selector-button {
-    filter: brightness(1.06);
+/*  The light square:  the aimbot window  */
+#aimbot {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+    padding: 8px 10px;
+    font-family: "Segoe UI", system-ui, Arial, sans-serif;
+    font-size: 13px;
+    color: var(--text);
+    background: var(--square-light);
+    box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.8);   /*  glowing white from inside  */
+}
+
+/*  The top line:   ⌖  3 / 128  ·  hit 1 of 2              Row 42 · City  */
+.aim-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+#aimCount {
+    font-weight: 600;
+}
+
+#aimWhere {
+    margin-left: auto;              /*  pushed all the way right  */
+    color: var(--text-soft);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/*  "Details ▾"  (the match's full text + its whole row),  at the right end of the top line  */
+#aimRowBtn {
+    margin: 0;
+    padding: 0 10px;
+    line-height: 22px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 8px;
+}
+
+#aimRowBtn:disabled {
+    opacity: 0.4;
+    filter: none;
+    cursor: default;
+}
+
+/*  The match is CUT OFF in the scope  ("Customer cal...")  ->  the button says so:
+    it turns into a dark square,  the SAME as the target cell  (so your eye links the two),
+    and pulses twice,  like a cell does when you snap to it.
+    Open?  It stays a dark square,  like the sheet tab you're on.  */
+#aimRowBtn.more,
+#aimRowBtn[aria-expanded="true"] {
+    color: #fff;
+    background: var(--square-dark);
+    text-shadow: 0 0 8px var(--theme-glow);
+    box-shadow: inset 0 0 10px color-mix(in srgb, var(--theme-glow) 35%, transparent);
+}
+
+#aimRowBtn.more {
+    animation: tell-more 1.1s ease-out;
+}
+
+#aimRowBtn[aria-expanded="true"] {
+    animation: none;                /*  already open:  nothing to tell  */
+}
+
+@keyframes tell-more {
+    0%, 50% { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.95), 0 0 14px 3px rgba(255, 255, 255, 0.95); }
+    25%, 75% { box-shadow: inset 0 0 10px color-mix(in srgb, var(--theme-glow) 35%, transparent); }
+}
+
+/*  The middle:   [◀]  the scope  [▶]  */
+.aim-body {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) 28px;
+    align-items: center;
+    gap: 6px;
+}
+
+#aimPrev,
+#aimNext {
+    margin: 0;
+    padding: 0;
+    line-height: 26px;
+    border-radius: 8px;
+}
+
+#aimPrev:disabled,
+#aimNext:disabled {
+    opacity: 0.4;
+    filter: none;
+    cursor: default;
+}
+
+/*  The scope:  a tiny piece of the sheet,  3 rows × 3 columns,  around the target.  */
+#aimScope {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 92px));
+    border: 1px solid var(--glass-edge);
+    border-radius: 8px;
+    overflow: hidden;
+    background: linear-gradient(135deg, var(--glass-top), var(--glass-bottom));
+    cursor: pointer;                /*  click it  ->  snap to the target  */
+}
+
+.scope-cell {
+    padding: 0 6px;
+    font-size: 12px;
+    line-height: 22px;
+    white-space: pre;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-right: 1px solid rgba(255, 255, 255, 0.5);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+}
+
+.scope-cell:nth-child(3n) { border-right: none; }           /*  the last column:  no line on the right  */
+.scope-cell:nth-last-child(-n+3) { border-bottom: none; }   /*  the last row:  no line underneath  */
+
+.scope-header { font-weight: 600; background: var(--header-bg); }      /*  the column names  (when the target is in row 1)  */
+.scope-edge   { background: rgba(0, 0, 0, 0.04); }                     /*  off the edge of the sheet:  nothing there  */
+
+/*  The TARGET:  the middle cell.  A dark square, like the sheet tab you're on.  */
+.scope-target {
+    color: #fff;
+    text-shadow: 0 0 8px var(--theme-glow);
+    background: var(--square-dark);
+    box-shadow: inset 0 0 10px color-mix(in srgb, var(--theme-glow) 35%, transparent);
+}
+
+/*  The target is CUT OFF?  A little  ▾  in its corner:  "there's more,  see Details ▾".  */
+.scope-target.cut {
+    position: relative;
+    padding-right: 16px;            /*  room for the  ▾  */
+}
+
+.scope-target.cut::after {
+    content: "▾";
+    position: absolute;
+    right: 5px;
+    top: 0;
+    font-size: 11px;
+}
+
+/*  Nothing to show yet:  one line of words, all the way across.  */
+.scope-hint {
+    grid-column: 1 / -1;
+    padding: 0 8px;
+    font-size: 12px;
+    line-height: 66px;              /*  as tall as the 3 rows it stands in for  */
+    text-align: center;
+    color: var(--text-soft);
+    cursor: default;
+}
+
+/*  "Ready"  (no search yet):  the word glows softly, in and out, slowly.
+    Only the word, not the whole window:  calmer on the eyes,  and less for the computer to redraw.
+    (It's an "opacity" change:  the cheapest kind of animation there is.)  */
+.scope-hint.ready {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--text);
+    text-shadow: 0 0 10px var(--theme-glow);
+    animation: ready-glow 2.4s ease-in-out infinite alternate;
+}
+
+@keyframes ready-glow {
+    from { opacity: 0.45; }
+    to   { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .scope-hint.ready { animation: none; }
+}
+
+
+/*  ---- THE DETAILS  ("Details ▾") ----
+
+    Drops down right under the bar.
+      1.  The FOCUS card:  the match's full text,  bigger,  dark words on a light square
+          (the easiest way round to read a lot of words).  Long?  It scrolls on its own.
+      2.  The whole row:  every column's name and value.  The target is a dark square,
+          like in the scope,  with its whole value  (long ones wrap onto more lines).
+
+         ┌────────────────────────────────────────────┐
+         │ Row 151  ·  40 columns                   × │   <-  dark
+         ├────────────────────────────────────────────┤
+         │ NOTES  ·  214 letters                      │   <-  the focus card  (light)
+         │ Customer called twice about the late       │
+         │ delivery. Promised a credit ...            │
+         ├────────────────────────────────────────────┤
+         │ The whole row                              │
+         ├────────────┬───────────────────────────────┤
+         │ H0         │ v150.0                        │
+         │ notes      │▓Customer called twice about ▓ │
+         │            │▓the late delivery. Promised ▓ │
+         └────────────┴───────────────────────────────┘
+*/
+#aimRow {
+    position: absolute;
+    top: calc(100% + 6px);          /*  just under the bar  */
+    left: 0;
+    right: 0;
+    z-index: 9;                     /*  over the search bar and the sheet  */
+    display: flex;
+    flex-direction: column;
+    max-height: 440px;
+    overflow: hidden;
+    font-family: "Segoe UI", system-ui, Arial, sans-serif;
+    font-size: 13px;
+
+    /*  The same glass as the CSV window  */
+    background: linear-gradient(135deg, var(--glass-top), var(--glass-bottom));
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--glass-edge);
+    border-radius: 12px;
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    animation: row-drop 0.22s ease-out;
+}
+
+@keyframes row-drop {
+    from { opacity: 0; transform: translateY(-6px); }
+}
+
+/*  Its top line:   Row 151  ·  40 columns                ×   (a dark square, like the theme menu's title)  */
+.row-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 6px 0 12px;
+    line-height: 28px;
+    font-weight: 600;
+    color: #fff;
+    text-shadow: 0 0 8px var(--theme-glow);
+    background: var(--square-dark);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+}
+
+#aimRowTitle {
+    flex-grow: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#aimRowClose {
+    margin: 0;
+    padding: 0 8px;
+    line-height: 20px;
+    border-radius: 6px;
+}
+
+/*  1.  THE FOCUS CARD:  a light square,  for reading.  */
+#aimFocus {
+    flex-shrink: 0;                 /*  never squeezed:  the row list below gives up room first  */
+    display: flex;
+    flex-direction: column;
+    max-height: 200px;
+    background: var(--square-light);
+    box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.8);   /*  glowing white from inside  */
+    border-bottom: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+/*  "NOTES  ·  214 letters"  */
+#aimFocusName {
+    padding: 8px 14px 2px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-soft);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/*  The full text:  bigger,  roomy lines,  real line breaks kept.  Long?  It scrolls.  */
+#aimFocusText {
+    padding: 2px 14px 10px;
+    font-size: 15px;
+    line-height: 24px;
+    color: var(--text);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+
+/*  "The whole row"  */
+.row-sub {
+    flex-shrink: 0;
+    margin: 0;
+    padding: 0 12px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    line-height: 22px;
+    color: var(--text-soft);
+    background: var(--header-bg);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+}
+
+/*  2.  The list:   [column name]  [its full value],  one line each  (or more, when it wraps).  It scrolls.  */
+#aimRowList {
+    display: grid;
+    min-height: 90px;               /*  always room for a few rows  */
+    grid-template-columns: minmax(80px, max-content) minmax(0, 1fr);
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+
+.row-name,
+.row-value {
+    padding: 4px 10px;
+    line-height: 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+}
+
+.row-name {
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+    color: #333;
+    background: var(--line-num-bg);                     /*  like the sheet's row-number column  */
+    border-right: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+.row-value {
+    white-space: pre-wrap;                              /*  keep real line breaks,  and wrap long words  */
+    overflow-wrap: anywhere;
+}
+
+/*  The target:  a dark square,  with its whole value  (it wraps,  like every other value here)  */
+.row-value.row-target {
+    color: #fff;
+    text-shadow: 0 0 8px var(--theme-glow);
+    background: var(--square-dark);
+}
+
+/*  A very wide row:  "showing columns 401–600 of 10,000"  */
+.row-note {
+    grid-column: 1 / -1;
+    padding: 4px 10px;
+    font-size: 12px;
+    color: var(--text-soft);
+    text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #aimRow,
+    #aimRowBtn.more { animation: none; }
+}
+
+
+/*  ---- "Reading from...  sales.csv"  (under the bar) ----
+
+    4 beats, forever:     (none)    .    ..    ...    (none)    .    ..    ...
+    All 3 dots are ALWAYS there  (so the words never jiggle).  Only how see-through they are changes,
+    in jumps  ("steps"),  twice a second.  No brain needed:  just the clothes.  */
+#readingFrom {
+    margin: 0 0 15px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-soft);
+}
+
+#readingName {
+    font-weight: 600;
+    color: var(--text);
+}
+
+.dots span:nth-child(1) { animation: dot-one   2s steps(1, end) infinite; }
+.dots span:nth-child(2) { animation: dot-two   2s steps(1, end) infinite; }
+.dots span:nth-child(3) { animation: dot-three 2s steps(1, end) infinite; }
+
+@keyframes dot-one   { 0% { opacity: 0; } 25% { opacity: 1; } 100% { opacity: 1; } }      /*  shows from the 2nd beat  */
+@keyframes dot-two   { 0% { opacity: 0; } 50% { opacity: 1; } 100% { opacity: 1; } }      /*  shows from the 3rd beat  */
+@keyframes dot-three { 0% { opacity: 0; } 75% { opacity: 1; } 100% { opacity: 1; } }      /*  shows on the 4th beat    */
+
+/*  Turned off motion?  The dots just sit there:  "..."  */
+@media (prefers-reduced-motion: reduce) {
+    .dots span { animation: none !important; }
 }
 
 
@@ -560,6 +971,30 @@ h1 {
 }
 
 
+/*  LOCKED ON:  the aimbot snapped to this cell.
+    It pulses with the glow a cell gets when you hover it,  twice,  then settles.  */
+.cell.locked {
+    position: relative;
+    z-index: 1;                     /*  on top, so the glow isn't hidden under the cells next to it  */
+    animation: lock-on 1.1s ease-out;
+}
+
+@keyframes lock-on {
+    0%, 50% {
+        background: rgba(255, 255, 255, 0.7);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.95), 0 0 16px 3px rgba(255, 255, 255, 0.95);
+    }
+    25%, 75% {
+        background: rgba(255, 255, 255, 0.35);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6), 0 0 6px 1px rgba(255, 255, 255, 0.5);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .cell.locked { animation: none; box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.95); }   /*  just a still outline  */
+}
+
+
 /*  An Excel FORMULA cell:  a tiny glowing green  ƒ  in its top-left corner.
     (Top-left, like Excel's own little corner marks.  Small enough to sit above the words.)
     Hover the cell to see the formula itself.  */
@@ -724,7 +1159,7 @@ mark {
     ----------------------------------------------------------  */
 
 /*  Every button is an ACCENT square:  the table's grey, as glowing glass.
-    (The hexagon and the theme menu's rows are buttons too.  They undo this with their own rules.)  */
+    (The theme chip and the theme menu's rows are buttons too.  They undo this with their own rules.)  */
 button {
     padding: 0 16px;
     margin: 4px;
@@ -788,100 +1223,58 @@ button:active {
 
 /*  ==========================================================
 
-        THE THEME HEXAGON   (top-left corner)
+        THE THEME CHIP   (top-left corner)
 
-        A hexagon is a box with its corners cut off.
-        "clip-path" is the scissors:  it cuts the box
-        along the 6 points below.
+        A small dark glass rectangle,  in the theme's own color,
+        with the thin shiny glass edge.  Click it  ->  it UNFOLDS
+        into the theme menu  (the menu grows right out of it).
 
-                 (50% 0)
-            ┌───/───\───┐
-            │  /       \│    (100% 25%)
-            │ |         |
-            │ |         |
-            │  \       /│    (100% 75%)
-            └───\───/───┘
-                 (50% 100%)
-
-        The scissors also cut off shadows  (and glows!).
-        So the GLOW + SHADOW go on the outside piece  (the button),
-        and the scissors go on the inside pieces.
+             ┌──────┐                ┌────┬──────────────────┐
+             │▓▓▓▓▓▓│     ->         │ ░░ │▓▓ Theme ▓▓▓▓▓▓▓▓▓│
+             └──────┘                ├────┼──────────────────┤
+                                     │▓▬▓│░░ Neo-Neutral ░✓░│
+                                     └────┴──────────────────┘
 
     ==========================================================  */
 
-#themeHex {
+#themeChip {
     position: fixed;            /*  glued to the screen, even when you scroll  */
     top: 24px;                  /*  a little spaced down  */
     left: 28px;                 /*  a little spaced over  */
     z-index: 10;                /*  on top of everything  */
 
-    width: 50px;
-    height: 58px;               /*  a hexagon is a bit taller than it is wide  */
+    width: 46px;
+    height: 22px;
     padding: 0;
     margin: 0;
-    border: none;
-    background: none;
-    box-shadow: none;           /*  no square glow from "ALL THE BUTTONS"  (the hexagon has its own, below)  */
+    border: 1px solid var(--glass-edge);    /*  the same thin shiny edge as the CSV window  */
+    border-radius: 6px;
 
-    /*  "drop-shadow" follows the hexagon shape, not the square box.
-        Stack 3 of them:  a white rim glow,  the theme's glow,  then a floating shadow.  */
-    filter:
-        drop-shadow(0 0 2px rgba(255, 255, 255, 0.9))
-        drop-shadow(0 0 8px var(--theme-glow))
-        drop-shadow(0 6px 12px rgba(0, 0, 0, 0.25));
-    transition: transform 0.35s ease, filter 0.35s ease;
-}
-
-#themeHex:hover {
-    background: none;           /*  undo the grey hover from "ALL THE BUTTONS"  */
-    transform: scale(1.07);
-    filter:                     /*  glow a little brighter  */
-        drop-shadow(0 0 3px #fff)
-        drop-shadow(0 0 14px var(--theme-glow))
-        drop-shadow(0 6px 12px rgba(0, 0, 0, 0.25));
-}
-
-/*  Menu open?  The hexagon turns 1/6 of the way around.
-    (A hexagon turned 60 degrees looks the same, so it just "clicks" into place.)  */
-#themeHex[aria-expanded="true"] {
-    transform: rotate(60deg);
-}
-
-/*  The keyboard ring  (when you Tab to it)  */
-#themeHex:focus-visible {
-    outline: none;
-    filter:
-        drop-shadow(0 0 3px #fff)
-        drop-shadow(0 0 4px #fff)
-        drop-shadow(0 6px 12px rgba(0, 0, 0, 0.25));
-}
-
-
-/*  The 2 layers, outside to inside:
-        .hex         =  the bright outline
-        .hex-inner   =  the solid theme color  */
-
-.hex,
-.hex-inner {
-    display: grid;
-    place-items: center;        /*  whatever's inside sits in the middle  */
-    clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
-}
-
-.hex {
-    width: 100%;
-    height: 100%;
-    background: var(--glass-edge);      /*  the same thin shiny edge as the CSV window  */
-}
-
-/*  The theme color, made of GLASS:  the same shine as the CSV window
-    (a little white in the top-left, fading to clear)  laid over the color.  */
-.hex-inner {
-    width: calc(100% - 4px);    /*  a bit smaller, so 2px of the outline shows around it  */
-    height: calc(100% - 4px);
+    /*  The theme color, made of GLASS:  the same shine as the CSV window
+        (a little white in the top-left, fading to clear)  laid over the color.  */
     background:
         linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0) 60%),
         var(--theme-color);
+    box-shadow:
+        0 0 8px var(--theme-glow),                      /*  the theme's glow  */
+        0 4px 10px rgba(0, 0, 0, 0.25);                 /*  a floating shadow  */
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+#themeChip:hover {
+    filter: none;               /*  undo the "brighter" hover from "ALL THE BUTTONS"  */
+    transform: scale(1.08);
+    box-shadow:                 /*  glow a little brighter  */
+        0 0 14px var(--theme-glow),
+        0 4px 10px rgba(0, 0, 0, 0.25);
+}
+
+/*  The keyboard ring  (when you Tab to it)  */
+#themeChip:focus-visible {
+    outline: none;
+    box-shadow:
+        0 0 0 2px #fff,
+        0 0 10px 2px rgba(255, 255, 255, 0.9);
 }
 
 
@@ -895,19 +1288,26 @@ button:active {
              ┌────┬──────────────────┐
              │    │ Theme            │   <-  the header row  (with the "0" corner box)
              ├────┼──────────────────┤
-             │ ⬢  │ Neo-Neutral    ✓ │   <-  a row  (the swatch sits in the row-number column)
+             │ ▬  │ Neo-Neutral    ✓ │   <-  a row  (the swatch sits in the row-number column)
              └────┴──────────────────┘
 
         Same glass, same edge, same corners, same shadow, same 30px rows.
-        It doesn't bob.  It pops in.
+        It doesn't bob.  It UNFOLDS out of the chip:
+
+          1.  It starts as the chip:  folded down to the chip's exact size,  under a DARK cover.
+          2.  It grows to full size  (still dark).
+          3.  The cover fades away,  and the chessboard shows through.
+
+        Closing does it backwards:  dark cover,  then fold back down into the chip.
+        (Only "transform" and "opacity" change:  the two cheapest things to animate.)
 
     ----------------------------------------------------------  */
 
 #themeMenu {
     position: fixed;
-    top: 94px;                  /*  just under the hexagon  */
-    left: 20px;
-    z-index: 10;
+    top: 24px;                  /*  right where the chip is,  so it grows out of it  */
+    left: 28px;
+    z-index: 11;                /*  on top of the chip  */
     min-width: 210px;
     overflow: hidden;           /*  keep the header row's corners inside the round corners  */
 
@@ -925,12 +1325,43 @@ button:active {
         0 12px 40px rgba(0, 0, 0, 0.18),                /*  soft shadow below  =  floating  */
         inset 0 1px 0 rgba(255, 255, 255, 0.9);         /*  shiny line on the top edge  */
 
-    transform-origin: 30px 0;   /*  grow out from under the hexagon  */
-    animation: menu-pop 0.18s ease-out;
+    transform-origin: top left; /*  grow out from the chip's corner  */
+    will-change: transform;     /*  "I'm going to grow and shrink":  so it stays smooth  */
+    transition: transform 0.42s cubic-bezier(0.16, 1, 0.3, 1);     /*  OPENING:  grow right away,  slowing down softly at the end  */
 }
 
-@keyframes menu-pop {
-    from { opacity: 0; transform: translateY(-6px) scale(0.96); }
+/*  CLOSED:  folded up AND out of sight.  It never really goes away  (display: none),
+    so the browser always knows where it's growing FROM.  (Without that, the second unfold could get stuck.)  */
+#themeMenu.closed {
+    visibility: hidden;         /*  invisible, can't be clicked, and screen readers skip it  */
+}
+
+/*  The dark cover  (the chip's own glass),  over everything in the menu.
+    Opening:  it fades away AFTER the menu has grown  (that's the 0.16s wait).  */
+#themeMenu::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 3;                 /*  over the squares, the swatch, and the words  */
+    border-radius: inherit;
+    background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0) 60%),
+        var(--theme-color);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease 0.26s;
+}
+
+/*  FOLDED:  shrunk to the chip's size  (the brain measures it:  --fold-x, --fold-y),  and dark.
+    Closing:  the cover comes back first,  THEN it folds down  (that's the 0.14s wait).  */
+#themeMenu.folded {
+    transform: scale(var(--fold-x, 0.2), var(--fold-y, 0.35));
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1) 0.14s;
+}
+
+#themeMenu.folded::after {
+    opacity: 1;
+    transition: opacity 0.16s ease;
 }
 
 
@@ -942,9 +1373,9 @@ button:active {
          ┌────┬──────────────────┐
          │ ░░ │▓▓ Theme ▓▓▓▓▓▓▓▓▓│     ░  =  light:  frosted glass, glowing white from inside
          ├────┼──────────────────┤     ▓  =  dark:   the theme color as glass, with a soft rim of its glow
-         │▓⬢▓│░░ Neo-Neutral ░✓░│
+         │▓▬▓│░░ Neo-Neutral ░✓░│
          ├────┼──────────────────┤     Every row flips the one above it,
-         │ ░⬢ │▓▓ Midnight ▓▓▓▓▓▓│     so a new theme just keeps the board going.
+         │ ░▬ │▓▓ Midnight ▓▓▓▓▓▓│     so a new theme just keeps the board going.
          └────┴──────────────────┘
 
     The colors are  --square-light  and  --square-dark,  up in the theme block.  */
@@ -1058,30 +1489,26 @@ button:active {
 }
 
 
-/*  The tiny hexagon next to the name.
+/*  The tiny chip next to the name:  the theme's chip, small.
     (Too tiny for a glow.  It would just look blurry.)
-    Same 2 layers as the big hexagon:  the swatch is the outline,
-    the span inside it is the colored glass.  */
-.theme-swatch,
-.theme-swatch span {
+    2 layers:  the swatch is the shiny edge,  the span inside it is the colored glass.  */
+.theme-swatch {
     display: grid;
     place-items: center;
-    clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
-}
-
-.theme-swatch {
-    width: 16px;
-    height: 18px;
+    width: 18px;
+    height: 10px;
     justify-self: center;       /*  in the middle of the row-number column  */
     position: relative;
     z-index: 1;                 /*  on top of the row-number column  (the ::before above)  */
+    border-radius: 3px;
     background: var(--glass-edge);
 }
 
-/*  The same colored glass as the big hexagon  */
+/*  The same colored glass as the big chip  */
 .theme-swatch span {
     width: calc(100% - 3px);
     height: calc(100% - 3px);
+    border-radius: 2px;
     background:
         linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0) 60%),
         var(--c);
@@ -1104,14 +1531,18 @@ button:active {
 }
 
 .theme-option[aria-checked="true"] .theme-check {
-    visibility: visible;
+    visibility: inherit;        /*  "as visible as the menu":  NOT "visible",  or it would show through the closed menu  */
 }
 
 
-/*  Turned off motion?  No spinning, no popping.  */
+/*  Turned off motion?  No growing, no fading:  the menu just appears and disappears.  */
 @media (prefers-reduced-motion: reduce) {
-    #themeHex  { transition: none; }
-    #themeMenu { animation: none; }
+    #themeChip,
+    #themeMenu,
+    #themeMenu.folded,
+    #themeMenu.closed,
+    #themeMenu::after,
+    #themeMenu.folded::after { transition: none; }
 }
 
 
@@ -1122,7 +1553,7 @@ button:active {
 
         1.  The screen CLOUDS UP:  everything behind it goes blurry.
         2.  A pie circle FILLS UP, all the way around,
-            into a solid color  (the same color as the hexagon).
+            into a solid color  (the same color as the theme chip).
         3.  The cloud clears.
 
         The pie, in a picture:
@@ -1136,7 +1567,7 @@ button:active {
 #loader {
     position: fixed;
     inset: 0;                       /*  fill the whole screen  */
-    z-index: 20;                    /*  above everything  (even the hexagon)  */
+    z-index: 20;                    /*  above everything  (even the theme chip)  */
 
     display: grid;
     place-content: center;          /*  the pie + the words sit in the middle  */
@@ -1180,7 +1611,7 @@ button:active {
     );
 
     box-shadow:
-        0 0 0 3px rgba(255, 255, 255, 0.9),         /*  a white outline  (like the hexagon)  */
+        0 0 0 3px rgba(255, 255, 255, 0.9),         /*  a white outline  (like the theme chip)  */
         0 0 18px var(--theme-glow),                 /*  a soft glow around it  */
         0 8px 20px rgba(0, 0, 0, 0.2);              /*  a floating shadow  */
 

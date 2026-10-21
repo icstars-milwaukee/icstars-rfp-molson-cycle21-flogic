@@ -72,32 +72,28 @@
 
 
     <!--
-        0.  THE THEME HEXAGON   (top-left corner)
+        0.  THE THEME CHIP   (top-left corner)
 
-            Click it  ->  the theme menu floats down.
-            It's filled with the color of the theme
-            you're using right now, with a glowing outline.
+            A small dark glass rectangle,  in the color of the theme
+            you're using right now.  Click it  ->  it UNFOLDS into the theme menu.
 
             "aria-..."  =  notes for screen readers,
                            so they know it opens a menu.
     -->
 
-    <button id="themeHex" title="Theme: Neo-Neutral" aria-haspopup="true" aria-expanded="false" aria-controls="themeMenu">
-        <span class="hex">
-            <span class="hex-inner"></span>
-        </span>
-    </button>
+    <button id="themeChip" title="Theme: Neo-Neutral" aria-haspopup="true" aria-expanded="false" aria-controls="themeMenu"></button>
 
 
     <!--
-        The floating theme menu.
-        Glass, like the CSV window, but brighter and glowier,
-        so you can tell them apart.
+        The theme menu:  a tiny glass chessboard.
+        It sits right on top of the chip, folded down to the chip's size,
+        and grows out of it.
+        class="folded closed"  =  it starts folded up, and out of sight.
 
         The brain fills in the list of themes.
     -->
 
-    <div id="themeMenu" role="menu" aria-label="Themes" hidden>
+    <div id="themeMenu" class="folded closed" role="menu" aria-label="Themes">
         <p class="menu-title">Theme</p>
         <div id="themeList"></div>
     </div>
@@ -111,17 +107,66 @@
 
 
     <!--
-        2.  The "Choose File" button
+        2.  The FILE BAR:   [ Choose File ] [ the aimbot window ]
 
-            type="file"          ->  makes it a "pick a file" button
+            The "Choose File" button opens the real file picker  (the input),
+            which sits out of sight.
+
+            type="file"          ->  makes it a "pick a file" picker
             accept=".csv,.xlsx"  ->  only shows CSV and Excel files when you pick
 
-        The badge under it says "XLSX SPREADSHEET" when an Excel file is open.
-        Under THAT:  the sheet tabs, when the Excel file has more than one sheet.
+            The AIMBOT window  (the snap menu):  search for something,
+            and it locks onto a match.  ◀ ▶  snap the sheet right to it.
+            The "scope" in the middle shows the 9 cells around the match.
+            (The brain fills it all in.)
+
+        Under the bar:   "Reading from...  sales.csv"   (hidden until a file is open)
+
+        Then the badge  ("XLSX SPREADSHEET",  for an Excel file),
+        and the sheet tabs  (when the Excel file has more than one sheet).
         (Both hidden for a CSV.  The brain fills them in.)
     -->
 
-    <input type="file" id="csvFileInput" accept=".csv,.xlsx">
+    <div id="fileArea">
+
+        <div id="fileBar">
+            <button id="chooseBtn" type="button">Choose File</button>
+            <input type="file" id="csvFileInput" accept=".csv,.xlsx" tabindex="-1" aria-hidden="true">
+
+            <div id="aimbot" role="group" aria-label="Snap to search matches">
+                <div class="aim-head">
+                    <span id="aimCount">No search</span>
+                    <span id="aimWhere"></span>
+                    <button id="aimRowBtn" type="button" aria-expanded="false" aria-controls="aimRow" title="Read the match's full text, and its whole row" disabled>Details ▾</button>
+                </div>
+                <div class="aim-body">
+                    <button id="aimPrev" type="button" aria-label="Previous match" disabled>◀</button>
+                    <div id="aimScope" title="Snap to this match"></div>
+                    <button id="aimNext" type="button" aria-label="Next match" disabled>▶</button>
+                </div>
+            </div>
+        </div>
+
+        <!--  The DETAILS, when you press "Details ▾".  It drops down right under the bar:
+                1.  The match's FULL text,  big and easy to read  (the "focus" card).
+                2.  Its whole row:  every column's name and value.
+              (The brain fills it in.)  -->
+        <div id="aimRow" role="region" aria-label="The match's details" hidden>
+            <div class="row-head">
+                <span id="aimRowTitle"></span>
+                <button id="aimRowClose" type="button" aria-label="Close the details">×</button>
+            </div>
+            <div id="aimFocus">
+                <div id="aimFocusName"></div>
+                <div id="aimFocusText"></div>
+            </div>
+            <p class="row-sub">The whole row</p>
+            <div id="aimRowList"></div>
+        </div>
+
+    </div>
+
+    <p id="readingFrom" hidden>Reading from<span class="dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span> <span id="readingName"></span></p>
 
     <div id="fileBadge" hidden></div>
     <div id="sheetTabs" role="tablist" aria-label="Sheets" hidden></div>
