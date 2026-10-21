@@ -62,8 +62,13 @@
     --header-bg:    rgba(218, 221, 227, 0.94);      /*  the header row  */
     --corner-bg:    rgba(198, 203, 211, 0.96);      /*  the top-left "0" box  */
 
-    --theme-color:  #4a5260;                        /*  the theme's own color  (the hexagon + its glowing name)  */
+    --theme-color:  #2a2e35;                        /*  the theme's own color  (the hexagon + its name)  */
     --theme-glow:   rgba(165, 175, 190, 0.95);      /*  the glow around it  */
+
+    --square-light: rgba(255, 255, 255, 0.5);       /*  the theme menu's chessboard:  the light squares  (frosted, glowing)  */
+    --square-dark:  rgba(42, 46, 53, 0.82);         /*  ...and the dark squares  (the theme color, as glass)  */
+
+    --control-accent: var(--corner-bg);             /*  the buttons' accent squares  =  the table's own accent  (the "0" corner box)  */
 }
 
 
@@ -106,6 +111,17 @@ h1 {
         "display: block"  +  "margin: auto"
         =  put it on its own line, in the middle.
 
+        ALL the controls are made of the theme menu's parts:
+        glowing glass SQUARES, with the shiny glass edge.
+        But instead of the theme menu's near-black,
+        the accent squares use the TABLE's accent  (--control-accent).
+
+            ░  =  a light square   (frosted, glowing white from inside)  ->  places you TYPE
+            ▓  =  an accent square (the table's grey)                    ->  places you CLICK
+
+        Pieces that belong together are joined into one bar,
+        light and accent taking turns.  Like the chessboard.
+
     ----------------------------------------------------------  */
 
 #csvFileInput,
@@ -114,14 +130,86 @@ h1 {
     margin: 0 auto 15px;
 }
 
+
+/*  The light squares  (where you type, and the file name)  */
+#csvFileInput,
+#searchInput,
+#jumpInput {
+    box-sizing: border-box;
+    font-family: "Segoe UI", system-ui, Arial, sans-serif;
+    font-size: 14px;
+    color: var(--text);
+    background: var(--square-light);
+    border: 1px solid var(--glass-edge);
+    box-shadow:
+        inset 0 0 12px rgba(255, 255, 255, 0.8),        /*  glowing white from inside  */
+        0 4px 14px rgba(0, 0, 0, 0.1);                  /*  a soft shadow  =  floating, a little  */
+    transition: box-shadow 0.15s, filter 0.15s;
+}
+
+/*  Clicked into it  (or Tabbed to it)  ->  it GLOWS, like a cell you hover in the sheet  */
+#searchInput:focus,
+#jumpInput:focus,
+#csvFileInput:focus-visible {
+    outline: none;
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.95),
+        0 0 14px 2px rgba(255, 255, 255, 0.9);
+}
+
+#searchInput::placeholder,
+#jumpInput::placeholder {
+    color: var(--text-soft);
+    opacity: 0.8;
+}
+
+
+/*  "Choose File"  =  ONE bar, two squares:   [▓ Choose File] [░ the file's name]
+    The input itself is the light square.  Its button is the accent square.  */
+#csvFileInput {
+    max-width: 100%;
+    padding: 0 14px 0 0;
+    line-height: 34px;              /*  34  +  the 2px edge  =  36 tall,  like every control  */
+    border-radius: 12px;
+    overflow: hidden;               /*  keep the button's square corners inside the round ones  */
+    cursor: pointer;
+}
+
+/*  "::file-selector-button"  =  the "Choose File" button INSIDE the file input  */
+#csvFileInput::file-selector-button {
+    margin: 0 12px 0 0;
+    padding: 0 16px;
+    height: 34px;
+    border: none;
+    border-right: 1px solid rgba(255, 255, 255, 0.6);  /*  the white line between the 2 squares  */
+    background: var(--control-accent);
+    box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.55);
+    font: inherit;
+    font-weight: 600;
+    color: #333;
+    cursor: pointer;
+    transition: filter 0.15s;
+}
+
+#csvFileInput:hover::file-selector-button {
+    filter: brightness(1.06);
+}
+
+
+/*  The search bar  =  one long light square  */
 #searchInput {
     width: 100%;
     max-width: 500px;               /*  wide, but not TOO wide  */
-    padding: 10px 12px;
-    font-size: 16px;
-    border: 1px solid #bbb;
-    border-radius: 6px;             /*  round corners  */
-    box-sizing: border-box;
+    padding: 0 14px;
+    line-height: 34px;              /*  34  +  the 2px edge  =  36 tall,  like every control  */
+    font-size: 15px;
+    border-radius: 12px;            /*  round corners  */
+}
+
+/*  Turned off  (no file yet)?  Fade it, so it LOOKS off too.  */
+#searchInput:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 
 
@@ -452,17 +540,41 @@ mark {
 
     ----------------------------------------------------------  */
 
+/*  "flex" lines them up side by side, with NO gaps,
+    so  [Row #] [Go to row]  join into one bar:
+
+         ┌───────┬───────────┐        ┌───────────────────┐
+         │░Row # │▓ Go to row│        │▓ Expand (show all)│
+         └───────┴───────────┘        └───────────────────┘
+                                 ^^^^
+                    extra space:  Expand changes the WHOLE page,
+                    so it sits apart  (a natural "careful" signal)  */
 #controls {
-    text-align: center;
+    display: flex;
+    justify-content: center;        /*  in the middle  */
+    align-items: center;
+    flex-wrap: wrap;                /*  narrow screen?  wrap onto the next line  */
     margin: 0 0 15px;
 }
 
+/*  The LEFT half of the bar:  round corners on the left only  */
 #jumpInput {
     width: 90px;
-    padding: 8px;
-    font-size: 14px;
-    border: 1px solid #bbb;
-    border-radius: 6px;
+    padding: 0 12px;
+    line-height: 34px;
+    border-radius: 12px 0 0 12px;
+    border-right: 1px solid rgba(255, 255, 255, 0.6);  /*  the white line between the 2 squares  */
+}
+
+/*  The RIGHT half:  round corners on the right only, and no edge on the left  (the line above is the edge)  */
+#jumpBtn {
+    margin: 0;
+    border-left: none;
+    border-radius: 0 12px 12px 0;
+}
+
+#expandBtn {
+    margin: 0 0 0 28px;             /*  the extra space  */
 }
 
 
@@ -473,18 +585,45 @@ mark {
 
     ----------------------------------------------------------  */
 
+/*  Every button is an ACCENT square:  the table's grey, as glowing glass.
+    (The hexagon and the theme menu's rows are buttons too.  They undo this with their own rules.)  */
 button {
-    padding: 8px 14px;
+    padding: 0 16px;
     margin: 4px;
+    line-height: 34px;          /*  34  +  the 2px edge  =  36 tall,  like every control  */
+    font-family: "Segoe UI", system-ui, Arial, sans-serif;
     font-size: 14px;
-    border: 1px solid #888;
-    border-radius: 6px;
-    background: #fff;
+    font-weight: 600;
+    color: #333;
+    background: var(--control-accent);
+    border: 1px solid var(--glass-edge);
+    border-radius: 12px;
+    box-shadow:
+        inset 0 0 12px rgba(255, 255, 255, 0.55),       /*  a soft glow inside  */
+        0 4px 14px rgba(0, 0, 0, 0.1);                  /*  a soft shadow  =  floating, a little  */
     cursor: pointer;            /*  the mouse turns into a pointing hand  */
+    transition: box-shadow 0.15s, filter 0.15s;
 }
 
+/*  Mouse on it  ->  a little brighter, and it GLOWS  (like a cell you hover in the sheet)  */
 button:hover {
-    background: #eaeaea;        /*  a little darker when your mouse is on it  */
+    filter: brightness(1.06);
+    box-shadow:
+        inset 0 0 12px rgba(255, 255, 255, 0.7),
+        0 0 14px 2px rgba(255, 255, 255, 0.7);
+}
+
+/*  Tabbed to it  ->  the same glow, a bit stronger  */
+button:focus-visible {
+    outline: none;
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.95),
+        0 0 14px 2px rgba(255, 255, 255, 0.9);
+}
+
+/*  Pressed  ->  it sinks a tiny bit  */
+button:active {
+    filter: brightness(0.97);
 }
 
 
@@ -502,7 +641,9 @@ button:hover {
     position: fixed;
     right: 20px;
     bottom: 20px;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    box-shadow:                 /*  a bigger shadow than the others:  it floats over the sheet  */
+        inset 0 0 12px rgba(255, 255, 255, 0.55),
+        0 8px 24px rgba(0, 0, 0, 0.2);
 }
 
 
@@ -542,6 +683,7 @@ button:hover {
     margin: 0;
     border: none;
     background: none;
+    box-shadow: none;           /*  no square glow from "ALL THE BUTTONS"  (the hexagon has its own, below)  */
 
     /*  "drop-shadow" follows the hexagon shape, not the square box.
         Stack 3 of them:  a white rim glow,  the theme's glow,  then a floating shadow.  */
@@ -591,13 +733,17 @@ button:hover {
 .hex {
     width: 100%;
     height: 100%;
-    background: rgba(255, 255, 255, 0.92);
+    background: var(--glass-edge);      /*  the same thin shiny edge as the CSV window  */
 }
 
+/*  The theme color, made of GLASS:  the same shine as the CSV window
+    (a little white in the top-left, fading to clear)  laid over the color.  */
 .hex-inner {
     width: calc(100% - 4px);    /*  a bit smaller, so 2px of the outline shows around it  */
     height: calc(100% - 4px);
-    background: var(--theme-color);     /*  solid  */
+    background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0) 60%),
+        var(--theme-color);
 }
 
 
@@ -606,14 +752,16 @@ button:hover {
 
         THE FLOATING THEME MENU
 
-        Same glass as the CSV window,
-        but turned UP so your eyes find it first:
+        A tiny sheet, made of the SAME parts as the CSV window:
 
-            -  brighter glass
-            -  a soft glowing ring all the way around
-            -  a bigger shadow  =  it looks CLOSER to you
-            -  a glowing line across the top
-            -  it doesn't bob.  It pops in.
+             ┌────┬──────────────────┐
+             │    │ Theme            │   <-  the header row  (with the "0" corner box)
+             ├────┼──────────────────┤
+             │ ⬢  │ Neo-Neutral    ✓ │   <-  a row  (the swatch sits in the row-number column)
+             └────┴──────────────────┘
+
+        Same glass, same edge, same corners, same shadow, same 30px rows.
+        It doesn't bob.  It pops in.
 
     ----------------------------------------------------------  */
 
@@ -623,36 +771,24 @@ button:hover {
     left: 20px;
     z-index: 10;
     min-width: 210px;
-    padding: 10px 8px 8px;
+    overflow: hidden;           /*  keep the header row's corners inside the round corners  */
 
+    /*  The same letters as the CSV window  */
     font-family: "Segoe UI", system-ui, Arial, sans-serif;
+    font-size: 14px;
 
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.24));
-    backdrop-filter: blur(16px) saturate(1.3);
-    border: 1px solid rgba(255, 255, 255, 0.95);
+    /*  The same glass as the CSV window  (see #output)  */
+    background: linear-gradient(135deg, var(--glass-top), var(--glass-bottom));
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--glass-edge);
     border-radius: 18px;
 
     box-shadow:
-        0 0 0 4px rgba(255, 255, 255, 0.25),            /*  the glowing ring  */
-        0 20px 50px rgba(0, 0, 0, 0.3),                 /*  big shadow  =  closer to you  */
-        inset 0 1px 0 #fff,                             /*  shiny top edge  */
-        inset 0 0 20px rgba(255, 255, 255, 0.35);       /*  light glowing inside the glass  */
+        0 12px 40px rgba(0, 0, 0, 0.18),                /*  soft shadow below  =  floating  */
+        inset 0 1px 0 rgba(255, 255, 255, 0.9);         /*  shiny line on the top edge  */
 
     transform-origin: 30px 0;   /*  grow out from under the hexagon  */
     animation: menu-pop 0.18s ease-out;
-}
-
-/*  The glowing line across the top  */
-#themeMenu::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 18px;
-    right: 18px;
-    height: 2px;
-    border-radius: 2px;
-    background: linear-gradient(90deg, transparent, var(--theme-glow), transparent);
-    box-shadow: 0 0 8px var(--theme-glow);
 }
 
 @keyframes menu-pop {
@@ -660,50 +796,134 @@ button:hover {
 }
 
 
-/*  The little "THEME" word on top  */
+/*  ---- THE CHESSBOARD ----
+
+    Every box in the menu is a SQUARE on a glowing glass chessboard.
+    Light and dark take turns, side to side AND top to bottom:
+
+         ┌────┬──────────────────┐
+         │ ░░ │▓▓ Theme ▓▓▓▓▓▓▓▓▓│     ░  =  light:  frosted glass, glowing white from inside
+         ├────┼──────────────────┤     ▓  =  dark:   the theme color as glass, with a soft rim of its glow
+         │▓⬢▓│░░ Neo-Neutral ░✓░│
+         ├────┼──────────────────┤     Every row flips the one above it,
+         │ ░⬢ │▓▓ Midnight ▓▓▓▓▓▓│     so a new theme just keeps the board going.
+         └────┴──────────────────┘
+
+    The colors are  --square-light  and  --square-dark,  up in the theme block.  */
+
+
+/*  The "Theme" word on top  =  the HEADER ROW.   A DARK square  (with the light "0" corner box beside it).  */
 .menu-title {
-    margin: 0 10px 6px;
-    font-size: 11px;
+    display: grid;
+    grid-template-columns: 36px 1fr;
+    column-gap: 8px;
+    margin: 0;
+    line-height: 29px;
+    background: linear-gradient(90deg, transparent 36px, var(--square-dark) 36px);  /*  dark only AFTER the corner box,
+                                                                                         so the corner sits on plain glass  (like every light square)  */
+    box-shadow: inset 0 0 12px color-mix(in srgb, var(--theme-glow) 25%, transparent);  /*  a soft rim of the theme's glow  */
+    border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+    color: #fff;
+    text-shadow: 0 0 8px var(--theme-glow);
     font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--text-soft);
+}
+
+/*  The "0" corner box  =  a LIGHT square  */
+.menu-title::before {
+    content: "";
+    background: var(--square-light);
+    box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.8);        /*  glowing white from inside  */
+    border-right: 1px solid rgba(255, 255, 255, 0.6);
 }
 
 
-/*  One theme in the list  */
+/*  One theme in the list  =  one ROW of the sheet.
+    29px + the 1px white line under it  =  30px.  Just like the CSV window.  */
 #themeMenu .theme-option {
-    display: flex;
+    position: relative;
+    display: grid;
+    grid-template-columns: 36px 1fr auto;      /*  [swatch]  [name]  [✓]  */
     align-items: center;
-    gap: 10px;
+    column-gap: 8px;
     width: 100%;
     margin: 0;
-    padding: 9px 10px;
-    border: 1px solid transparent;
-    border-radius: 10px;
+    padding: 0 12px 0 0;
+    font: inherit;              /*  (FIRST:  "font" also resets line-height, so it has to come before it)  */
+    line-height: 29px;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+    border-radius: 0;
     background: none;
     text-align: left;
-    font: inherit;
-    font-size: 15px;
+    transition: background 0.15s;
 }
 
-#themeMenu .theme-option:hover,
+#themeMenu .theme-option:last-child {
+    border-bottom: none;        /*  the glass edge is the last line  */
+}
+
+/*  The row-number column, behind the swatch  */
+#themeMenu .theme-option::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 36px;
+    border-right: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+/*  1st, 3rd, 5th theme...  (the header was dark-on-the-right, so flip it):
+    swatch  =  DARK square,   name  =  LIGHT square  */
+#themeMenu .theme-option:nth-child(odd) {
+    background: var(--square-light);
+    box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.8);
+}
+
+#themeMenu .theme-option:nth-child(odd)::before {
+    background: var(--square-dark);
+    box-shadow: inset 0 0 12px color-mix(in srgb, var(--theme-glow) 25%, transparent);
+}
+
+/*  2nd, 4th, 6th theme...  (flip again):
+    swatch  =  LIGHT square,   name  =  DARK square  */
+#themeMenu .theme-option:nth-child(even) {
+    background: var(--square-dark);
+    box-shadow: inset 0 0 12px color-mix(in srgb, var(--theme-glow) 25%, transparent);
+}
+
+#themeMenu .theme-option:nth-child(even)::before {
+    background: var(--square-light);
+    box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.8);
+}
+
+/*  On a DARK square, the name turns white and glows in its own theme color
+    (so it's easy to read on the dark glass).  */
+#themeMenu .theme-option:nth-child(even) .theme-name {
+    color: #fff;
+    text-shadow: 0 0 2px #fff, 0 0 10px var(--c-glow);
+}
+
+/*  Mouse on it  ->  both of its squares light up  */
+#themeMenu .theme-option:hover {
+    filter: brightness(1.12);
+}
+
+/*  Got there with the keyboard  ->  it GLOWS, like a cell you hover in the sheet  */
 #themeMenu .theme-option:focus-visible {
     outline: none;
-    background: rgba(255, 255, 255, 0.45);
-    border-color: rgba(255, 255, 255, 0.9);
+    filter: brightness(1.12);
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.95),
+        0 0 14px 2px rgba(255, 255, 255, 0.9);
+    z-index: 1;
 }
 
-/*  The theme you're using right now  */
-#themeMenu .theme-option[aria-checked="true"] {
-    background: rgba(255, 255, 255, 0.35);
-}
 
-
-/*  The tiny hexagon next to the name:  solid color with a white outline.
+/*  The tiny hexagon next to the name.
     (Too tiny for a glow.  It would just look blurry.)
     Same 2 layers as the big hexagon:  the swatch is the outline,
-    the span inside it is the solid color.  */
+    the span inside it is the colored glass.  */
 .theme-swatch,
 .theme-swatch span {
     display: grid;
@@ -714,28 +934,28 @@ button:hover {
 .theme-swatch {
     width: 16px;
     height: 18px;
-    flex-shrink: 0;
-    background: #fff;
+    justify-self: center;       /*  in the middle of the row-number column  */
+    position: relative;
+    z-index: 1;                 /*  on top of the row-number column  (the ::before above)  */
+    background: var(--glass-edge);
 }
 
+/*  The same colored glass as the big hexagon  */
 .theme-swatch span {
     width: calc(100% - 3px);
     height: calc(100% - 3px);
-    background: var(--c);
+    background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0) 60%),
+        var(--c);
 }
 
 
-/*  The GLOWING name, in the theme's own color.
-    The brain hands over the colors as  --c  and  --c-glow.  */
+/*  The name, in the theme's own color.  (The brain hands over the color as  --c.)
+    Plain like the sheet's words, with just a thin white rim so it stays sharp on the glass.  */
 .theme-name {
-    flex-grow: 1;
     font-weight: 600;
-    letter-spacing: 0.02em;
     color: var(--c);
-    text-shadow:
-        0 0 2px #fff,                                   /*  a bright white rim, so the letters stay sharp  */
-        0 0 10px var(--c-glow),                         /*  the colored glow  */
-        0 0 20px var(--c-glow);                         /*  the glow fading out  */
+    text-shadow: 0 0 2px #fff;
 }
 
 

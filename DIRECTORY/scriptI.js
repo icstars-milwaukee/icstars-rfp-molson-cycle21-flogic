@@ -1720,7 +1720,7 @@ function finishLoading() {
 // ----------------------------------------------------------
 
 const THEMES = [
-    { id: 'neo-neutral', name: 'Neo-Neutral', color: '#4a5260', glow: 'rgba(165, 175, 190, 0.95)' },
+    { id: 'neo-neutral', name: 'Neo-Neutral', color: '#2a2e35', glow: 'rgba(165, 175, 190, 0.95)' },
 ];
 
 const themeHex  = document.getElementById('themeHex');      //  the hexagon button
