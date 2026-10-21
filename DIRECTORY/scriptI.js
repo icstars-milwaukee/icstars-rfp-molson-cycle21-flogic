@@ -211,6 +211,7 @@ let gliding     = false;  //  is the glide moving right now?
 
 let loadId         = 0;      //  counts every file you pick.  If you pick a NEW file while an old one
                              //  is still loading, the old one sees the number changed, and quits.
+let fileNote       = '';     //  a note added to the "Rows 1–15" words about how the file was read  (or nothing)
 let buildingSearch = false;  //  is the brain getting the search ready right now?
 let loaderTimer    = null;   //  the "wait a moment before showing the loader" timer
 
@@ -221,6 +222,67 @@ let loaderTimer    = null;   //  the "wait a moment before showing the loader" t
 //    STEP 1 + 2 + 3 + 4:  PICK A FILE  ->  READ IT  ->  CUT IT UP
 //
 // ----------------------------------------------------------
+
+//  WHICH "RULEBOOK" IS THIS FILE WRITTEN IN?   (its "encoding")
+//
+//  A file is just numbers  (bytes).  The rulebook says which number is which letter.
+//  Plain letters, numbers and commas are the SAME in every rulebook.  Only special ones differ:
+//
+//      letter    UTF-8  (modern)    Windows-1252  (older Excel "CSV")
+//        A            41                 41
+//        é          C3 A9                E9
+//        €         E2 82 AC              80
+//
+//  We read as UTF-8, unless the bytes BREAK UTF-8's rules.  Then it must be the older Excel rulebook.
+//  (Read old-Excel bytes as UTF-8 and every é turns into  �.)
+//
+//  isUtf8(file, howMuch, done):  checks the first "howMuch" bytes, a slice at a time,
+//  with a STRICT decoder that throws an error at the first broken byte.
+//  Then calls  done(true)  or  done(false).
+function isUtf8(file, howMuch, done) {
+
+    const decoder = new TextDecoder('utf-8', { fatal: true });    //  fatal  =  "throw an error, don't put in a  �"
+    const SLICE   = 16 * 1024 * 1024;                               //  16 MB at a time  (so memory stays low)
+    const end     = Math.min(howMuch, file.size);
+    let at = 0;
+
+    (function next() {
+
+        if (at >= end) {
+            //  Checked the WHOLE file?  Make sure it didn't stop halfway through a letter.
+            //  (Only checked the start?  Stopping halfway is fine.  The rest just wasn't checked.)
+            if (end === file.size) {
+                try { decoder.decode(); } catch (e) { done(false); return; }
+            }
+            done(true);
+            return;
+        }
+
+        file.slice(at, Math.min(at + SLICE, end)).arrayBuffer().then(function (bytes) {
+
+            //  A UTF-16 file  (Excel's "Unicode Text")?  It starts with a marker:  FF FE  or  FE FF.
+            //  The browser spots that marker by itself and reads it right.  So:  fine.
+            const b = new Uint8Array(bytes, 0, Math.min(2, bytes.byteLength));
+            if (at === 0 && b.length === 2 && ((b[0] === 0xFF && b[1] === 0xFE) || (b[0] === 0xFE && b[1] === 0xFF))) {
+                done(true);
+                return;
+            }
+
+            at += SLICE;
+            try {
+                decoder.decode(bytes, { stream: true });    //  stream  =  "a letter might keep going in the next slice"
+            } catch (e) {
+                done(false);                                //  a broken byte:  NOT UTF-8
+                return;
+            }
+            next();
+
+        }, function () {
+            done(true);     //  couldn't even read it?  Let the normal reading try  (it has its own error message).
+        });
+    })();
+}
+
 
 //  Clear the button every time you CLICK it.
 //  (The browser only says "change" if you pick a DIFFERENT file.  So without this,
@@ -243,6 +305,9 @@ fileInput.addEventListener('change', function (event) {
 
 
     const reader = new FileReader();        //  FileReader = a helper that reads files. It comes with every browser.
+
+    let encoding     = 'utf-8';             //  which rulebook to read it with  (decided just before reading, at the bottom)
+    let checkedWhole = false;               //  did the safety net already check the WHOLE file?
 
 
     //  While reading:  fill the first 20% of the pie.
@@ -286,6 +351,31 @@ fileInput.addEventListener('change', function (event) {
             couldNotRead();
             return;
         }
+
+        //  SAFETY NET:  read as UTF-8, but a  �  showed up?
+        //  The first 4 MB looked fine, but a broken byte might be further in.  Check the WHOLE file for real.
+        //    Broken?           Read it again with the older Excel rulebook.
+        //    Really UTF-8?     Then the file truly has a  �  in it.  Carry on with this text.
+        //  (Just seeing a  �  isn't enough to decide:  a UTF-8 file is ALLOWED to have one.)
+        if (encoding === 'utf-8' && !checkedWhole && text.indexOf('�') !== -1) {
+
+            checkedWhole = true;
+            setLoadingLabel('Checking the letters...');
+
+            isUtf8(file, file.size, function (ok) {
+
+                if (myLoad !== loadId) return;  //  a newer file?  Forget this one.
+
+                if (ok) {
+                    reader.onload(e);           //  really UTF-8.  Run this again  (the net is checked now, so it carries on).
+                } else {
+                    encoding = 'windows-1252';
+                    reader.readAsText(file, encoding);
+                }
+            });
+            return;
+        }
+
         let spot = 0;                       //  where we are in it
 
 
@@ -425,6 +515,9 @@ fileInput.addEventListener('change', function (event) {
             rowCount    = count;
             rowCache    = new Map();            //  new file  =  forget the old file's rows
             cacheCells  = 0;
+            fileNote    = encoding === 'windows-1252'
+                ? '  ·  read as Windows-1252  (an older Excel format)'
+                : '';
             columnCount = longest.length;       //  the widest row decides how many columns there are
             searchText  = null;                 //  new file  =  throw away the old search copy
             allRows     = null;                 //  ...and the old "every row" list
@@ -446,7 +539,15 @@ fileInput.addEventListener('change', function (event) {
     };
 
 
-    reader.readAsText(file);                //  GO!  Start reading.
+    //  GO!  But first:  check the first 4 MB.  Breaks UTF-8's rules?  Use the older Excel rulebook.
+    //  (4 MB is quick, and almost always enough:  the safety net up in onload catches the rest.)
+    isUtf8(file, 4 * 1024 * 1024, function (ok) {
+
+        if (myLoad !== loadId) return;      //  a newer file?  Forget this one.
+
+        encoding = ok ? 'utf-8' : 'windows-1252';
+        reader.readAsText(file, encoding);  //  start reading
+    });
 });
 
 
@@ -1077,9 +1178,9 @@ function updatePosition() {
     const word = searchInput.value.trim();
 
     if (matches.length === 0) {
-        statusText.textContent = word === ''
+        statusText.textContent = (word === ''
             ? 'This file only has a header row'
-            : 'No rows match "' + word + '"';
+            : 'No rows match "' + word + '"') + fileNote;
         return;
     }
 
@@ -1102,7 +1203,7 @@ function updatePosition() {
         message += ' (' + matches.length + ' matching row(s) for "' + word + '")';
     }
 
-    statusText.textContent = message;
+    statusText.textContent = message + fileNote;
 }
 
 

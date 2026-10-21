@@ -334,6 +334,7 @@ let glideSpot   = 0;      // exactly where the glide is right now (can be in-bet
 let gliding     = false;  // is the glide moving right now?
 
 let loadId         = 0;      // counts every file you pick (a NEW file = a new number, so the old one quits)
+let fileNote       = '';     // a note added to the "Rows 1–15" words about how the file was read (or nothing)
 let buildingSearch = false;  // is the brain getting the search ready right now?
 let loaderTimer    = null;   // "wait a moment before showing the loader" timer
 ```
@@ -1135,9 +1136,9 @@ function updatePosition() {
     const word = searchInput.value.trim();
 
     if (matches.length === 0) {
-        statusText.textContent = word === ''
+        statusText.textContent = (word === ''
             ? 'This file only has a header row'
-            : 'No rows match "' + word + '"';
+            : 'No rows match "' + word + '"') + fileNote;
         return;
     }
 
@@ -1158,9 +1159,11 @@ function updatePosition() {
         message += ' (' + matches.length + ' matching row(s) for "' + word + '")';
     }
 
-    statusText.textContent = message;
+    statusText.textContent = message + fileNote;
 }
 ```
+
+> **What's `fileNote`?** A little extra note about how the file was read, stuck on the end. Usually it's empty (`''`). For an older Excel file it says *"· read as Windows-1252 (an older Excel format)"* (Step 2.15).
 
 | Code | Baby words |
 |---|---|
@@ -1530,9 +1533,70 @@ function finishLoading() {
 
 ### Step 2.15: Read the file
 
-Now the brain listens for you picking a file. It cuts the file up **in bites** too, one line at a time, and measures each column's longest thing as it goes:
+Now the brain listens for you picking a file. It cuts the file up **in bites** too, one line at a time, and measures each column's longest thing as it goes.
+
+But first, one question: **which "rulebook" is the file written in?** A file is just numbers (bytes). The rulebook (its *encoding*) says which number is which letter:
+
+| Letter | UTF-8 (modern) | Windows-1252 (older Excel "CSV") |
+|---|---|---|
+| `A` | `41` | `41` ← same |
+| `é` | `C3 A9` (2 bytes) | `E9` (1 byte) |
+| `€` | `E2 82 AC` (3 bytes) | `80` (1 byte) |
+
+Plain letters, numbers and commas are the SAME in both. Only special letters differ. Read an old Excel file with the UTF-8 rulebook, and `José` shows up as `Jos�`.
 
 ```js
+// WHICH "RULEBOOK" IS THIS FILE WRITTEN IN? (its "encoding")
+// We read as UTF-8, unless the bytes BREAK UTF-8's rules. Then it must be the older Excel rulebook.
+//
+// isUtf8(file, howMuch, done): checks the first "howMuch" bytes, a slice at a time,
+// with a STRICT decoder that throws an error at the first broken byte.
+// Then calls done(true) or done(false).
+function isUtf8(file, howMuch, done) {
+
+    const decoder = new TextDecoder('utf-8', { fatal: true });    // fatal = "throw an error, don't put in a �"
+    const SLICE   = 16 * 1024 * 1024;                               // 16 MB at a time (so memory stays low)
+    const end     = Math.min(howMuch, file.size);
+    let at = 0;
+
+    (function next() {
+
+        if (at >= end) {
+            // Checked the WHOLE file? Make sure it didn't stop halfway through a letter.
+            // (Only checked the start? Stopping halfway is fine. The rest just wasn't checked.)
+            if (end === file.size) {
+                try { decoder.decode(); } catch (e) { done(false); return; }
+            }
+            done(true);
+            return;
+        }
+
+        file.slice(at, Math.min(at + SLICE, end)).arrayBuffer().then(function (bytes) {
+
+            // A UTF-16 file (Excel's "Unicode Text")? It starts with a marker: FF FE or FE FF.
+            // The browser spots that marker by itself and reads it right. So: fine.
+            const b = new Uint8Array(bytes, 0, Math.min(2, bytes.byteLength));
+            if (at === 0 && b.length === 2 && ((b[0] === 0xFF && b[1] === 0xFE) || (b[0] === 0xFE && b[1] === 0xFF))) {
+                done(true);
+                return;
+            }
+
+            at += SLICE;
+            try {
+                decoder.decode(bytes, { stream: true });    // stream = "a letter might keep going in the next slice"
+            } catch (e) {
+                done(false);                                // a broken byte: NOT UTF-8
+                return;
+            }
+            next();
+
+        }, function () {
+            done(true);     // couldn't even read it? Let the normal reading try (it has its own error message).
+        });
+    })();
+}
+
+
 // Clear the button every time you CLICK it.
 // (The browser only says "change" if you pick a DIFFERENT file. So without this,
 //  editing a file in Excel and picking it again would do nothing.)
@@ -1552,6 +1616,9 @@ fileInput.addEventListener('change', function (event) {
     startLoading('Reading the file...');  // the loader shows up (if this takes a while)
 
     const reader = new FileReader();      // a helper that reads files (comes with every browser)
+
+    let encoding     = 'utf-8';           // which rulebook to read it with (decided just before reading, at the bottom)
+    let checkedWhole = false;             // did the safety net already check the WHOLE file?
 
     // While reading: fill the first 20% of the pie.
     reader.onprogress = function (e) {
@@ -1591,6 +1658,30 @@ fileInput.addEventListener('change', function (event) {
         // (A too-big file read from disk does this: no error, just an empty string.)
         if (text.length === 0 && file.size > 0) {
             couldNotRead();
+            return;
+        }
+
+        // SAFETY NET: read as UTF-8, but a � showed up?
+        // The first 4 MB looked fine, but a broken byte might be further in. Check the WHOLE file for real.
+        //   Broken?           Read it again with the older Excel rulebook.
+        //   Really UTF-8?     Then the file truly has a � in it. Carry on with this text.
+        // (Just seeing a � isn't enough to decide: a UTF-8 file is ALLOWED to have one.)
+        if (encoding === 'utf-8' && !checkedWhole && text.indexOf('�') !== -1) {
+
+            checkedWhole = true;
+            setLoadingLabel('Checking the letters...');
+
+            isUtf8(file, file.size, function (ok) {
+
+                if (myLoad !== loadId) return;  // a newer file? Forget this one.
+
+                if (ok) {
+                    reader.onload(e);           // really UTF-8. Run this again (the net is checked now, so it carries on).
+                } else {
+                    encoding = 'windows-1252';
+                    reader.readAsText(file, encoding);
+                }
+            });
             return;
         }
 
@@ -1726,6 +1817,9 @@ fileInput.addEventListener('change', function (event) {
             rowCount    = count;
             rowCache    = new Map();            // new file = forget the old file's rows
             cacheCells  = 0;
+            fileNote    = encoding === 'windows-1252'
+                ? '  ·  read as Windows-1252  (an older Excel format)'
+                : '';
             columnCount = longest.length;       // the widest row decides how many columns there are
             searchText  = null;                 // new file = throw away the old search copy
             allRows     = null;                 // ...and the old "every row" list
@@ -1746,7 +1840,15 @@ fileInput.addEventListener('change', function (event) {
         cutSomeRows();                          // take the first bite
     };
 
-    reader.readAsText(file);              // GO! start reading.
+    // GO! But first: check the first 4 MB. Breaks UTF-8's rules? Use the older Excel rulebook.
+    // (4 MB is quick, and almost always enough: the safety net up in onload catches the rest.)
+    isUtf8(file, 4 * 1024 * 1024, function (ok) {
+
+        if (myLoad !== loadId) return;      // a newer file? Forget this one.
+
+        encoding = ok ? 'utf-8' : 'windows-1252';
+        reader.readAsText(file, encoding);  // start reading
+    });
 });
 ```
 
@@ -1762,6 +1864,24 @@ fileInput.addEventListener('change', function (event) {
 | `quotes % 2 === 0` | "Is the number of quotes EVEN?" (`% 2` = the leftover after dividing by 2. Even numbers leave 0.) |
 | `while (...) { ... }` | "Keep doing this, over and over, as long as `...` is true." |
 | `break` | "Stop the loop RIGHT NOW, and carry on after it." |
+
+> **Why check the rulebook BEFORE reading?** So a big file only gets read once. Checking the first 4 MB takes about 0.01 seconds, even on a 489 MB file. Real old-Excel text almost never "accidentally" follows UTF-8's rules, so a broken byte = it's the older rulebook.
+
+> **Why a safety net too?** A file can be plain English for the first 4 MB, and have its first `é` way down at row 170,000. The safety net only kicks in if a `�` shows up, and then it checks the WHOLE file for real.
+
+> **Why not just "saw a `�`? Re-read it"?** Because a UTF-8 file is ALLOWED to contain a real `�` (someone typed or pasted one). Re-reading that file with the older rulebook would turn ALL its special letters into garbage (`☕` → `â˜•`). The strict check knows the difference.
+
+> **What about Excel's "CSV UTF-8" and "Unicode Text"?** They start with a hidden marker that says which rulebook they use. The browser reads that marker by itself, so they always worked, and still do.
+
+| Code | Baby words |
+|---|---|
+| `new TextDecoder('utf-8', { fatal: true })` | A strict UTF-8 reader that throws an error at the first broken byte, instead of quietly putting in a `�`. |
+| `file.slice(a, b)` | Just part of the file: from byte `a` to byte `b`. (It doesn't read anything yet.) |
+| `.arrayBuffer().then(function (bytes) { ... })` | "Read that part as raw bytes, and when it's done, run this." |
+| `try { ... } catch (e) { ... }` | "Try this. If it throws an error, do THIS instead of crashing." |
+| `(function next() { ... })()` | Make a function and run it right away. It calls itself again (`next()`) for each slice. |
+| `reader.readAsText(file, encoding)` | Read the file as text, using THIS rulebook. |
+| `reader.onload(e)` | Run the "done reading" part again, by hand, with the same text. |
 
 > **Why does the list of row starts double when it's full?** A `Uint32Array` can't grow. So when it's full, make one twice as big and copy everything over. Doubling means it only happens about 20 times even for a million rows. (Growing by 1 each time would copy a million times!)
 
@@ -1840,6 +1960,8 @@ You should see the header and the first few rows with their numbers, and "Rows 1
 > You should see **3 rows** (Bob, Cy, Di), not 1. Bob's quote never closes, so the brain catches it (`neverClosed`), and Cy and Di stay safe.
 
 > **Test the same file twice.** Pick `breaks.csv`. Change it in Notepad, save, and pick it AGAIN. You should see the change.
+
+> **Test an older Excel file.** In Notepad, type `name,city` then `José,München` on the next line. In **Save As**, set **Encoding** to **ANSI** (that's Windows-1252), and save as `old.csv`. Pick it. You should see `José` and `München` (not `Jos�`), and the words should end with *"· read as Windows-1252 (an older Excel format)"*. Save it again as **UTF-8**, pick it, and the note goes away.
 
 > Picked a REALLY big file? You might see the words "Cutting it into rows..." for a moment. That's the loader, with no clothes yet. Part 3 turns it into the cloud and the pie.
 
@@ -3622,6 +3744,10 @@ Refresh. You should have:
 | Stripes jump around while scrolling | The CSS still uses `.line:nth-child(even)` instead of `.line.zebra`. |
 | The window isn't header + 15 rows | The numbers don't match in both places, or the row height isn't 30. |
 | Picking a file does nothing, and the Console says `startLoading is not defined` | Step 2.14 (the loader) is missing from the brain. |
+| Accented letters show up as `�` (`Jos�`) | The file is in the older Excel rulebook, and `isUtf8` isn't called before reading, or `readAsText` is missing its `encoding`. |
+| Every file says "read as Windows-1252" | `isUtf8` calls `done(false)` too easily. Is `fatal: true` there? Is `{ stream: true }` there? (Without it, a letter cut in half at the 4 MB edge looks "broken".) |
+| A file with a real `�` in it turns into garbage (`â˜•`) | The safety net re-reads as soon as it SEES a `�`. It has to check the whole file with `isUtf8(file, file.size, ...)` first. |
+| The loader never goes away on a file with `�` in it | The safety net's `ok` branch is missing `reader.onload(e);`, or `checkedWhole = true;` is missing (so it checks forever). |
 | Every row shows the NEXT row's first letter, or loses its last letter | `rowText` is off by one. The row ends at `rowStart[i + 1] - 1` (the line break), not `rowStart[i + 1]`. |
 | The last row is missing, or shows up empty | `starts[count] = spot;` is missing from the "ALL DONE" part of Step 2.15, so the last row has no end. |
 | Cells end with a weird invisible character (Windows files) | `rowText` isn't leaving off the `\r` (the `charCodeAt(end - 1) === 13` line). |
