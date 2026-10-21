@@ -186,6 +186,9 @@ let builtColEnd   = 0;    //     from builtColStart, up to (but not including) b
 let lastColumns   = '';   //  the last column list we handed the clothes  (so we don't hand over the same one twice)
 
 let searchTimer = null;   //  the "wait until they stop typing" timer, for big files
+let searchId    = 0;      //  counts every search.  Type again while one is running?  The old one sees the number changed, and quits.
+let doneQuery   = null;   //  the last search that FINISHED  ...
+let doneMatches = null;   //  ...and its matches.  (Type MORE onto that word, and only these rows get checked.)
 
 let snapTimer   = null;   //  the "wait until scrolling stops, then snap" timer
 let wheelTarget = null;   //  where the mouse wheel is gliding the window to  (null = not gliding)
@@ -399,6 +402,8 @@ fileInput.addEventListener('change', function (event) {
             columnCount = longest.length;       //  the widest row decides how many columns there are
             searchText  = null;                 //  new file  =  throw away the old search copy
             allRows     = null;                 //  ...and the old "every row" list
+            doneQuery   = null;                 //  ...and the last search  (its rows were the OLD file's rows)
+            doneMatches = null;
 
             //  Clean slate for the new file.
             searchInput.value = '';
@@ -1258,15 +1263,17 @@ function render() {
 
     //  Your search word, in small letters.
     //  (So "ANA" and "ana" find the same thing.)
-    query = searchInput.value.trim().toLowerCase();
+    const wanted = searchInput.value.trim().toLowerCase();
 
 
     //  The first time you search, the search copy isn't ready yet.
     //  Get it ready  (in bites, with the loader),  and it'll come back here when it's done.
-    if (query !== '' && searchText === null) {
+    if (wanted !== '' && searchText === null) {
         buildSearchText();
         return;
     }
+
+    const mySearch = ++searchId;            //  this search's number.  (Type again?  The next one gets a new number.)
 
 
     //  Pick which rows to show.
@@ -1275,21 +1282,83 @@ function render() {
     //
     //  Each match is just the row's spot in dataRows  (0, 1, 2...).
     //  Its row NUMBER is that  +1,  because the header is row 0.
-    if (query === '') {
+    if (wanted === '') {
 
         if (allRows === null) {
             allRows = dataRows.map(function (cells, i) { return i; });
         }
-        matches = allRows;
-
-    } else {
-
-        matches = [];
-
-        for (let i = 0; i < dataRows.length; i++) {
-            if (searchText[i].includes(query)) matches.push(i);
-        }
+        doneQuery   = null;
+        doneMatches = null;
+        showMatches('', allRows);
+        return;
     }
+
+
+    //  NARROWING:  you typed MORE onto the last word?  ("chi"  ->  "chic")
+    //  Then only rows that had "chi" can have "chic".  Only check THOSE.
+    //  (Same answer as checking every row.  Just way less checking.)
+    const pool  = doneQuery !== null && wanted.includes(doneQuery) ? doneMatches : null;    //  null  =  check every row
+    const total = pool === null ? dataRows.length : pool.length;
+    const texts = searchText;               //  hold on to THIS file's search copy
+    const found = [];
+    let i = 0;
+
+
+    //  Search in BITES, like cutting up the file, so the page never freezes.
+    //  (Small file?  It's all done in the first bite, so it's instant, same as always.)
+    //  The old results stay on screen until the new ones are READY.  Then they swap in, all at once.
+    function searchSome() {
+
+        if (mySearch !== searchId) return;  //  you typed again since?  This search is old.  Stop.
+
+        const stopAt = performance.now() + CHUNK_TIME;
+
+        while (i < total && performance.now() < stopAt) {
+
+            const last = Math.min(i + 500, total);  //  (checking the clock every 500 rows, like cutting up the file.
+                                                     //   Wide rows are BIG:  500 of square_10000's rows  =  25 MB.)
+            for (; i < last; i++) {
+                const row = pool === null ? i : pool[i];
+                if (texts[row].includes(wanted)) found.push(row);
+            }
+        }
+
+        //  More to do?  Say how far along we are, let the screen breathe, then take the next bite.
+        if (i < total) {
+            statusText.textContent = 'Searching for "' + searchInput.value.trim() + '"...  ' + Math.floor(100 * i / total) + '%';
+            setTimeout(searchSome, 0);
+            return;
+        }
+
+        //  Done!  Remember it  (for narrowing next time),  and swap it in.
+        doneQuery   = wanted;
+        doneMatches = found;
+        showMatches(wanted, found);
+    }
+
+    searchSome();                           //  take the first bite
+}
+
+
+
+// ----------------------------------------------------------
+//
+//    SHOW THESE MATCHES
+//
+//    Swaps in a search's results, and redraws the window.
+//    "wanted"  =  the search word  (it paints the yellow).
+//    "list"    =  the rows that passed.
+//
+//    The word and the rows change TOGETHER, right here.
+//    (If the word changed sooner, rows built while the search was
+//     still running would paint the NEW word on the OLD results.)
+//
+// ----------------------------------------------------------
+
+function showMatches(wanted, list) {
+
+    query   = wanted;
+    matches = list;
 
 
     //  Start over:  wipe the old rows, put the 2 spacers in.
@@ -1361,7 +1430,8 @@ function buildSearchText() {
 
         while (i < rows.length && performance.now() < stopAt) {
 
-            const last = Math.min(i + 500, rows.length);
+            const last = Math.min(i + 50, rows.length);     //  (checking the clock every 50 rows:  squishing a WIDE row is slow.
+                                                             //   500 of square_10000's rows  =  25 MB in one go  =  a freeze.)
 
             for (; i < last; i++) {
                 built.push(rows[i].join('\u0000').toLowerCase());

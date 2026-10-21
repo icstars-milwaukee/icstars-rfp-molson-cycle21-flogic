@@ -311,6 +311,9 @@ let builtColEnd   = 0;    //    from builtColStart, up to (but not including) bu
 let lastColumns   = '';   // the last column list we handed the clothes (so we don't hand over the same one twice)
 
 let searchTimer = null;   // "wait until they stop typing" timer
+let searchId    = 0;      // counts every search. Type again while one is running? The old one sees the number changed, and quits.
+let doneQuery   = null;   // the last search that FINISHED ...
+let doneMatches = null;   // ...and its matches. (Type MORE onto that word, and only these rows get checked.)
 let snapTimer   = null;   // "wait until scrolling stops, then snap" timer
 let wheelTarget = null;   // the glide's FINISH LINE (null = no glide)
 let wheelLeft   = 0;      // leftover wheel spin, not enough for a whole row yet
@@ -1024,40 +1027,94 @@ function sizeWindow() {
 
 ### Step 2.12: Pick the rows to show (`render`)
 
-This runs after you pick a file AND every time you search. It decides WHICH rows pass the search, then hands off to `buildVisibleRows` (Step 2.9) to actually build them.
+This runs after you pick a file AND every time you search. It decides WHICH rows pass the search, then hands them to `showMatches`, which hands off to `buildVisibleRows` (Step 2.9) to actually build them.
+
+The search is done **in bites** (like cutting up the file in Step 2.15), so even a huge file never freezes the page. And when you type MORE onto your word, it only re-checks the rows that already matched (**narrowing**).
 
 ```js
 function render() {
 
     // Your search word, in small letters. ("ANA" and "ana" find the same thing.)
-    query = searchInput.value.trim().toLowerCase();
+    const wanted = searchInput.value.trim().toLowerCase();
 
     // The first time you search, the search copy isn't ready yet.
     // Get it ready (Step 2.13), and it'll come back here when it's done.
-    if (query !== '' && searchText === null) {
+    if (wanted !== '' && searchText === null) {
         buildSearchText();
         return;
     }
+
+    const mySearch = ++searchId;            // this search's number. (Type again? The next one gets a new number.)
 
     // Pick which rows to show.
     //   No search word?  keep every row. (Use the "every row" list. Make it the first time.)
     //   Search word?     keep only rows that have it.
     // Each match is just the row's spot in dataRows (0, 1, 2...).
-    if (query === '') {
+    if (wanted === '') {
 
         if (allRows === null) {
             allRows = dataRows.map(function (cells, i) { return i; });
         }
-        matches = allRows;
-
-    } else {
-
-        matches = [];
-
-        for (let i = 0; i < dataRows.length; i++) {
-            if (searchText[i].includes(query)) matches.push(i);
-        }
+        doneQuery   = null;
+        doneMatches = null;
+        showMatches('', allRows);
+        return;
     }
+
+    // NARROWING: you typed MORE onto the last word? ("chi" -> "chic")
+    // Then only rows that had "chi" can have "chic". Only check THOSE.
+    // (Same answer as checking every row. Just way less checking.)
+    const pool  = doneQuery !== null && wanted.includes(doneQuery) ? doneMatches : null;    // null = check every row
+    const total = pool === null ? dataRows.length : pool.length;
+    const texts = searchText;               // hold on to THIS file's search copy
+    const found = [];
+    let i = 0;
+
+    // Search in BITES, like cutting up the file, so the page never freezes.
+    // (Small file? It's all done in the first bite, so it's instant, same as always.)
+    // The old results stay on screen until the new ones are READY. Then they swap in, all at once.
+    function searchSome() {
+
+        if (mySearch !== searchId) return;  // you typed again since? This search is old. Stop.
+
+        const stopAt = performance.now() + CHUNK_TIME;
+
+        while (i < total && performance.now() < stopAt) {
+
+            const last = Math.min(i + 500, total);  // (checking the clock every 500 rows, like cutting up the file.
+                                                     //  Wide rows are BIG: 500 of square_10000's rows = 25 MB.)
+            for (; i < last; i++) {
+                const row = pool === null ? i : pool[i];
+                if (texts[row].includes(wanted)) found.push(row);
+            }
+        }
+
+        // More to do? Say how far along we are, let the screen breathe, then take the next bite.
+        if (i < total) {
+            statusText.textContent = 'Searching for "' + searchInput.value.trim() + '"...  ' + Math.floor(100 * i / total) + '%';
+            setTimeout(searchSome, 0);
+            return;
+        }
+
+        // Done! Remember it (for narrowing next time), and swap it in.
+        doneQuery   = wanted;
+        doneMatches = found;
+        showMatches(wanted, found);
+    }
+
+    searchSome();                           // take the first bite
+}
+
+
+// SHOW THESE MATCHES: swaps in a search's results, and redraws the window.
+// "wanted" = the search word (it paints the yellow). "list" = the rows that passed.
+// The word and the rows change TOGETHER, right here.
+// (If the word changed sooner, rows built while the search was still running
+//  would paint the NEW word on the OLD results.)
+function showMatches(wanted, list) {
+
+    query   = wanted;
+    matches = list;
 
     // Start over: wipe the old rows, put the 2 spacers in.
     // (No matches? Leave it totally empty, and the window hides itself.)
@@ -1092,6 +1149,21 @@ function render() {
 | `===` | "is exactly equal to" |
 
 > **Why reuse `allRows`?** Clearing the search used to rebuild the "every row" list from scratch. Now it's made once per file, and handed back every time.
+
+> **Why search in bites?** On a 489 MB file, checking every row in one go froze the page for about 0.2 seconds per search, a visible stutter. In bites, the longest freeze is about 0.02 seconds (smooth). The whole search takes a tiny bit longer, because it stops to let the screen breathe. Small files fit in the first bite, so they're exactly as fast as before.
+
+> **Why `searchId`?** Same trick as `loadId` (Step 2.15). Type "denver", then "austin" before "denver" is done: the "denver" search sees the number changed, and quits. Only the newest search ever lands.
+
+> **Why does narrowing give the SAME answer?** If a row has "chic" in it, it MUST have "chi" in it (that's the start of "chic"!). So the rows with "chic" are always somewhere in the "chi" list. Checking only that list can't miss any. It only works when the new word CONTAINS the old one: backspacing ("chic" → "chi") has to check every row again.
+
+> **Why do the old results stay up while it searches?** So the window never shows a half-finished list. The new word and its rows swap in together, in `showMatches`.
+
+| Code | Baby words |
+|---|---|
+| `++searchId` | Add 1 to `searchId`, and use the NEW number |
+| `wanted.includes(doneQuery)` | "Is the old word INSIDE the new one?" `"chic"` has `"chi"` inside it: yes. |
+| `a ? b : c` | "Is `a` true? Then `b`. If not, `c`." |
+| `pool === null ? i : pool[i]` | No pool? Check row `i`. Pool? Check the `i`-th row IN the pool. |
 
 <br>
 
@@ -1133,7 +1205,8 @@ function buildSearchText() {
 
         while (i < rows.length && performance.now() < stopAt) {
 
-            const last = Math.min(i + 500, rows.length);
+            const last = Math.min(i + 50, rows.length);     // (checking the clock every 50 rows: squishing a WIDE row is slow.
+                                                             //  500 of square_10000's rows = 25 MB in one go = a freeze.)
 
             for (; i < last; i++) {
                 built.push(rows[i].join('\u0000').toLowerCase());
@@ -1455,6 +1528,8 @@ fileInput.addEventListener('change', function (event) {
             columnCount = longest.length;       // the widest row decides how many columns there are
             searchText  = null;                 // new file = throw away the old search copy
             allRows     = null;                 // ...and the old "every row" list
+            doneQuery   = null;                 // ...and the last search (its rows were the OLD file's rows)
+            doneMatches = null;
 
             // Clean slate for the new file.
             searchInput.value = '';
@@ -2340,7 +2415,8 @@ This is the biggest rule. It's split into labeled sections so it's easy to follo
     /* THE GLASS LOOK */
     /* The fill: a little white top-left → almost clear bottom-right. That fade = glass. */
     background: linear-gradient(135deg, var(--glass-top), var(--glass-bottom));
-    backdrop-filter: blur(12px);                      /* frosts whatever is behind it */
+    /* (No "backdrop-filter: blur" here. Behind the window is only the flat grey page,
+       and a blurred flat color looks the same. See "Why no blur?" below.) */
     border: 1px solid var(--glass-edge);              /* thin shiny edge */
     border-radius: 18px;                              /* round corners */
     box-shadow:
@@ -2353,13 +2429,25 @@ This is the biggest rule. It's split into labeled sections so it's easy to follo
     scrollbar-width: thin;
     scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
 
-    /* FLOATING: bob up and down forever. Don't like it? Delete this line. */
-    animation: float 6s ease-in-out infinite;
+    /* FLOATING: bob up and down forever. Don't like it? Delete this line.
+       "steps(3)" = inside each of the 10 keyframes below, move in 3 little jumps,
+       and DON'T change at all in between. */
+    animation: float 6s steps(3) infinite;
+
+    /* "I'm going to MOVE." So the browser draws the window (and its big shadow) ONCE,
+       then just slides that finished picture up and down. */
+    will-change: transform;
 }
 
-/* The floating move: up 4 pixels, then back down */
+/* The floating move: up 4 pixels, then back down.
+   A smooth float written out as 10 points on the curve (slow at the top and bottom, faster in the middle). */
 @keyframes float {
-    50% { transform: translateY(-4px); }
+    0%, 100% { transform: translateY(0); }
+    10%, 90% { transform: translateY(-0.38px); }
+    20%, 80% { transform: translateY(-1.38px); }
+    30%, 70% { transform: translateY(-2.62px); }
+    40%, 60% { transform: translateY(-3.62px); }
+    50%      { transform: translateY(-4px); }
 }
 
 /* If someone turned off motion on their computer, stay still */
@@ -2378,6 +2466,28 @@ This is the biggest rule. It's split into labeled sections so it's easy to follo
     display: none;
 }
 ```
+
+**Making the float cheap** 🔋. A forever-animation runs even when you're doing NOTHING, so every bit of work it does, it does forever. We measured it: with the page just sitting there, how much computer time does it burn every 10 seconds?
+
+| Version | Computer time per 10 idle seconds |
+|---|---|
+| Smooth float + blur (the old way) | ~4.5 s (almost half of one processor core!) |
+| **Stepped float, no blur, `will-change` (now)** | **~0.6 s** |
+| No float at all | ~0.05 s |
+
+Three tricks did it:
+
+> **Why no blur?** `backdrop-filter: blur(...)` blurs what's BEHIND a piece. Behind the window is just the flat grey page, and a blurred flat color looks exactly the same. But since the window moves, the browser had to re-blur that whole area every frame, 60 times a second. All that work for nothing you could see. (The theme menu and the loader KEEP their blur: they really do float over other things.)
+
+> **Why `will-change: transform`?** It tells the browser "I'm going to move." So it draws the window once, like a sticker, then just slides the sticker. Without it, the browser might redraw the window on every frame.
+
+> **Why `steps(3)` and 10 keyframes?** The whole float is only 4 pixels over 3 seconds. That's about 0.02 pixels per frame. Nobody can see a move that small, but every frame still costs work. `steps(3)` means "jump, don't glide": about 5 small jumps a second, each less than half a pixel. That still looks smooth. The 10 keyframes keep it slow at the top and bottom (like `ease-in-out` did), because plain `steps` alone would move at the same speed the whole way.
+
+| Word | Baby words |
+|---|---|
+| `steps(3)` | Don't glide. Make 3 jumps between each keyframe, and stay still in between. |
+| `10%, 90% { ... }` | The same spot at 10% of the way through AND at 90% (going up, then coming back down). |
+| `will-change: transform` | "Heads up, browser: I'm going to move." |
 
 <br>
 
@@ -3262,7 +3372,8 @@ Refresh. You should have:
 
 | I want to... | Do this |
 |---|---|
-| **Stop the floating** | Delete `animation: float 6s ease-in-out infinite;` in `#output` |
+| **Stop the floating** | Delete `animation: float 6s steps(3) infinite;` in `#output` |
+| **Make the float glide (smoother, but costs more)** | Change `steps(3)` to `linear`. More steps (like `steps(6)`) = smoother AND more work. |
 | **Show 20 rows instead of 15** | Change **BOTH**: `WINDOW_SIZE = 15` → `20` (brain) AND `calc(16 * 30px)` → `calc(21 * 30px)` (clothes). Remember the +1 for the header! |
 | **Make the wheel move more/fewer rows** | The wheel moves 1 row per 30 pixels of spin. Most mice spin 100 per click (≈ 3 rows). To change it, multiply `pixels` in the wheel listener, like `e.deltaY * 2` |
 | **Make the wheel glide snappier or floatier** | Change `GLIDE`. `0.4` = snappier, `0.15` = floatier. Keep it between `0.1` and `0.5`. |
@@ -3306,6 +3417,11 @@ Refresh. You should have:
 | Stripes jump around while scrolling | The CSS still uses `.line:nth-child(even)` instead of `.line.zebra`. |
 | The window isn't header + 15 rows | The numbers don't match in both places, or the row height isn't 30. |
 | Picking a file does nothing, and the Console says `startLoading is not defined` | Step 2.14 (the loader) is missing from the brain. |
+| Search results flicker, or OLD results show up after you typed a new word | `searchSome` is missing `if (mySearch !== searchId) return;` at the top, so old searches keep running and landing. |
+| Yellow paints the wrong word for a moment while searching | `query = ...` is set at the top of `render` instead of inside `showMatches`. The word and the rows have to change together. |
+| Backspacing gives too FEW results | Narrowing is used when the new word is SHORTER. It must only narrow when `wanted.includes(doneQuery)`. |
+| A new file's first search gives weird results | `doneQuery = null; doneMatches = null;` is missing from the "ALL DONE" part of Step 2.15. The old file's matches are getting reused. |
+| "Searching for ...%" never goes away | `showMatches` isn't called at the end of `searchSome` (it's what puts the "Rows 1–15" words back). |
 | The loader shows up but never goes away | `finishLoading();` is missing at the end of `cutSomeRows` (Step 2.15) or `squishSomeRows` (Step 2.13). |
 | The loader flashes on and off for tiny files | `LOADER_DELAY` is `0`, or `startLoading` shows the loader right away instead of using `setTimeout`. |
 | The pie jumps instead of filling smoothly | The `@property --done` block is missing or misspelled (it needs `syntax: "<number>"`). |
