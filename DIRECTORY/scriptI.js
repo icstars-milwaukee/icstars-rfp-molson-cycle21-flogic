@@ -296,7 +296,14 @@ fileInput.addEventListener('change', function (event) {
 
     const file = event.target.files[0];     //  the file you picked
 
-    if (!file) return;                      //  you clicked "Cancel"?  Then stop.
+    if (file) loadFile(file, null);         //  (you clicked "Cancel"?  Then there's no file:  do nothing)
+});
+
+
+//  READ A FILE, and show it.
+//  "sheet"  =  for an Excel file:  which sheet to show  (0 = the first).   null  =  the first real one that isn't hidden.
+//  (Picking a file calls this.  So does clicking a sheet tab:  same file, another sheet.)
+function loadFile(file, sheet) {
 
     const myLoad = ++loadId;                //  this file's number.  (Pick another file?  It gets a new number.)
 
@@ -308,6 +315,7 @@ fileInput.addEventListener('change', function (event) {
 
     let encoding     = 'utf-8';             //  which rulebook to read it with  (decided just before reading, at the bottom)
     let checkedWhole = false;               //  did the safety net already check the WHOLE file?
+    let excel        = null;                //  an Excel file?  Its notes  (from xlsxI.js).   A CSV?  null.
 
 
     //  While reading:  fill the first 20% of the pie.
@@ -318,12 +326,14 @@ fileInput.addEventListener('change', function (event) {
     //  Couldn't read it?  Put the loader away, turn search back on  (if there's an old file to search),
     //  and SAY what happened.  (The browser's own reason is no help:  it blames "permission problems"
     //  even when the file is just too big.)
-    function couldNotRead() {
+    //  "why"  =  the words to show, if we already know what's wrong  (like a broken Excel file).
+    function couldNotRead(why) {
 
         searchInput.disabled = headerCells.length === 0;
         finishLoading();
 
-        let message = file.size > 500 * 1000 * 1000
+        let message = why ? why
+            : file.size > 500 * 1000 * 1000
             ? 'Couldn\'t open "' + file.name + '": it\'s ' + Math.round(file.size / 1000000) + ' MB, and the browser can only read files up to about 500 MB.'
             : 'Couldn\'t read "' + file.name + '". Was it moved, renamed, or deleted? Try picking it again.';
 
@@ -357,7 +367,7 @@ fileInput.addEventListener('change', function (event) {
         //    Broken?           Read it again with the older Excel rulebook.
         //    Really UTF-8?     Then the file truly has a  �  in it.  Carry on with this text.
         //  (Just seeing a  �  isn't enough to decide:  a UTF-8 file is ALLOWED to have one.)
-        if (encoding === 'utf-8' && !checkedWhole && text.indexOf('�') !== -1) {
+        if (encoding === 'utf-8' && !checkedWhole && text.indexOf('\uFFFD') !== -1) {
 
             checkedWhole = true;
             setLoadingLabel('Checking the letters...');
@@ -375,6 +385,13 @@ fileInput.addEventListener('change', function (event) {
             });
             return;
         }
+
+        useText(text);                      //  the text is good.  Cut it up!
+    };
+
+
+    //  CUT UP THE TEXT  (a CSV file's text,  or an Excel file's sheet turned into CSV text).
+    function useText(text) {
 
         let spot = 0;                       //  where we are in it
 
@@ -515,9 +532,15 @@ fileInput.addEventListener('change', function (event) {
             rowCount    = count;
             rowCache    = new Map();            //  new file  =  forget the old file's rows
             cacheCells  = 0;
-            fileNote    = encoding === 'windows-1252'
+            xlsxInfo    = excel;                //  the Excel notes  (null for a CSV)
+            fileNote    = excel !== null
+                ? (excel.hasDates ? '  ·  dates shown as YYYY-MM-DD  (originals kept)' : '') +
+                  (excel.unsolved > 0 ? '  ·  ' + excel.unsolved + ' formula(s) had no saved answer  (shown as formulas)' : '') +
+                  (excel.recalc ? '  ·  ⚠ this file asks Excel to recalculate:  formula answers may be out of date' : '')
+                : encoding === 'windows-1252'
                 ? '  ·  read as Windows-1252  (an older Excel format)'
                 : '';
+            showBadge();                        //  "XLSX SPREADSHEET"  (or nothing, for a CSV)
             columnCount = longest.length;       //  the widest row decides how many columns there are
             searchText  = null;                 //  new file  =  throw away the old search copy
             allRows     = null;                 //  ...and the old "every row" list
@@ -536,19 +559,158 @@ fileInput.addEventListener('change', function (event) {
         }
 
         cutSomeRows();                          //  take the first bite
-    };
+    }
 
 
-    //  GO!  But first:  check the first 4 MB.  Breaks UTF-8's rules?  Use the older Excel rulebook.
-    //  (4 MB is quick, and almost always enough:  the safety net up in onload catches the rest.)
-    isUtf8(file, 4 * 1024 * 1024, function (ok) {
+    //  GO!   But first:  WHAT KIND of file is it?
+    //  Not by its name:  by its first few bytes.  (A file can be named anything.)
+    //
+    //      50 4B 03 04   ("PK")   =  a zip file  =  an Excel .xlsx         ->  xlsxI.js reads it
+    //      D0 CF 11 E0            =  an old Excel .xls  (or a password-locked .xlsx)  ->  say so
+    //      anything else          =  text  (a CSV)
+    file.slice(0, 8).arrayBuffer().then(function (head) {
 
         if (myLoad !== loadId) return;      //  a newer file?  Forget this one.
 
-        encoding = ok ? 'utf-8' : 'windows-1252';
-        reader.readAsText(file, encoding);  //  start reading
+        const b = new Uint8Array(head);
+
+        if (b[0] === 0x50 && b[1] === 0x4B && b[2] === 0x03 && b[3] === 0x04) {
+            readAsExcel();
+            return;
+        }
+
+        if (b[0] === 0xD0 && b[1] === 0xCF && b[2] === 0x11 && b[3] === 0xE0) {
+            couldNotRead('Couldn\'t open "' + file.name + '": it\'s an old Excel file (.xls), or a password-protected one. ' +
+                         'In Excel:  File → Save As → Excel Workbook (.xlsx)  or  CSV,  then pick that.');
+            return;
+        }
+
+        //  Text.  Check the first 4 MB:  breaks UTF-8's rules?  Use the older Excel rulebook.
+        //  (4 MB is quick, and almost always enough:  the safety net up in onload catches the rest.)
+        isUtf8(file, 4 * 1024 * 1024, function (ok) {
+
+            if (myLoad !== loadId) return;  //  a newer file?  Forget this one.
+
+            encoding = ok ? 'utf-8' : 'windows-1252';
+            reader.readAsText(file, encoding);      //  start reading
+        });
+
+    }, function () {
+        couldNotRead();                     //  couldn't even read the first 8 bytes
     });
-});
+
+
+    //  An Excel file:  xlsxI.js turns its first sheet into CSV text.  Then it's cut up like any CSV.
+    function readAsExcel() {
+
+        setLoadingLabel('Opening the spreadsheet...');
+
+        readXlsx(file, function () { return myLoad === loadId; }, sheet).then(function (result) {
+
+            if (myLoad !== loadId) return;
+            setProgress(0.2);               //  unpacked + translated  =  the "reading" part is done
+            excel = result.info;
+            useText(result.text);
+
+        }, function (problem) {
+
+            if (myLoad !== loadId || problem === XLSX_STALE) return;     //  a newer file?  Not a real problem.
+            couldNotRead(xlsxProblem(problem, file.name));
+        });
+    }
+}
+
+
+
+// ----------------------------------------------------------
+//
+//    THE "XLSX SPREADSHEET" BADGE
+//
+//    An Excel file is NOT a CSV, and the page says so, right under the file bar:
+//
+//        XLSX SPREADSHEET  ·  Sheet1  ·  1 of 3 sheets  ·  1904 dates
+//
+//  (It shows the first sheet that isn't hidden.  "2 of 3"  =  the 1st one was hidden.)
+//
+//    A CSV?  No badge.
+//
+// ----------------------------------------------------------
+
+const fileBadge = document.getElementById('fileBadge');
+const sheetTabs = document.getElementById('sheetTabs');
+
+function showBadge() {
+
+    showSheetTabs();
+
+    if (xlsxInfo === null) {
+        fileBadge.hidden = true;
+        return;
+    }
+
+    fileBadge.textContent = 'XLSX SPREADSHEET  ·  ' + xlsxInfo.sheetName +
+        (xlsxInfo.sheetCount > 1 ? '  ·  ' + xlsxInfo.sheetNumber + ' of ' + xlsxInfo.sheetCount + ' sheets' : '') +
+        (xlsxInfo.date1904 ? '  ·  1904 dates' : '');
+    fileBadge.hidden = false;
+}
+
+
+
+// ----------------------------------------------------------
+//
+//    THE SHEET TABS   (an Excel file with more than one sheet)
+//
+//    Like the tabs at the bottom of Excel.  One button per sheet, joined into one bar:
+//
+//        ┌──────────┬──────────┬──────────────────┬──────────┐
+//        │▓Q1 Sales │▒ Q2 Sales│▒ Archive (hidden)│░ Chart1  │
+//        └──────────┴──────────┴──────────────────┴──────────┘
+//           ▓ = the one you're on  (dark, like the badge)
+//           ▒ = click to open it
+//           ░ = a chart sheet:  no rows to show  (faded, can't click)
+//
+//    Click one  ->  the SAME file loads again, showing that sheet.
+//    (It goes through loadFile like any file, so the loader, search, everything just works.)
+//
+// ----------------------------------------------------------
+
+function showSheetTabs() {
+
+    sheetTabs.textContent = '';                                 //  wipe the old tabs
+
+    if (xlsxInfo === null || xlsxInfo.sheets.length < 2) {      //  a CSV, or just 1 sheet?  No tabs.
+        sheetTabs.hidden = true;
+        return;
+    }
+
+    xlsxInfo.sheets.forEach(function (sheet, i) {
+
+        const tab     = document.createElement('button');
+        const current = i + 1 === xlsxInfo.sheetNumber;
+
+        tab.className = 'sheet-tab';
+        tab.setAttribute('role', 'tab');
+        tab.setAttribute('aria-selected', current);
+        tab.textContent = sheet.name + (sheet.hidden ? '  (hidden)' : '') + (sheet.chart ? '  (chart)' : '');
+
+        if (sheet.hidden) tab.classList.add('hidden-sheet');
+
+        if (sheet.chart) {
+            tab.disabled = true;
+            tab.title = 'A chart sheet:  it has no rows to show.';
+        } else if (!current) {
+            const file = xlsxInfo.file;                         //  (the file, as it is right now)
+            tab.title = 'Open the sheet "' + sheet.name + '"';
+            tab.addEventListener('click', function () {
+                loadFile(file, i);
+            });
+        }
+
+        sheetTabs.appendChild(tab);
+    });
+
+    sheetTabs.hidden = false;
+}
 
 
 
@@ -1918,6 +2080,18 @@ function makeRow(num, cells, query, index) {
         if (looksLikeNumber(shown)) cell.classList.add('num');     //  numbers go on the right
 
         if (text.length > 40 || shown !== text) cell.title = short; //  too long, or has line breaks?  hover to read it
+
+        //  An Excel FORMULA?  A glowing green  ƒ  in the corner,  and the formula when you hover.
+        //  (Row "num" here  =  Excel's row - 1,  so the cell's spot in the Excel notes is  num × 16384 + col.)
+        if (xlsxInfo !== null) {
+            const kept = xlsxInfo.cells.get(num * EXCEL_MAX_COLS + col);
+            if (kept !== undefined && kept.formula !== null) {
+                cell.classList.add('formula');
+                cell.title = kept.raw === null
+                    ? kept.formula + '   (no saved answer:  open the file in Excel and save it, to fill one in)'
+                    : kept.formula;
+            }
+        }
 
         paintMatches(cell, shown, query);
 

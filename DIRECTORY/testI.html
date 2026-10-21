@@ -113,11 +113,18 @@
     <!--
         2.  The "Choose File" button
 
-            type="file"    ->  makes it a "pick a file" button
-            accept=".csv"  ->  only shows CSV files when you pick
+            type="file"          ->  makes it a "pick a file" button
+            accept=".csv,.xlsx"  ->  only shows CSV and Excel files when you pick
+
+        The badge under it says "XLSX SPREADSHEET" when an Excel file is open.
+        Under THAT:  the sheet tabs, when the Excel file has more than one sheet.
+        (Both hidden for a CSV.  The brain fills them in.)
     -->
 
-    <input type="file" id="csvFileInput" accept=".csv">
+    <input type="file" id="csvFileInput" accept=".csv,.xlsx">
+
+    <div id="fileBadge" hidden></div>
+    <div id="sheetTabs" role="tablist" aria-label="Sheets" hidden></div>
 
 
 
@@ -214,8 +221,12 @@
             It goes LAST, on purpose.
             The brain needs all the pieces above to exist first,
             so it can find them.
+
+            The Excel translator  (xlsxI.js)  goes right before it,
+            because the brain uses it.
     -->
 
+    <script src="xlsxI.js"></script>
     <script src="scriptI.js"></script>
 
 

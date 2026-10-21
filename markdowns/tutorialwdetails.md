@@ -9,6 +9,7 @@ You're going to build a web page that opens a CSV file and shows it like a **min
 - Go to any row, or expand to see everything
 - **It stays fast, even with hundreds of thousands of rows**
 - A glass **hexagon** in the corner opens a theme menu (the default theme is **Neo-Neutral**)
+- It opens **Excel files (`.xlsx`)** too, with dates done carefully (Part 5)
 
 You'll build it **one piece at a time**. After each part there's a **✅ Test it** step, so you always know it's working before you move on.
 
@@ -27,6 +28,8 @@ A web page is usually 3 files working together:
 | `testI.html` | **the skeleton** | WHAT is on the page |
 | `styleI.css` | **the clothes** | How it LOOKS |
 | `scriptI.js` | **the brain** | What it DOES |
+
+(Later, Part 5 adds a 4th file: `xlsxI.js`, **the translator**, which reads Excel files.)
 
 **We build them in this order:**
 
@@ -1666,7 +1669,7 @@ fileInput.addEventListener('change', function (event) {
         //   Broken?           Read it again with the older Excel rulebook.
         //   Really UTF-8?     Then the file truly has a � in it. Carry on with this text.
         // (Just seeing a � isn't enough to decide: a UTF-8 file is ALLOWED to have one.)
-        if (encoding === 'utf-8' && !checkedWhole && text.indexOf('�') !== -1) {
+        if (encoding === 'utf-8' && !checkedWhole && text.indexOf('\uFFFD') !== -1) {
 
             checkedWhole = true;
             setLoadingLabel('Checking the letters...');
@@ -3679,15 +3682,1414 @@ setTheme(currentTheme);
 Refresh. You should have:
 
 - [ ] A darker grey page than before (that's Neo-Neutral)
-- [ ] A solid slate hexagon in the top-left, with a bright glowing outline
+- [ ] A near-black glass hexagon in the top-left, with a shiny glowing outline
 - [ ] Mouse on it → it grows a little and glows brighter
-- [ ] In the menu, the tiny hexagon is solid with a crisp white outline (no glow)
+- [ ] In the menu, the tiny hexagon is the same dark glass, with a crisp white outline (no glow)
 - [ ] Click it → it turns, and the menu pops down underneath
-- [ ] **Neo-Neutral**, glowing, with a ✓ next to it
+- [ ] The menu is a tiny sheet, colored like a glowing chessboard: a dark "Theme" header, and **Neo-Neutral** on a light square with a ✓
 - [ ] Click the name, click anywhere else, or press **Escape** → the menu goes away
-- [ ] Open a CSV with the menu open: the menu looks **brighter and closer** than the CSV window
+- [ ] Open a CSV with the menu open: the menu is made of the same glass as the CSV window
 
-**Now you're done!** 🎉
+**The CSV reader is done!** 🎉 One more part: Part 5 teaches it to open Excel files too.
+
+<br>
+
+---
+
+<br>
+
+# PART 5: Reading Excel Files (`xlsxI.js`) 📗
+
+So far the reader opens CSV files. Now it opens **Excel files (`.xlsx`)** too.
+
+The trick: we don't teach the whole brain about Excel. We add a **translator**. It turns the first sheet into the same kind of text a CSV file has, and hands it to the brain. Storage, search, scrolling, the treadmills: all of it just works, because the brain only ever sees CSV text.
+
+```text
+   a CSV file   ─────────────────────────────────────────────▶  the brain  (Parts 2-4)
+   an Excel file ──▶  xlsxI.js  ──▶  CSV text  ───────────────▶  the brain
+                       (the translator)
+```
+
+The page also makes it impossible to miss that it's NOT a CSV:
+
+```text
+   ┌─────────────┬──────────────┐
+   │▓ Choose File│░ sales.xlsx  │
+   └─────────────┴──────────────┘
+      ┌──────────────────────────────┐
+      │ XLSX SPREADSHEET  ·  Sheet1  │      ← a dark chessboard square (Part 4's colors)
+      └──────────────────────────────┘
+   Rows 1–15 of 1000  ·  dates shown as YYYY-MM-DD  (originals kept)
+```
+
+This part touches **all 4 files**: a brand-new one (`xlsxI.js`), plus a few changes to the skeleton, the brain, and the clothes.
+
+<br>
+
+### What's inside an .xlsx file?
+
+An `.xlsx` file is really a **zip file** full of text files. (Rename one to `.zip` and you can open it!)
+
+```text
+sales.xlsx  (a zip)
+├── _rels/.rels                ← "the workbook is at xl/workbook.xml"
+├── xl/workbook.xml            ← the sheet names, and which CALENDAR the dates use
+├── xl/_rels/workbook.xml.rels ← "sheet rId1 is at worksheets/sheet1.xml" ...
+├── xl/worksheets/sheet1.xml   ← the cells:   <c r="B3" s="2"><v>43586</v></c>
+├── xl/sharedStrings.xml       ← every word, stored ONCE:   word #4 = "Chicago"
+└── xl/styles.xml              ← how numbers LOOK (which ones are dates)
+```
+
+**The translator's job, in 4 steps:**
+
+1. **Unzip** (with a guard against "zip bombs").
+2. **Read** the words, the styles, and the sheet.
+3. **Turn every cell into text** (dates the careful way).
+4. **Glue it into CSV text**, and hand it to the brain.
+
+> **Nothing is lost.** The page SHOWS a simple version of each cell (dates as `2019-05-01`, numbers rounded like Excel). But for every cell that looks different from what Excel stored, the **original** is kept: the exact number, the format, the formula. So a future "save back to Excel" can put back exactly what was there.
+
+<br>
+
+### Step 5.1: Plug in the translator (skeleton)
+
+Make a 4th file next to the others: **`xlsxI.js`**. Then 3 changes in `testI.html`.
+
+**1.** The file button also shows Excel files, and the badge gets its spot right under it:
+
+```html
+    <input type="file" id="csvFileInput" accept=".csv,.xlsx">
+
+    <div id="fileBadge" hidden></div>
+    <div id="sheetTabs" role="tablist" aria-label="Sheets" hidden></div>
+```
+
+**2.** The translator gets plugged in right **before** the brain (the brain uses it):
+
+```html
+    <script src="xlsxI.js"></script>
+    <script src="scriptI.js"></script>
+```
+
+| Code | Baby words |
+|---|---|
+| `accept=".csv,.xlsx"` | The file picker shows CSV AND Excel files. |
+| `<div id="fileBadge" hidden>` | An empty box for the "XLSX SPREADSHEET" badge. Hidden until an Excel file is open. |
+| `<div id="sheetTabs" role="tablist" ...>` | An empty box for the sheet tabs (Step 5.13). `role="tablist"` tells screen readers "these are tabs". |
+
+<br>
+
+### Step 5.2: The top of the translator
+
+Start `xlsxI.js` with the settings. (Everything after this goes in `xlsxI.js` too, in order, until Step 5.9.)
+
+```js
+const XLSX_LIMIT = 512 * 1024 * 1024;    //  the most we'll unzip, in total  (bytes).  More than this?  Stop.
+                                         //  (Same as the biggest CSV the browser can read anyway.)
+
+const EXCEL_MAX_ROWS = 1048576;          //  Excel's own limits.  An address past these is junk.
+const EXCEL_MAX_COLS = 16384;            //  (column XFD)
+```
+
+<br>
+
+### Step 5.3: Dates, the careful way 📅
+
+Excel doesn't store dates. It stores **numbers**: how many days since its "day zero." `43586` = `2019-05-01`. A fraction is the time of day: `0.5` = noon.
+
+**3 traps:**
+
+| Trap | What goes wrong | How we avoid it |
+|---|---|---|
+| **The day that never was** | Excel thinks **February 29, 1900** existed. It didn't (1900 wasn't a leap year). It's a famous bug, kept on purpose so old Lotus 1-2-3 files still work. Every date before it is one day off. | Number `60` is the fake day. Numbers below 60 get one less. |
+| **Two calendars** | Some files (old Mac Excel) count from **1904**. Same number, 4 years apart! | The workbook says which (`date1904`), and we use the right one. |
+| **Time zones** | JavaScript's own `Date` quietly shifts dates by your time zone and daylight saving. A date can come out one day early. | We don't use `Date` at all. Just **whole-number math**: same answer on every computer. |
+
+```js
+const EXCEL_LAST_DAY = 2958465;          //  9999-12-31,  the last date Excel knows
+
+
+//  Days since 1970-01-01  ->  [year, month, day].
+//  (A well-known recipe, "civil from days":  whole numbers only, works for any day.)
+function civilFromDays(z) {
+
+    z += 719468;                                        //  count from March 1, year 0  (so the leap day is the LAST day of a year)
+    const era = Math.floor(z / 146097);                 //  400-year blocks  (146,097 days each)
+    const doe = z - era * 146097;                       //  day of the block            [0, 146096]
+    const yoe = Math.floor((doe - Math.floor(doe / 1460) + Math.floor(doe / 36524) - Math.floor(doe / 146096)) / 365);
+    const doy = doe - (365 * yoe + Math.floor(yoe / 4) - Math.floor(yoe / 100));   //  day of the year  [0, 365]
+    const mp  = Math.floor((5 * doy + 2) / 153);       //  month, counting from March  [0, 11]
+
+    const day   = doy - Math.floor((153 * mp + 2) / 5) + 1;
+    const month = mp < 10 ? mp + 3 : mp - 9;
+    const year  = yoe + era * 400 + (month <= 2 ? 1 : 0);
+
+    return [year, month, day];
+}
+
+
+//  [year, month, day]  ->  days since 1970-01-01.   (The same recipe, backwards.)
+function daysFromCivil(year, month, day) {
+
+    const y   = month <= 2 ? year - 1 : year;           //  January and February count as the END of last year
+    const era = Math.floor(y / 400);
+    const yoe = y - era * 400;
+    const doy = Math.floor((153 * (month > 2 ? month - 3 : month + 9) + 2) / 5) + day - 1;
+    const doe = yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
+
+    return era * 146097 + doe - 719468;
+}
+
+
+//  Excel's day number  ->  [year, month, day].
+//  "date1904"  =  does this file use the 1904 calendar?
+function excelDayToDate(serial, date1904) {
+
+    if (date1904) return civilFromDays(serial - 24107);     //  1904 calendar:  day 0 = 1904-01-01.  No fake day.
+
+    if (serial === 0)  return [1900, 1, 0];                 //  day 0:  Excel shows it as "January 0, 1900"
+    if (serial === 60) return [1900, 2, 29];                //  THE DAY THAT NEVER WAS
+    if (serial < 60)   return civilFromDays(serial - 25568);    //  before it:  one less to skip over
+    return civilFromDays(serial - 25569);                       //  after it:   1970-01-01 is day 25569
+}
+
+
+//  [year, month, day]  ->  Excel's day number.   (Backwards.  For saving back to Excel, someday.)
+function dateToExcelDay(year, month, day, date1904) {
+
+    if (date1904) return daysFromCivil(year, month, day) + 24107;
+
+    if (year === 1900 && month === 1 && day === 0)  return 0;
+    if (year === 1900 && month === 2 && day === 29) return 60;     //  the day that never was
+
+    const serial = daysFromCivil(year, month, day) + 25569;
+    return serial <= 60 ? serial - 1 : serial;                     //  before the fake day?  one less
+}
+
+
+//  2 digits, with a 0 in front if needed:   7  ->  "07"
+function two(n) {
+    return n < 10 ? '0' + n : String(n);
+}
+
+
+//  A date cell, as text.   "kind" says what the cell's format shows:
+//      'date'      ->  2019-05-01
+//      'datetime'  ->  2019-05-01 13:08          (+ ":45" if the format shows seconds)
+//      'time'      ->  13:08                     (time of day)
+//      'elapsed'   ->  37:30                     (a format like [h]:mm:  hours keep counting past 24)
+//  Not a real Excel date  (negative, or after 9999)?  Gives back null, and the cell shows as a plain number.
+function excelDateText(value, kind, seconds, date1904) {
+
+    if (!(value >= 0) || value >= EXCEL_LAST_DAY + 1) return null;
+
+    let days = Math.floor(value);
+    let secs = Math.round((value - days) * 86400);      //  the fraction  ->  seconds into the day
+
+    if (secs === 86400) {                               //  rounded up all the way to midnight?  That's the next day.
+        days++;
+        secs = 0;
+    }
+
+    const hours = Math.floor(secs / 3600);
+    const time  = two(hours) + ':' + two(Math.floor(secs / 60) % 60) + (seconds ? ':' + two(secs % 60) : '');
+
+    if (kind === 'time')    return time;
+    if (kind === 'elapsed') return (days * 24 + hours) + time.slice(2);
+
+    const ymd  = excelDayToDate(days, date1904);
+    const date = ymd[0] + '-' + two(ymd[1]) + '-' + two(ymd[2]);
+
+    return kind === 'datetime' ? date + ' ' + time : date;
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `Math.floor(a / b)` | Divide, and throw away the leftover. (Whole numbers only.) |
+| `return [year, month, day]` | Hand back 3 things at once, in a list. |
+| `serial - 25569` | Excel's day 25569 = 1970-01-01, where the recipe counts from. |
+| `!(value >= 0)` | "Not zero or more." Also catches `NaN` (not a number at all), because `NaN >= 0` is false. |
+
+> **How do we KNOW it's right?** The test (`dates.html` in Castle Claude) checks **every** Excel date there is: all 2,958,466 days in the 1900 calendar and 2,957,004 in the 1904 calendar. Each one goes number → date → number, and must come back the same. And each day must be the day AFTER the one before, checked with a separate, plain calendar rule. Then we broke the math on purpose 3 ways (forgot Feb 29, wrong 1904 offset, wrong leap rule): the test caught all 3.
+
+> **Why `dateToExcelDay` (backwards)?** Nothing uses it yet! It's for saving back to Excel someday. And it lets the test prove the math works both ways.
+
+<br>
+
+### Step 5.4: Numbers, shown like Excel
+
+```js
+function generalNumber(raw) {
+
+    const n = Number(raw);
+
+    if (raw.trim() === '' || !isFinite(n)) return raw;     //  not a number at all?  Show it as it is.
+    if (n === 0) return '0';                                //  (also turns  -0  into  0)
+    if (Number.isInteger(n) && Math.abs(n) < 1e15) return String(n);
+
+    let text  = n.toPrecision(15);                          //  15 digits:  "548.971500000000"   or   "1.23456789012346e+20"
+    let power = '';
+
+    const e = text.indexOf('e');
+    if (e !== -1) {                                         //  huge or tiny?  Excel writes it like  1.23456789012346E+20
+        const p = Number(text.slice(e + 1));
+        power = 'E' + (p < 0 ? '-' : '+') + two(Math.abs(p));
+        text  = text.slice(0, e);
+    }
+
+    if (text.indexOf('.') !== -1) text = text.replace(/0+$/, '').replace(/\.$/, '');   //  548.971500000000  ->  548.9715
+
+    return text + power;
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `n.toPrecision(15)` | The number, written with exactly 15 digits. |
+| `.replace(/0+$/, '')` | Remove all the zeros at the very end. |
+| `Number.isInteger(n)` | "Is it a whole number?" |
+
+> **Why 15 digits?** Excel stores `522.83` as `522.83000000000004` (that's how computers store decimals: almost exact, never quite). Excel itself only SHOWS 15 digits, so it shows `522.83`. So do we. The stored number is kept in the Excel notes.
+
+<br>
+
+### Step 5.5: Which cells are dates?
+
+The number alone can't say: `43586` could be a date, or 43,586 cases of beer. Only the cell's **style** knows. A style points to a number format: a built-in one by number (`14` = a date), or a custom one written out (`yyyy-mm-dd`).
+
+```js
+const BUILT_IN_DATES = {
+    14: ['date', false], 15: ['date', false], 16: ['date', false], 17: ['date', false],
+    18: ['time', false], 19: ['time', true],  20: ['time', false], 21: ['time', true],
+    22: ['datetime', false],
+    45: ['time', true],  46: ['elapsed', true], 47: ['time', true]
+};
+for (let id = 27; id <= 36; id++) BUILT_IN_DATES[id] = ['date', false];    //  (Asian-language date formats)
+for (let id = 50; id <= 58; id++) BUILT_IN_DATES[id] = ['date', false];
+
+
+//  A custom format code  ->  [kind, shows seconds?],  or null if it isn't a date or time.
+function formatKind(code) {
+
+    let f = code
+        .replace(/"[^"]*"/g, '')            //  words in quotes
+        .replace(/\\./g, '')                //  \x   (just this character)
+        .replace(/[_*]./g, '');             //  _x  *x   (spacing tricks)
+
+    f = f.split(';')[0];                    //  only the first part  (the part for positive numbers)
+
+    const elapsed = /\[(h+|m+|s+)\]/i.test(f);
+
+    f = f.replace(/\[[^\]]*\]/g, '')        //  [Red]  [$-409]  [h] ...
+         .replace(/am\/pm|a\/p/gi, '')
+         .toLowerCase();
+
+    const date = /[yd]/.test(f);
+    const time = /[hs]/.test(f) || elapsed;
+
+    if (!date && !time && f.indexOf('m') === -1) return null;     //  no date letters at all:  a plain number format
+
+    const seconds = f.indexOf('s') !== -1;
+
+    if (elapsed)      return ['elapsed', seconds];
+    if (date && time) return ['datetime', seconds];
+    if (time)         return ['time', seconds];
+    return ['date', false];                 //  y, d, or just m  (months)
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `.replace(/"[^"]*"/g, '')` | Remove everything in quotes. (`"Qty: "0` has a `y` in it, but it's just a word, not a date!) |
+| `.replace(/\\./g, '')` | Remove a backslash AND the character after it. (`\d` means "just the letter d", not "day".) |
+| `.split(';')[0]` | A format can have 4 parts (positive; negative; zero; text). Only look at the first. |
+| `/[yd]/.test(f)` | "Is there a `y` or a `d` in it?" |
+
+> **Why so careful?** Every format below has a date letter in it, and NONE of them are dates: `"Qty: "0` (quoted), `[Red]0.00` (the `d` is in a color name), `0.0 \d\a\y\s` (escaped letters). Get it wrong, and a price shows up as a date in 1900.
+
+<br>
+
+### Step 5.6: Reading the XML, safely
+
+The file came from outside, so it's treated like a **stranger**. We read the XML with plain text searching (`indexOf`), NOT the browser's XML reader. Tricky XML (like "billion laughs," which makes a tiny file explode into gigabytes) has nothing to grab onto.
+
+```js
+function attr(tag, name) {
+
+    const found = new RegExp('\\s' + name + '\\s*=\\s*(?:"([^"]*)"|\'([^\']*)\')').exec(tag);
+    if (found === null) return null;
+
+    return decodeXml(found[1] !== undefined ? found[1] : found[2]);
+}
+
+
+//  Turn XML's codes back into letters.   ONLY these:
+//      &amp; &lt; &gt; &quot; &apos;     the 5 standard ones
+//      &#233;  &#xE9;                    a letter by its number
+//      _x000D_                           Excel's own code for invisible characters
+//  Anything else is left exactly as it is.  (So there's nothing for tricky XML to grab onto.)
+function decodeXml(text) {
+
+    if (text.indexOf('&') !== -1) {
+        text = text.replace(/&(amp|lt|gt|quot|apos|#[0-9]{1,7}|#x[0-9a-fA-F]{1,6});/g, function (all, code) {
+            if (code === 'amp')  return '&';
+            if (code === 'lt')   return '<';
+            if (code === 'gt')   return '>';
+            if (code === 'quot') return '"';
+            if (code === 'apos') return '\'';
+            return safeChar(code[1] === 'x' ? parseInt(code.slice(2), 16) : parseInt(code.slice(1), 10));
+        });
+    }
+
+    if (text.indexOf('_x') !== -1) {
+        text = text.replace(/_x([0-9a-fA-F]{4})_/g, function (all, hex) { return safeChar(parseInt(hex, 16)); });
+    }
+
+    return text;
+}
+
+
+//  A letter by its number  (only real letters:  no "nothing" characters, no impossible numbers).
+function safeChar(n) {
+
+    const ok = n === 9 || n === 10 || n === 13 ||
+               (n >= 0x20 && n <= 0xD7FF) || (n >= 0xE000 && n <= 0xFFFD) || (n >= 0x10000 && n <= 0x10FFFF);
+
+    return ok ? String.fromCodePoint(n) : '';
+}
+
+
+//  All the words in one shared word  (<si>)  or inline word  (<is>).
+//  A word can come in pieces  (one piece bold, one piece red):  <r><t>Hel</t></r><r><t>lo</t></r>  ->  "Hello"
+//  <rPh> is a pronunciation guide for Japanese  (not part of the word), so it's skipped.
+function textOf(part) {
+
+    if (part.indexOf('<rPh') !== -1) part = part.replace(/<rPh\b[\s\S]*?<\/rPh>/g, '');
+
+    const piece = /<t(?:\s[^>/]*)?>([\s\S]*?)<\/t>/g;
+    let text = '';
+    let found;
+
+    while ((found = piece.exec(part)) !== null) text += found[1];
+
+    return decodeXml(text);
+}
+
+
+//  A cell address  ->  its column number.    "A3" -> 0,   "B3" -> 1,   "AA7" -> 26.   Junk -> -1.
+function columnOf(ref) {
+
+    let col = 0;
+    let i   = 0;
+
+    while (i < ref.length && i < 4) {
+        const c = ref.charCodeAt(i);
+        if (c < 65 || c > 90) break;        //  not  A to Z?  The letters are over.
+        col = col * 26 + (c - 64);
+        i++;
+    }
+
+    return i === 0 || i > 3 ? -1 : col - 1;
+}
+
+
+//  A column number  ->  its letters.    0 -> "A",   1 -> "B",   26 -> "AA".   (columnOf, backwards)
+function columnName(col) {
+
+    let name = '';
+
+    for (let n = col + 1; n > 0; n = Math.floor((n - 1) / 26)) {
+        name = String.fromCharCode(65 + (n - 1) % 26) + name;
+    }
+
+    return name;
+}
+
+
+//  COPY A FORMULA DOWN  (or across),  the way Excel does.
+//
+//  Excel saves a formula that was copied down a column ONCE  (the "shared" formula),
+//  and the other cells just say "same as group #0".  To show THEIR formula,
+//  move every cell address by how far the cell is from the first one:
+//
+//      first cell, row 8:    =A7*2
+//      row 9  (1 down):      =A8*2          (A7 moved down 1)
+//      =$A$1+B4  ->          =$A$1+B5       ($ means "don't move this part")
+//
+//  Left alone:  words in "quotes",  sheet names in 'quotes',  and function names like LOG10( .
+function shiftFormula(text, rows, cols) {
+
+    return text.replace(
+        /("[^"]*")|('[^']*')|(?<![A-Za-z0-9_.])(\$?)([A-Z]{1,3})(\$?)([0-9]+)(?![0-9A-Za-z_(.])/g,
+        function (all, quoted, sheet, lockCol, letters, lockRow, digits) {
+
+            if (quoted || sheet) return all;                        //  words or sheet names in quotes:  not addresses
+
+            const col = lockCol ? columnOf(letters) : columnOf(letters) + cols;
+            const row = lockRow ? Number(digits) : Number(digits) + rows;
+
+            if (columnOf(letters) === -1) return all;               //  not really an address  (too many letters)
+            if (col < 0 || col >= EXCEL_MAX_COLS || row < 1 || row > EXCEL_MAX_ROWS) return '#REF!';    //  moved off the sheet  (Excel says the same)
+
+            return lockCol + columnName(col) + lockRow + row;
+        });
+}
+
+
+//  One cell, ready for CSV:  a comma, quote or line break inside?  Wrap it in quotes  (and double any quotes).
+function csvCell(text) {
+    return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `new RegExp(...)` | Build a search pattern out of words. |
+| `&amp;` `&lt;` `&gt;` `&quot;` `&apos;` | XML's codes for `&` `<` `>` `"` `'`. Only these 5 (plus letter numbers) get turned back into letters. Anything else stays exactly as written. |
+| `String.fromCodePoint(n)` | The letter with this number. `233` = `é`. |
+| `_x000D_` | Excel's own code for invisible characters. `000D` = a line break. |
+| `(?<![A-Za-z0-9_.])` | "...but NOT right after a letter, digit, `_` or `.`." (So the `G10` inside `LOG10` isn't an address.) |
+| `(?![0-9A-Za-z_(.])` | "...and NOT right before one of these, or a `(`." (So `LOG10(` is a function, not an address.) |
+| `lockCol ? ... : ... + cols` | A `$` in front means "don't move this part". No `$`? Move it. |
+
+> **Why does `shiftFormula` exist?** When you copy a formula down a column in Excel, the file saves it ONCE (a "shared" formula), and the other cells just say "same as group #0". To show THEIR formula, every address has to move by how far that cell is from the first one: row 8 has `=A7*2`, so row 9 has `=A8*2`. Exactly what Excel does when you copy. Words in `"quotes"` and sheet names in `'quotes'` are left alone, and so is anything with a `$` in front.
+
+<br>
+
+### Step 5.7: Unzipping 🗜️
+
+A zip file keeps its **table of contents** at the END. It lists every file inside: its name, where it starts, and how big it is (packed and unpacked). The browser can unpack ("deflate") by itself. We just find the pieces, and **count as it unpacks**.
+
+```js
+function zipEntries(bytes) {
+
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
+    //  The very end of the table has a marker  (50 4B 05 06).  Look for it, from the end backwards.
+    let end = -1;
+    for (let i = bytes.length - 22; i >= 0 && i >= bytes.length - 22 - 65535; i--) {
+        if (view.getUint32(i, true) === 0x06054b50) { end = i; break; }
+    }
+    if (end === -1) throw new Error('damaged');
+
+    const count = view.getUint16(end + 10, true);           //  how many files are inside
+    let at      = view.getUint32(end + 16, true);           //  where the table starts
+
+    if (count === 0xFFFF || at === 0xFFFFFFFF) throw new Error('too big');     //  a "ZIP64" file:  over 4 GB.  Way too big anyway.
+
+    const entries = new Map();
+    const names   = new TextDecoder('utf-8');
+
+    for (let k = 0; k < count; k++) {
+
+        if (at + 46 > bytes.length || view.getUint32(at, true) !== 0x02014b50) throw new Error('damaged');
+
+        const nameLength  = view.getUint16(at + 28, true);
+        const extraLength = view.getUint16(at + 30, true);
+        const noteLength  = view.getUint16(at + 32, true);
+
+        entries.set(names.decode(bytes.subarray(at + 46, at + 46 + nameLength)), {
+            flags:  view.getUint16(at + 8, true),           //  bit 1 on  =  locked with a password
+            method: view.getUint16(at + 10, true),          //  0 = not packed,  8 = deflate
+            packed: view.getUint32(at + 20, true),          //  size inside the zip
+            size:   view.getUint32(at + 24, true),          //  size unpacked
+            local:  view.getUint32(at + 42, true)           //  where its own little header is
+        });
+
+        at += 46 + nameLength + extraLength + noteLength;
+    }
+
+    return entries;
+}
+
+
+//  Unpack one file from the zip, as text.   (null = it isn't in there.)
+//  "budget.used" counts EVERY byte unpacked so far, for the whole spreadsheet.
+async function unzipText(bytes, entries, name, budget) {
+
+    const entry = entries.get(name);
+    if (entry === undefined) return null;
+
+    if (entry.flags & 1) throw new Error('locked');
+    if (entry.packed === 0xFFFFFFFF || entry.size === 0xFFFFFFFF || entry.local === 0xFFFFFFFF) throw new Error('too big');
+
+    //  Its own little header says how long its name is, so we know where the packed bytes start.
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (entry.local + 30 > bytes.length || view.getUint32(entry.local, true) !== 0x04034b50) throw new Error('damaged');
+
+    const start = entry.local + 30 + view.getUint16(entry.local + 26, true) + view.getUint16(entry.local + 28, true);
+    if (start + entry.packed > bytes.length) throw new Error('damaged');
+
+    const packed  = bytes.subarray(start, start + entry.packed);
+    const decoder = new TextDecoder('utf-8');
+
+    if (entry.method === 0) {                               //  not packed at all
+        budget.used += packed.length;
+        if (budget.used > XLSX_LIMIT) throw new Error('bomb');
+        return decoder.decode(packed);
+    }
+
+    if (entry.method !== 8) throw new Error('unsupported');
+
+    //  Un-deflate it a piece at a time, COUNTING as we go.
+    const reader = new Blob([packed]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
+    const parts  = [];
+
+    try {
+        while (true) {
+            const step = await reader.read();
+            if (step.done) break;
+
+            budget.used += step.value.length;
+            if (budget.used > XLSX_LIMIT) {                 //  too much!  Stop unpacking right now.
+                reader.cancel();
+                throw new Error('bomb');
+            }
+            parts.push(decoder.decode(step.value, { stream: true }));
+        }
+    } catch (problem) {
+        throw problem.message === 'bomb' ? problem : new Error('damaged');     //  (the packed bytes were broken)
+    }
+
+    parts.push(decoder.decode());
+    return parts.join('');
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `new DataView(...)` | Read raw bytes as numbers. |
+| `view.getUint32(i, true)` | The 4 bytes at spot `i`, as one number. `true` = "littlest byte first" (that's how zip files write numbers). |
+| `0x06054b50` | The "end of the table" marker. (Written backwards in the file: `50 4B 05 06` = `PK` + 5 + 6.) |
+| `async function` / `await` | A job that WAITS for slow things (like unpacking) without freezing the page. `await` = "wait for this, then keep going." |
+| `new DecompressionStream('deflate-raw')` | The browser's own unpacker. |
+| `entry.flags & 1` | "Is the first little switch on?" That one means "locked with a password." |
+
+> **What's a zip bomb?** A tiny file that unpacks into a GIANT one. Our test bomb is 583 KB on disk and unpacks to 600 MB. Because we count every byte as it comes out, we stop at `XLSX_LIMIT` (512 MB), long before the browser runs out of memory.
+
+<br>
+
+### Step 5.8: Finding the parts
+
+The parts point to each other with **relationships** (`.rels` files). Never just guess `sheet1.xml`: the first sheet isn't always called that, and it can live anywhere.
+
+```js
+function relationships(xml) {
+
+    const list = [];
+    if (xml === null) return list;
+
+    const tag = /<Relationship\b[^>]*>/g;
+    let found;
+
+    while ((found = tag.exec(xml)) !== null) {
+        if (attr(found[0], 'TargetMode') === 'External') continue;     //  a link to somewhere else:  not a part of this file
+        list.push({ id: attr(found[0], 'Id'), type: attr(found[0], 'Type') || '', target: attr(found[0], 'Target') || '' });
+    }
+
+    return list;
+}
+
+
+//  Where a "target" really is.   folder "xl/"  +  "worksheets/sheet1.xml"   ->   "xl/worksheets/sheet1.xml"
+//  (A target starting with  /  is from the top.  ".." means "up one folder".)
+function partPath(folder, target) {
+
+    const pieces = (target.charAt(0) === '/' ? target.slice(1) : folder + target).split('/');
+    const path   = [];
+
+    pieces.forEach(function (piece) {
+        if (piece === '..') path.pop();
+        else if (piece !== '.' && piece !== '') path.push(piece);
+    });
+
+    return path.join('/');
+}
+
+
+//  The relationship whose type ends with this word  (like "/styles").
+function findRel(list, kind) {
+    return list.find(function (rel) { return rel.type.slice(-kind.length - 1) === '/' + kind; }) || null;
+}
+```
+
+<br>
+
+### Step 5.9: Read the whole spreadsheet
+
+This is the main job. It uses everything above: unzip → find the parts → read the words and styles → walk the sheet, row by row, cell by cell → CSV text. It works in **bites** (like everything else), so a big spreadsheet never freezes the page.
+
+```js
+let xlsxInfo = null;
+
+const XLSX_STALE = new Error('stale');      //  "a newer file was picked:  forget this one"  (not a real problem)
+```
+
+```js
+async function readXlsx(file, isCurrent, choice) {
+
+    //  Big jobs are done in BITES  (like everything else),  so the page never freezes.
+    let stopAt = performance.now() + CHUNK_TIME;
+
+    async function breathe() {
+        if (performance.now() < stopAt) return;
+        await new Promise(function (go) { setTimeout(go, 0); });
+        if (!isCurrent()) throw XLSX_STALE;
+        stopAt = performance.now() + CHUNK_TIME;
+    }
+
+
+    //  1.  UNZIP:  the table of contents, then the parts we need.
+    const bytes   = new Uint8Array(await file.arrayBuffer());
+    if (!isCurrent()) throw XLSX_STALE;
+
+    const entries = zipEntries(bytes);
+    const budget  = { used: 0 };
+
+
+    //  2.  FIND THE WORKBOOK, and its relationships.
+    const top          = relationships(await unzipText(bytes, entries, '_rels/.rels', budget));
+    const bookRel      = findRel(top, 'officeDocument');
+    const bookPath     = bookRel ? partPath('', bookRel.target) : 'xl/workbook.xml';
+    const bookFolder   = bookPath.slice(0, bookPath.lastIndexOf('/') + 1);              //  "xl/"
+    const bookXml      = await unzipText(bytes, entries, bookPath, budget);
+    if (bookXml === null) throw new Error('damaged');
+
+    const bookRels     = relationships(await unzipText(bytes, entries, bookFolder + '_rels/' + bookPath.slice(bookFolder.length) + '.rels', budget));
+
+    //  Which calendar?   <workbookPr date1904="1"/>
+    const prTag    = /<workbookPr\b[^>]*>/.exec(bookXml);
+    const date1904 = prTag !== null && /^(1|true)$/.test(attr(prTag[0], 'date1904') || '');
+
+    //  "Excel, recalculate everything when you open me"?   <calcPr fullCalcOnLoad="1"/>
+    //  (Files made by some programs do this, and save 0 or nothing as every formula's answer.
+    //   So the answers we'd show might be WRONG.  We can't recalculate, but we can say so.)
+    const calcTag = /<calcPr\b[^>]*>/.exec(bookXml);
+    const recalc  = calcTag !== null && /^(1|true)$/.test(attr(calcTag[0], 'fullCalcOnLoad') || '');
+
+    //  The sheets, in order.   Each one:  its name,  hidden or not,  and is it a real sheet  (or just a chart)?
+    const sheets = [];
+    const sheetTag = /<sheet\b[^>]*>/g;
+    let found;
+    while ((found = sheetTag.exec(bookXml)) !== null) {
+        const id    = attr(found[0], '[\\w.-]+:id');
+        const rel   = bookRels.find(function (r) { return r.id === id; }) || null;
+        const state = attr(found[0], 'state');
+        sheets.push({
+            name:   attr(found[0], 'name') || 'Sheet',
+            rel:    rel,
+            hidden: state === 'hidden' || state === 'veryHidden',
+            chart:  rel === null || rel.type.slice(-10) !== '/worksheet'       //  a chart sheet  (or missing):  no rows to show
+        });
+    }
+
+    //  Which one?  The one asked for  (a sheet tab was clicked),  or the first real sheet that isn't hidden.
+    const sheet = (choice !== null && sheets[choice] && !sheets[choice].chart ? sheets[choice] : null) ||
+                  sheets.find(function (s) { return !s.hidden && !s.chart; }) ||
+                  sheets.find(function (s) { return !s.chart; });
+    if (sheet === undefined) throw new Error('nosheet');
+
+    const sheetXml = await unzipText(bytes, entries, partPath(bookFolder, sheet.rel.target), budget);
+    if (sheetXml === null) throw new Error('nosheet');
+
+
+    //  3.  THE SHARED WORDS.   <si><t>Chicago</t></si>   ->   strings[4] = "Chicago"
+    const stringsRel = findRel(bookRels, 'sharedStrings');
+    const stringsXml = stringsRel ? await unzipText(bytes, entries, partPath(bookFolder, stringsRel.target), budget) : null;
+    const strings    = [];
+
+    if (stringsXml !== null) {
+        let at = 0;
+        while (true) {
+            const open = stringsXml.indexOf('<si', at);
+            if (open === -1) break;
+            const tagEnd = stringsXml.indexOf('>', open);
+            if (tagEnd === -1) break;
+
+            if (stringsXml.charAt(tagEnd - 1) === '/') {        //  <si/>  =  an empty word
+                strings.push('');
+                at = tagEnd + 1;
+                continue;
+            }
+            const close = stringsXml.indexOf('</si>', tagEnd);
+            if (close === -1) break;
+
+            strings.push(textOf(stringsXml.slice(tagEnd + 1, close)));
+            at = close + 5;
+            await breathe();
+        }
+    }
+
+
+    //  4.  THE STYLES:  for each style number, its format, and whether it's a date.
+    const stylesRel = findRel(bookRels, 'styles');
+    const stylesXml = stylesRel ? await unzipText(bytes, entries, partPath(bookFolder, stylesRel.target), budget) : null;
+    const styles    = [];                                   //  style number  ->  null  (General)   or   { id, code, kind, seconds }
+
+    if (stylesXml !== null) {
+
+        const custom = {};                                  //  format number  ->  its written-out code
+        const fmtTag = /<numFmt\b[^>]*>/g;
+        while ((found = fmtTag.exec(stylesXml)) !== null) {
+            custom[attr(found[0], 'numFmtId')] = attr(found[0], 'formatCode') || '';
+        }
+
+        const from = stylesXml.indexOf('<cellXfs');
+        const to   = stylesXml.indexOf('</cellXfs>', from);
+        const xfs  = from === -1 || to === -1 ? '' : stylesXml.slice(from, to);
+        const xfTag = /<xf\b[^>]*>/g;
+
+        while ((found = xfTag.exec(xfs)) !== null) {
+            const id   = parseInt(attr(found[0], 'numFmtId') || '0', 10);
+            const code = custom[id] !== undefined ? custom[id] : null;
+            const kind = code !== null ? formatKind(code) : (BUILT_IN_DATES[id] || null);
+
+            styles.push(id === 0 && code === null ? null : { id: id, code: code, kind: kind ? kind[0] : null, seconds: kind ? kind[1] : false });
+        }
+    }
+
+
+    //  5.  THE SHEET:  row by row, cell by cell.
+    //
+    //      <row r="2">
+    //        <c r="A2" t="s"><v>15</v></c>            t="s"  ->  shared word #15
+    //        <c r="B2" s="2"><v>43586</v></c>         style 2 is a date  ->  2019-05-01 00:00:00
+    //        <c r="I2"><v>74.69</v></c>               a plain number
+    //      </row>
+    //
+    //  Missing rows and cells are left EMPTY  (so everything stays in its own row and column).
+    const lines  = [];                  //  the CSV lines
+    const cells  = new Map();           //  the originals  (only where the page shows something different)
+    const shared = {};                  //  copied-down formulas:  group number  ->  { text, row, col }  of its FIRST cell
+    let hasDates = false;
+    let unsolved = 0;                   //  formulas with no saved answer
+    let rowNum   = 0;                   //  Excel's row number  (1, 2, 3 ...)
+
+    let at         = sheetXml.indexOf('<sheetData');
+    const dataEnd  = sheetXml.indexOf('</sheetData>', at);
+
+    while (at !== -1 && dataEnd !== -1) {
+
+        const rowOpen = sheetXml.indexOf('<row', at);
+        if (rowOpen === -1 || rowOpen > dataEnd) break;
+
+        const rowTagEnd = sheetXml.indexOf('>', rowOpen);
+        const rowTag    = sheetXml.slice(rowOpen, rowTagEnd + 1);
+        const empty     = sheetXml.charAt(rowTagEnd - 1) === '/';
+        const rowEnd    = empty ? rowTagEnd : sheetXml.indexOf('</row>', rowTagEnd);
+        if (rowEnd === -1) throw new Error('damaged');
+
+        at = empty ? rowTagEnd + 1 : rowEnd + 6;
+
+        const r   = attr(rowTag, 'r');
+        const num = r !== null ? parseInt(r, 10) : rowNum + 1;
+        if (!(num > rowNum) || num > EXCEL_MAX_ROWS) continue;        //  junk, or out of order?  Skip it.
+
+        while (rowNum < num - 1) {          //  rows Excel skipped  (they were empty)
+            lines.push('');
+            rowNum++;
+        }
+        rowNum = num;
+
+        const values = [];                  //  this row's cells, by column
+        let col = -1;
+        let p   = rowTagEnd + 1;
+
+        while (!empty) {
+
+            const c = sheetXml.indexOf('<c', p);
+            if (c === -1 || c > rowEnd) break;
+
+            const after = sheetXml.charAt(c + 2);
+            if (after !== ' ' && after !== '>' && after !== '/') { p = c + 2; continue; }      //  not a cell tag
+
+            const cTagEnd = sheetXml.indexOf('>', c);
+            const cTag    = sheetXml.slice(c, cTagEnd + 1);
+            let inner     = '';
+
+            if (sheetXml.charAt(cTagEnd - 1) === '/') {
+                p = cTagEnd + 1;                                            //  <c r="B2" s="1"/>  =  an empty cell
+            } else {
+                const cEnd = sheetXml.indexOf('</c>', cTagEnd);
+                if (cEnd === -1) throw new Error('damaged');
+                inner = sheetXml.slice(cTagEnd + 1, cEnd);
+                p = cEnd + 4;
+            }
+
+            const ref = attr(cTag, 'r');
+            col = ref !== null ? columnOf(ref) : col + 1;
+            if (col < 0 || col >= EXCEL_MAX_COLS) continue;                //  junk address?  Skip it.
+
+            const cell = readCell(cTag, inner, rowNum, col);
+            if (cell === null) continue;
+
+            values[col] = csvCell(cell.show);
+            if (cell.keep !== null) cells.set((rowNum - 1) * EXCEL_MAX_COLS + col, cell.keep);
+        }
+
+        let line = '';
+        for (let i = 0; i < values.length; i++) line += (i > 0 ? ',' : '') + (values[i] === undefined ? '' : values[i]);
+        lines.push(line);
+
+        await breathe();
+    }
+
+
+    //  One cell  ->  { show, keep }.    show  =  what the page shows.    keep  =  the original  (or null).
+    //  (null  =  nothing in it at all.)
+    function readCell(cTag, inner, row, col) {
+
+        const type  = attr(cTag, 't') || 'n';               //  s = shared word,  n = number,  b = TRUE/FALSE,  e = error ...
+        const style = styles[parseInt(attr(cTag, 's') || '0', 10)] || null;
+
+        let raw = null;                                     //  what Excel stored
+        const v = inner.indexOf('<v>');
+        if (v !== -1) raw = decodeXml(inner.slice(v + 3, inner.indexOf('</v>', v)));
+
+        let formula = null;                                 //  =SUM(B2:B9)   (we show its last answer)
+        let group   = null;                                 //  a copied-down formula's group number  (or null)
+        const f = inner.indexOf('<f');
+        if (f !== -1) {
+            const fTagEnd = inner.indexOf('>', f);
+            const fTag    = inner.slice(f, fTagEnd + 1);
+            const text    = inner.charAt(fTagEnd - 1) === '/' ? '' : decodeXml(inner.slice(fTagEnd + 1, inner.indexOf('</f>', fTagEnd)));
+
+            if (attr(fTag, 't') === 'shared') group = attr(fTag, 'si');
+
+            if (text !== '') {
+                formula = '=' + text;
+                if (group !== null) shared[group] = { text: text, row: row, col: col };    //  the FIRST cell of a copied-down group
+            } else if (group !== null && shared[group] !== undefined) {
+                const first = shared[group];                //  "same as group #si":  copy the first cell's formula over to here
+                formula = '=' + shiftFormula(first.text, row - first.row, col - first.col);
+            } else {
+                formula = '=?';                             //  a formula we can't see  (its group's first cell is missing)
+            }
+        }
+
+        let show;
+
+        if (type === 's') {
+            const n = raw === null ? -1 : parseInt(raw, 10);
+            show = n >= 0 && n < strings.length ? strings[n] : '';
+        } else if (type === 'inlineStr') {
+            show = textOf(inner);
+        } else if (type === 'b') {
+            show = raw === '1' ? 'TRUE' : raw === '0' ? 'FALSE' : (raw || '');
+        } else if (type === 'str' || type === 'e' || type === 'd') {
+            show = raw || '';                               //  formula text,  an error like #N/A,  or a written-out date
+        } else if (raw === null) {
+            show = '';
+        } else {
+            const date = style !== null && style.kind !== null
+                ? excelDateText(Number(raw), style.kind, style.seconds, date1904)
+                : null;
+            if (date !== null) hasDates = true;
+            show = date !== null ? date : generalNumber(raw);
+        }
+
+        //  A formula with NO saved answer?  We can't work it out, so show the formula itself
+        //  (like Excel's "Show Formulas"),  instead of an empty cell that looks like real data.
+        if (formula !== null && raw === null && type !== 'inlineStr') {
+            show = formula;
+            unsolved++;
+        }
+
+        if (raw === null && formula === null && show === '') return null;
+
+        //  Keep the original when the page shows something different from what Excel stored:
+        //  a formula,  a number shown differently  (a date, or rounded),  or a number with its own format  ($, %).
+        const differs = formula !== null ||
+                        (type !== 's' && type !== 'inlineStr' && raw !== null && show !== raw) ||
+                        (type === 'n' && style !== null);
+
+        const keep = differs
+            ? { raw: raw, type: type, format: style === null ? null : (style.code !== null ? style.code : style.id), formula: formula, group: group }
+            : null;
+
+        return { show: show, keep: keep };
+    }
+
+
+    return {
+        text: lines.join('\n'),
+        info: { file: file, sheetName: sheet.name, sheetNumber: sheets.indexOf(sheet) + 1, sheetCount: sheets.length,
+                sheets: sheets.map(function (s) { return { name: s.name, hidden: s.hidden, chart: s.chart }; }),
+                date1904: date1904, hasDates: hasDates, recalc: recalc, unsolved: unsolved, cells: cells }
+    };
+}
+```
+
+And the words for when something's wrong:
+
+```js
+function xlsxProblem(problem, name) {
+
+    const why = {
+        'damaged':     'it looks like a damaged Excel file.',
+        'locked':      'it\'s password-protected. Open it in Excel, remove the password, and save it again.',
+        'bomb':        'it unpacks to more than 512 MB. That\'s more than the browser can handle.',
+        'too big':     'it\'s too big for the browser to unpack.',
+        'unsupported': 'it\'s packed in a way this reader doesn\'t know. In Excel: File → Save As → Excel Workbook (.xlsx), then try again.',
+        'nosheet':     'there\'s no sheet in it to show.'
+    }[problem && problem.message];
+
+    if (why) return 'Couldn\'t open "' + name + '": ' + why;
+    if (problem instanceof RangeError) return 'Couldn\'t open "' + name + '": it\'s too big for the browser.';
+    return 'Couldn\'t open "' + name + '": something in this Excel file wasn\'t what we expected.';
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `new Map()` | A list you look things up in by a key. Here: the cell's spot → its original. |
+| `(rowNum - 1) * EXCEL_MAX_COLS + col` | One number for each cell: row × 16,384 + column. (Like a house number for every cell.) |
+| `values[col] = ...` | Put this cell in its own column. Columns Excel skipped stay empty. |
+| `throw new Error('damaged')` | "Stop everything, something's wrong." The brain catches it and shows the words for it. |
+| `XLSX_STALE` | Not a real problem: a newer file was picked, so this one quietly stops. |
+
+> **Why the first sheet that isn't hidden?** That's what you'd see first in Excel too. The badge says which one it is ("2 of 3 sheets" = the first one was hidden).
+
+> **What about formulas?** We don't recalculate them (that takes a whole "calculation engine"). An `.xlsx` saves each formula's last ANSWER next to it, and that's what shows. Three honest extras:
+> - A formula with **no saved answer** (some programs make files like that) shows the **formula itself**, like Excel's "Show Formulas" mode, never an empty cell that looks like real data. The status line counts them.
+> - A file that says **"recalculate me when you open me"** (`fullCalcOnLoad`) gets a ⚠ warning: its answers may be out of date.
+> - Every formula cell gets a glowing green **ƒ**, and hovering shows the formula (Step 5.12).
+
+> **What do "the originals" look like?** For the date in cell B2 of the sample file: `{ raw: "43586", type: "n", format: "yyyy\-mm\-dd\ hh:mm:ss", formula: null }`. The page shows `2019-05-01 00:00:00`. The original is all there for later.
+
+<br>
+
+### Step 5.10: Teach the brain (5 changes in `scriptI.js`)
+
+**1.** The file listener remembers if it's an Excel file. Add the 3rd line under the other two (Step 2.15):
+
+```js
+    let encoding     = 'utf-8';             //  which rulebook to read it with  (decided just before reading, at the bottom)
+    let checkedWhole = false;               //  did the safety net already check the WHOLE file?
+    let excel        = null;                //  an Excel file?  Its notes  (from xlsxI.js).   A CSV?  null.
+```
+
+**2.** `couldNotRead` can show specific words (like "it's password-protected"):
+
+```js
+    function couldNotRead(why) {
+
+        searchInput.disabled = headerCells.length === 0;
+        finishLoading();
+
+        let message = why ? why
+            : file.size > 500 * 1000 * 1000
+            ? 'Couldn\'t open "' + file.name + '": it\'s ' + Math.round(file.size / 1000000) + ' MB, and the browser can only read files up to about 500 MB.'
+            : 'Couldn\'t read "' + file.name + '". Was it moved, renamed, or deleted? Try picking it again.';
+
+        if (headerCells.length > 0) message += '  (Your last file is still open.)';
+
+        statusText.textContent = message;
+    }
+```
+
+**3.** Split "done reading" in two. The end of `onload` hands the text to a new `useText`, which does the cutting. (So an Excel file's CSV text can go straight to `useText` too.) Replace `let spot = 0;` near the top of `onload` with:
+
+```js
+        useText(text);                      //  the text is good.  Cut it up!
+    };
+
+
+    //  CUT UP THE TEXT  (a CSV file's text,  or an Excel file's sheet turned into CSV text).
+    function useText(text) {
+
+        let spot = 0;                       //  where we are in it
+```
+
+...and at the very end of the cutting part, the `};` after `cutSomeRows();` becomes just `}` (it now closes `useText`, not `onload`).
+
+**4.** When the new file is swapped in ("ALL DONE"), remember its Excel notes, and show the badge:
+
+```js
+            xlsxInfo    = excel;                //  the Excel notes  (null for a CSV)
+            fileNote    = excel !== null
+                ? (excel.hasDates ? '  ·  dates shown as YYYY-MM-DD  (originals kept)' : '') +
+                  (excel.unsolved > 0 ? '  ·  ' + excel.unsolved + ' formula(s) had no saved answer  (shown as formulas)' : '') +
+                  (excel.recalc ? '  ·  ⚠ this file asks Excel to recalculate:  formula answers may be out of date' : '')
+                : encoding === 'windows-1252'
+                ? '  ·  read as Windows-1252  (an older Excel format)'
+                : '';
+            showBadge();                        //  "XLSX SPREADSHEET"  (or nothing, for a CSV)
+```
+
+**5.** At the very bottom of the listener: check WHAT KIND of file it is (by its first bytes, not its name), then the badge itself:
+
+```js
+    //  GO!   But first:  WHAT KIND of file is it?
+    //  Not by its name:  by its first few bytes.  (A file can be named anything.)
+    //
+    //      50 4B 03 04   ("PK")   =  a zip file  =  an Excel .xlsx         ->  xlsxI.js reads it
+    //      D0 CF 11 E0            =  an old Excel .xls  (or a password-locked .xlsx)  ->  say so
+    //      anything else          =  text  (a CSV)
+    file.slice(0, 8).arrayBuffer().then(function (head) {
+
+        if (myLoad !== loadId) return;      //  a newer file?  Forget this one.
+
+        const b = new Uint8Array(head);
+
+        if (b[0] === 0x50 && b[1] === 0x4B && b[2] === 0x03 && b[3] === 0x04) {
+            readAsExcel();
+            return;
+        }
+
+        if (b[0] === 0xD0 && b[1] === 0xCF && b[2] === 0x11 && b[3] === 0xE0) {
+            couldNotRead('Couldn\'t open "' + file.name + '": it\'s an old Excel file (.xls), or a password-protected one. ' +
+                         'In Excel:  File → Save As → Excel Workbook (.xlsx)  or  CSV,  then pick that.');
+            return;
+        }
+
+        //  Text.  Check the first 4 MB:  breaks UTF-8's rules?  Use the older Excel rulebook.
+        //  (4 MB is quick, and almost always enough:  the safety net up in onload catches the rest.)
+        isUtf8(file, 4 * 1024 * 1024, function (ok) {
+
+            if (myLoad !== loadId) return;  //  a newer file?  Forget this one.
+
+            encoding = ok ? 'utf-8' : 'windows-1252';
+            reader.readAsText(file, encoding);      //  start reading
+        });
+
+    }, function () {
+        couldNotRead();                     //  couldn't even read the first 8 bytes
+    });
+
+
+    //  An Excel file:  xlsxI.js turns its first sheet into CSV text.  Then it's cut up like any CSV.
+    function readAsExcel() {
+
+        setLoadingLabel('Opening the spreadsheet...');
+
+        readXlsx(file, function () { return myLoad === loadId; }, sheet).then(function (result) {
+
+            if (myLoad !== loadId) return;
+            setProgress(0.2);               //  unpacked + translated  =  the "reading" part is done
+            excel = result.info;
+            useText(result.text);
+
+        }, function (problem) {
+
+            if (myLoad !== loadId || problem === XLSX_STALE) return;     //  a newer file?  Not a real problem.
+            couldNotRead(xlsxProblem(problem, file.name));
+        });
+    }
+}
+
+
+
+// ----------------------------------------------------------
+//
+//    THE "XLSX SPREADSHEET" BADGE
+//
+//    An Excel file is NOT a CSV, and the page says so, right under the file bar:
+//
+//        XLSX SPREADSHEET  ·  Sheet1  ·  1 of 3 sheets  ·  1904 dates
+//
+//  (It shows the first sheet that isn't hidden.  "2 of 3"  =  the 1st one was hidden.)
+//
+//    A CSV?  No badge.
+//
+// ----------------------------------------------------------
+
+const fileBadge = document.getElementById('fileBadge');
+const sheetTabs = document.getElementById('sheetTabs');
+
+function showBadge() {
+
+    showSheetTabs();
+
+    if (xlsxInfo === null) {
+        fileBadge.hidden = true;
+        return;
+    }
+
+    fileBadge.textContent = 'XLSX SPREADSHEET  ·  ' + xlsxInfo.sheetName +
+        (xlsxInfo.sheetCount > 1 ? '  ·  ' + xlsxInfo.sheetNumber + ' of ' + xlsxInfo.sheetCount + ' sheets' : '') +
+        (xlsxInfo.date1904 ? '  ·  1904 dates' : '');
+    fileBadge.hidden = false;
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `file.slice(0, 8)` | Just the first 8 bytes of the file. |
+| `50 4B 03 04` | "PK" + 3 + 4: how every zip file starts (PK = Phil Katz, who invented zip). |
+| `D0 CF 11 E0` | How an old `.xls` file starts. (A password-locked `.xlsx` too: Excel wraps it the old way.) |
+| `.then(function (result) {...}, function (problem) {...})` | When the job's done: if it worked, run the first one. If it failed, run the second. |
+
+> **Why look at the bytes, not the name?** A file can be named anything. Someone renames `sales.xlsx` to `sales.csv`: it still opens right. And a text file that's named `.xlsx` gets read as text.
+
+<br>
+
+### Step 5.11: The badge's clothes
+
+Add this in `styleI.css`, right above "The search bar = one long light square":
+
+```css
+/*  "XLSX SPREADSHEET"  (only when an Excel file is open)
+    A DARK square, like the theme menu's:  this isn't a CSV, and it should look different.  */
+#fileBadge {
+    width: fit-content;
+    max-width: 100%;
+    box-sizing: border-box;
+    margin: -6px auto 15px;
+    padding: 0 14px;
+    line-height: 26px;
+    font-family: "Segoe UI", system-ui, Arial, sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    white-space: pre;               /*  keep the double spaces around the  ·  */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #fff;
+    text-shadow: 0 0 8px var(--theme-glow);
+    background: var(--square-dark);
+    border: 1px solid var(--glass-edge);
+    border-radius: 12px;
+    box-shadow:
+        inset 0 0 12px color-mix(in srgb, var(--theme-glow) 25%, transparent),     /*  a soft rim of the theme's glow  */
+        0 4px 14px rgba(0, 0, 0, 0.1);
+}
+```
+
+> **A dark square, on purpose.** Part 4's chessboard dark squares (`--square-dark`) are for things that are DIFFERENT. An Excel file isn't a CSV, and it should look different at a glance.
+
+<br>
+
+### Step 5.12: The glowing green ƒ (formula cells)
+
+A formula cell looks just like any other cell (it shows the answer). So it gets a tiny glowing **ƒ** in its top-left corner, in **Excel's own green**. Hover the cell to see the formula.
+
+**1.** Two new colors in the theme block (Step 3.1), right after `--control-accent`:
+
+```css
+    --formula:      #217346;                        /*  the  ƒ  on an Excel formula cell:  Excel's own green  */
+    --formula-glow: rgba(33, 163, 102, 0.85);       /*  ...and its glow  (the brighter green from Excel's icon)  */
+```
+
+**2.** In `makeRow` (Step 2.5), right after the `cell.title = short;` line: look the cell up in the Excel notes.
+
+```js
+        //  An Excel FORMULA?  A glowing green  ƒ  in the corner,  and the formula when you hover.
+        //  (Row "num" here  =  Excel's row - 1,  so the cell's spot in the Excel notes is  num × 16384 + col.)
+        if (xlsxInfo !== null) {
+            const kept = xlsxInfo.cells.get(num * EXCEL_MAX_COLS + col);
+            if (kept !== undefined && kept.formula !== null) {
+                cell.classList.add('formula');
+                cell.title = kept.raw === null
+                    ? kept.formula + '   (no saved answer:  open the file in Excel and save it, to fill one in)'
+                    : kept.formula;
+            }
+        }
+```
+
+**3.** The clothes for the ƒ, right after the `.cell.num` rule (Step 3.5):
+
+```css
+/*  An Excel FORMULA cell:  a tiny glowing green  ƒ  in its top-left corner.
+    (Top-left, like Excel's own little corner marks.  Small enough to sit above the words.)
+    Hover the cell to see the formula itself.  */
+.cell.formula {
+    position: relative;
+}
+
+.cell.formula::before {
+    content: "ƒ";
+    position: absolute;
+    top: -2px;
+    left: 3px;
+    font: italic 700 11px Georgia, "Times New Roman", serif;
+    line-height: 14px;
+    color: var(--formula);
+    text-shadow:
+        0 0 2px #fff,                                   /*  a white rim, so it's sharp on the glass  */
+        0 0 6px var(--formula-glow);                    /*  the green glow  */
+    pointer-events: none;                               /*  (so it doesn't get in the way of hovering the cell)  */
+}
+
+.cell.formula:hover::before {
+    text-shadow:                                        /*  mouse on it?  glow brighter  */
+        0 0 2px #fff,
+        0 0 8px var(--formula-glow),
+        0 0 14px var(--formula-glow);
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `num * EXCEL_MAX_COLS + col` | The cell's "house number" in the Excel notes. Row `num` here is Excel's row minus 1 (Excel's row 1 is our header, row 0), and that's exactly how the notes count. |
+| `::before` + `content: "ƒ"` | A fake extra piece, with just the letter ƒ in it. |
+| `position: absolute; top: -2px; left: 3px;` | Stick it in the top-left corner of the cell. (The cell is `position: relative`, so "corner" means the CELL's corner.) |
+| `pointer-events: none;` | The mouse goes right through it, so hovering still hovers the cell. |
+
+> **Why Excel's green?** `#217346` is the green on Excel's own icon. Spreadsheet people already read green as "spreadsheet". It glows in the brighter green from the icon (`#21A366`).
+
+<br>
+
+### Step 5.13: Sheet tabs (more than one sheet)
+
+An Excel file can have lots of sheets. Like the tabs at the bottom of Excel, there's one button per sheet, joined into one bar:
+
+```text
+      ┌──────────┬──────────┬──────────────────┬──────────┐
+      │▓Q1 Sales │▒ Q2 Sales│▒ Archive (hidden)│░ Chart1  │
+      └──────────┴──────────┴──────────────────┴──────────┘
+         ▓ = the sheet you're on  (a dark square, like the badge)
+         ▒ = click to open it     (accent squares, like every button)
+         ░ = a chart sheet: no rows to show  (faded, can't click)
+```
+
+Clicking a tab loads the **same file again**, showing that sheet. So the file listener's insides move into a function, `loadFile(file, sheet)`, that both can use.
+
+**1.** The file listener becomes tiny. Everything that was inside it is now `loadFile` (same code, new first lines):
+
+```js
+fileInput.addEventListener('change', function (event) {
+
+    const file = event.target.files[0];     //  the file you picked
+
+    if (file) loadFile(file, null);         //  (you clicked "Cancel"?  Then there's no file:  do nothing)
+});
+
+
+//  READ A FILE, and show it.
+//  "sheet"  =  for an Excel file:  which sheet to show  (0 = the first).   null  =  the first real one that isn't hidden.
+//  (Picking a file calls this.  So does clicking a sheet tab:  same file, another sheet.)
+function loadFile(file, sheet) {
+
+    const myLoad = ++loadId;                //  this file's number.  (Pick another file?  It gets a new number.)
+```
+
+...and the very last `});` of the old listener becomes just `}` (it now closes `loadFile`).
+
+**2.** The tabs (right after `showBadge`, which now starts with `showSheetTabs();`):
+
+```js
+function showSheetTabs() {
+
+    sheetTabs.textContent = '';                                 //  wipe the old tabs
+
+    if (xlsxInfo === null || xlsxInfo.sheets.length < 2) {      //  a CSV, or just 1 sheet?  No tabs.
+        sheetTabs.hidden = true;
+        return;
+    }
+
+    xlsxInfo.sheets.forEach(function (sheet, i) {
+
+        const tab     = document.createElement('button');
+        const current = i + 1 === xlsxInfo.sheetNumber;
+
+        tab.className = 'sheet-tab';
+        tab.setAttribute('role', 'tab');
+        tab.setAttribute('aria-selected', current);
+        tab.textContent = sheet.name + (sheet.hidden ? '  (hidden)' : '') + (sheet.chart ? '  (chart)' : '');
+
+        if (sheet.hidden) tab.classList.add('hidden-sheet');
+
+        if (sheet.chart) {
+            tab.disabled = true;
+            tab.title = 'A chart sheet:  it has no rows to show.';
+        } else if (!current) {
+            const file = xlsxInfo.file;                         //  (the file, as it is right now)
+            tab.title = 'Open the sheet "' + sheet.name + '"';
+            tab.addEventListener('click', function () {
+                loadFile(file, i);
+            });
+        }
+
+        sheetTabs.appendChild(tab);
+    });
+
+    sheetTabs.hidden = false;
+}
+```
+
+**3.** Their clothes, right after the badge's (Step 5.11):
+
+```css
+/*  THE SHEET TABS  (an Excel file with more than one sheet)
+    One bar, like  [Row #][Go to row]:  every tab is an accent square  (click to open it),
+    and the one you're on is a DARK square, like the badge above it.
+    Too many to fit?  They wrap onto the next line.  */
+#sheetTabs {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 900px;
+    margin: -6px auto 15px;
+}
+
+#sheetTabs .sheet-tab {
+    margin: 0;
+    padding: 0 14px;
+    line-height: 28px;
+    font-size: 13px;
+    white-space: pre;               /*  keep the double space before "(hidden)"  */
+    border-left: none;              /*  the tab before it already drew the line between them  */
+    border-radius: 0;
+}
+
+#sheetTabs .sheet-tab:first-child {
+    border-left: 1px solid var(--glass-edge);
+    border-radius: 12px 0 0 12px;   /*  round on the left end of the bar  */
+}
+
+#sheetTabs .sheet-tab:last-child {
+    border-radius: 0 12px 12px 0;   /*  ...and on the right end  */
+}
+
+/*  The sheet you're on:  a dark square, glowing a little  (like the badge)  */
+#sheetTabs .sheet-tab[aria-selected="true"] {
+    color: #fff;
+    text-shadow: 0 0 8px var(--theme-glow);
+    background: var(--square-dark);
+    box-shadow: inset 0 0 12px color-mix(in srgb, var(--theme-glow) 25%, transparent);
+    filter: none;
+    cursor: default;
+}
+
+/*  A hidden sheet:  slanted, a little quieter  (you CAN still open it)  */
+#sheetTabs .sheet-tab.hidden-sheet {
+    font-style: italic;
+}
+
+/*  A chart sheet:  faded, and can't be clicked  (no rows to show)  */
+#sheetTabs .sheet-tab:disabled {
+    opacity: 0.5;
+    filter: none;
+    cursor: not-allowed;
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `loadFile(file, i)` | Load THIS file again, showing sheet number `i` (counting from 0). |
+| `const file = xlsxInfo.file;` | Remember the file NOW. (If you open another file later, this old tab can't get mixed up.) |
+| `tab.disabled = true` | A button that can't be clicked. Used for chart sheets. |
+| `aria-selected` | Tells screen readers (and the clothes) which tab is the one you're on. |
+| `:first-child` / `:last-child` | Only the first tab / only the last one: they get the round ends of the bar. |
+
+> **Which sheet opens first?** The first REAL sheet that isn't hidden (`readXlsx`, Step 5.9). A chart sheet is skipped: it has no rows, so it would open as an empty page.
+
+> **Hidden sheets get a tab too?** Yes, marked *(hidden)* and slanted. Someone hid it in Excel, but you might still want to look. (Excel lets you unhide it, too.)
+
+<br>
+
+### ✅ Test it
+
+1. Save any spreadsheet in Excel as **Excel Workbook (.xlsx)**, and pick it. You should see the dark **XLSX SPREADSHEET** badge with the sheet's name, and the first sheet as rows.
+2. Got dates in it? They show as `YYYY-MM-DD`, and the words under the search bar say *"dates shown as YYYY-MM-DD (originals kept)"*.
+3. A number like `0.1 + 0.2` (Excel stores `0.30000000000000004`) shows as `0.3`.
+4. A spreadsheet with **more than one sheet**? You should see the sheet tabs under the badge. Click one: that sheet loads, and its tab turns dark.
+5. Pick a CSV again: the badge (and the tabs) go away.
+6. Rename a `.txt` file to `.xls` and pick it... it's text, so it opens as text. Now try a REAL old `.xls` (or a password-protected `.xlsx`): you should see *"it's an old Excel file (.xls), or a password-protected one"* with what to do about it.
+
+> **Want proof?** Press **F12** → **Console**, and type `xlsxInfo`. You'll see the Excel notes: the sheet name, the calendar, and every original that was kept.
 
 <br>
 
@@ -3721,6 +5123,8 @@ Refresh. You should have:
 | **Change when the scrollbars get "scaled"** | Change `MAX_SCROLL_WIDTH` (sideways) or `MAX_SCROLL_HEIGHT` (up and down). Keep them under about 4,000,000: browsers stop drawing text past ~8 million pixels, and on sharp 2× screens that limit comes twice as soon. |
 | **Change the buttons' accent color** | Change `--control-accent` in the theme block. `var(--corner-bg)` = the table's corner. Try `var(--square-dark)` for near-black buttons like the theme menu (then also set `color: #fff` in `button`). |
 | **Move Expand closer (or further)** | `#expandBtn` → the `28px` in `margin`. |
+| **Let bigger Excel files unpack** | `XLSX_LIMIT` in `xlsxI.js`. Careful: past ~512 MB the browser can't hold the text anyway, and this limit is what stops "zip bombs". |
+| **Show Excel dates another way** | `excelDateText` in `xlsxI.js` builds `year-month-day`. Change the order there (like `day/month/year`). The originals are kept either way. |
 | **Show more (or less) of a huge cell** | Change `SHOW_LETTERS`. Keep it in the thousands: every letter you show costs the browser work, on every row. |
 | **Change when a stray quote gets caught** | Change `QUOTE_LIMIT`. Smaller = gives up sooner. Don't go below a few thousand, or real notes with line breaks get chopped. |
 | **Make the page even smoother during big loads** | Lower `CHUNK_TIME` (like `8`). Smaller bites = smoother, but the whole job takes a little longer. |
@@ -3744,6 +5148,23 @@ Refresh. You should have:
 | Stripes jump around while scrolling | The CSS still uses `.line:nth-child(even)` instead of `.line.zebra`. |
 | The window isn't header + 15 rows | The numbers don't match in both places, or the row height isn't 30. |
 | Picking a file does nothing, and the Console says `startLoading is not defined` | Step 2.14 (the loader) is missing from the brain. |
+| Picking an Excel file does nothing, and the Console says `readXlsx is not defined` | `xlsxI.js` isn't plugged in, or it's AFTER `scriptI.js`. It has to come first (Step 5.1). |
+| Picking ANY file crashes with `Cannot set properties of null (setting 'hidden')` | The `<div id="fileBadge" hidden></div>` is missing from the skeleton (Step 5.1). |
+| An Excel file shows garbage letters (`PK...`) | The first-bytes check (Step 5.10 #5) is missing, so it got read as text. |
+| Excel dates show as numbers like `43586` | The date style wasn't found: check `styles` in `readXlsx` (it reads `<cellXfs>`), and that `formatKind` returns a kind for the format. |
+| Excel dates are all 1 day off (before March 1900), or 4 years off | The Feb 29, 1900 lines in `excelDayToDate` are missing, or the `date1904` check is. Run `dates.html` (Castle Claude): it checks every date. |
+| A price shows up as a date in 1900 | `formatKind` is finding a date letter that isn't one: in quotes (`"Qty: "`), escaped (`\d`), or in brackets (`[Red]`). Those get removed first. |
+| Excel numbers show way too many digits (`522.83000000000004`) | `generalNumber` isn't used for plain numbers. |
+| An Excel file loads, but the words are the wrong words | The shared words list is off by one. `<si/>` (an empty word) still counts as a word: it has to `push('')`. |
+| A multi-sheet Excel file shows no sheet tabs | `showBadge` doesn't call `showSheetTabs();`, or the `<div id="sheetTabs">` is missing from the skeleton (Step 5.1). |
+| Clicking a sheet tab does nothing | The listener's insides weren't moved into `loadFile(file, sheet)`, or `readAsExcel` doesn't pass `sheet` on to `readXlsx` (Step 5.13). |
+| A workbook opens to an empty page | Its first sheet is a chart sheet. `readXlsx` has to skip sheets where `chart` is true. |
+| The tabs have gaps between them, or double lines | `#sheetTabs` needs `display: flex;`, and each tab `border-left: none;` (except the first). |
+| No green ƒ on formula cells | The `if (xlsxInfo !== null)` part is missing from `makeRow` (Step 5.12), or the `.cell.formula::before` rule is missing `content: "ƒ";`. |
+| The ƒ is on the WRONG cells (one row off) | The cell's spot in the notes is `num * EXCEL_MAX_COLS + col`. Using `index` (the spot on screen) instead of `num` (the row number) gets it wrong as soon as you search. |
+| A copied-down formula shows the FIRST cell's formula on every row | `shiftFormula` isn't used for the "same as group #si" cells (Step 5.9, `readCell`). |
+| An empty-looking cell turns out to be a formula | The "no saved answer" part of `readCell` is missing: it should show the formula itself (`show = formula`). |
+| A tiny Excel file freezes the page | The zip-bomb guard is missing: `unzipText` must add up `budget.used` as it unpacks, and stop at `XLSX_LIMIT`. |
 | Accented letters show up as `�` (`Jos�`) | The file is in the older Excel rulebook, and `isUtf8` isn't called before reading, or `readAsText` is missing its `encoding`. |
 | Every file says "read as Windows-1252" | `isUtf8` calls `done(false)` too easily. Is `fatal: true` there? Is `{ stream: true }` there? (Without it, a letter cut in half at the 4 MB edge looks "broken".) |
 | A file with a real `�` in it turns into garbage (`â˜•`) | The safety net re-reads as soon as it SEES a `�`. It has to check the whole file with `isUtf8(file, file.size, ...)` first. |
@@ -3806,6 +5227,12 @@ Refresh. You should have:
 <br>
 
 ## What it can't do (yet)
+
+- **Excel: one sheet at a time.** It opens the first real sheet that isn't hidden; click a sheet tab to see another one. Chart sheets can't be opened (they have no rows).
+- **Excel: dates and plain numbers only.** Dates and times show as `YYYY-MM-DD hh:mm`. Other formats (`$1,234.00`, `25%`, fractions) show as the plain number. The format itself is kept in the Excel notes.
+- **Excel: formulas aren't recalculated.** It shows the last answer Excel saved, with a green **ƒ** (hover for the formula). No saved answer? It shows the formula itself. The page warns when a file asks to be recalculated.
+- **Excel: no old `.xls` files, no password-protected files.** You get a message saying what to do (Save As `.xlsx` or CSV).
+- **Excel: no merged cells, colors, or fonts.** Just the values.
 
 - **It expects a header.** The first line is always treated as the column names.
 - **A quote that never closes still changes its OWN row.** The brain catches a stray `"` and keeps every other row safe, but in that one row, everything after the `"` lands in one cell. (`Bob,5'10",tall` → `[Bob] [5'10,tall]`.) The real fix is in the file.

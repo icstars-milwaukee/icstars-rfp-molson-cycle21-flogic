@@ -69,6 +69,9 @@
     --square-dark:  rgba(42, 46, 53, 0.82);         /*  ...and the dark squares  (the theme color, as glass)  */
 
     --control-accent: var(--corner-bg);             /*  the buttons' accent squares  =  the table's own accent  (the "0" corner box)  */
+
+    --formula:      #217346;                        /*  the  ƒ  on an Excel formula cell:  Excel's own green  */
+    --formula-glow: rgba(33, 163, 102, 0.85);       /*  ...and its glow  (the brighter green from Excel's icon)  */
 }
 
 
@@ -193,6 +196,87 @@ h1 {
 
 #csvFileInput:hover::file-selector-button {
     filter: brightness(1.06);
+}
+
+
+/*  "XLSX SPREADSHEET"  (only when an Excel file is open)
+    A DARK square, like the theme menu's:  this isn't a CSV, and it should look different.  */
+#fileBadge {
+    width: fit-content;
+    max-width: 100%;
+    box-sizing: border-box;
+    margin: -6px auto 15px;
+    padding: 0 14px;
+    line-height: 26px;
+    font-family: "Segoe UI", system-ui, Arial, sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    white-space: pre;               /*  keep the double spaces around the  ·  */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #fff;
+    text-shadow: 0 0 8px var(--theme-glow);
+    background: var(--square-dark);
+    border: 1px solid var(--glass-edge);
+    border-radius: 12px;
+    box-shadow:
+        inset 0 0 12px color-mix(in srgb, var(--theme-glow) 25%, transparent),     /*  a soft rim of the theme's glow  */
+        0 4px 14px rgba(0, 0, 0, 0.1);
+}
+
+
+/*  THE SHEET TABS  (an Excel file with more than one sheet)
+    One bar, like  [Row #][Go to row]:  every tab is an accent square  (click to open it),
+    and the one you're on is a DARK square, like the badge above it.
+    Too many to fit?  They wrap onto the next line.  */
+#sheetTabs {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 900px;
+    margin: -6px auto 15px;
+}
+
+#sheetTabs .sheet-tab {
+    margin: 0;
+    padding: 0 14px;
+    line-height: 28px;
+    font-size: 13px;
+    white-space: pre;               /*  keep the double space before "(hidden)"  */
+    border-left: none;              /*  the tab before it already drew the line between them  */
+    border-radius: 0;
+}
+
+#sheetTabs .sheet-tab:first-child {
+    border-left: 1px solid var(--glass-edge);
+    border-radius: 12px 0 0 12px;   /*  round on the left end of the bar  */
+}
+
+#sheetTabs .sheet-tab:last-child {
+    border-radius: 0 12px 12px 0;   /*  ...and on the right end  */
+}
+
+/*  The sheet you're on:  a dark square, glowing a little  (like the badge)  */
+#sheetTabs .sheet-tab[aria-selected="true"] {
+    color: #fff;
+    text-shadow: 0 0 8px var(--theme-glow);
+    background: var(--square-dark);
+    box-shadow: inset 0 0 12px color-mix(in srgb, var(--theme-glow) 25%, transparent);
+    filter: none;
+    cursor: default;
+}
+
+/*  A hidden sheet:  slanted, a little quieter  (you CAN still open it)  */
+#sheetTabs .sheet-tab.hidden-sheet {
+    font-style: italic;
+}
+
+/*  A chart sheet:  faded, and can't be clicked  (no rows to show)  */
+#sheetTabs .sheet-tab:disabled {
+    opacity: 0.5;
+    filter: none;
+    cursor: not-allowed;
 }
 
 
@@ -473,6 +557,35 @@ h1 {
 /*  Numbers sit on the RIGHT side of their box.  Just like Excel.  */
 .cell.num {
     text-align: right;
+}
+
+
+/*  An Excel FORMULA cell:  a tiny glowing green  ƒ  in its top-left corner.
+    (Top-left, like Excel's own little corner marks.  Small enough to sit above the words.)
+    Hover the cell to see the formula itself.  */
+.cell.formula {
+    position: relative;
+}
+
+.cell.formula::before {
+    content: "ƒ";
+    position: absolute;
+    top: -2px;
+    left: 3px;
+    font: italic 700 11px Georgia, "Times New Roman", serif;
+    line-height: 14px;
+    color: var(--formula);
+    text-shadow:
+        0 0 2px #fff,                                   /*  a white rim, so it's sharp on the glass  */
+        0 0 6px var(--formula-glow);                    /*  the green glow  */
+    pointer-events: none;                               /*  (so it doesn't get in the way of hovering the cell)  */
+}
+
+.cell.formula:hover::before {
+    text-shadow:                                        /*  mouse on it?  glow brighter  */
+        0 0 2px #fff,
+        0 0 8px var(--formula-glow),
+        0 0 14px var(--formula-glow);
 }
 
 
