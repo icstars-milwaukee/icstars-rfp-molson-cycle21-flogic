@@ -253,6 +253,8 @@ const BIG_FILE    = 20000;  // bigger than this? search waits until you stop typ
 const GLIDE       = 0.25;   // how fast the wheel glide catches up (bigger = snappier, smaller = floatier)
 const CHUNK_TIME  = 12;     // big jobs are done in BITES of about 12 milliseconds, so the page never freezes
 const LOADER_DELAY = 150;   // the loader only shows up if a job takes longer than this (milliseconds)
+const SHOW_LETTERS = 1000;  // a cell with MORE letters than this only shows (and hovers) its first 1,000 (Step 2.5)
+const QUOTE_LIMIT = 32767;  // a quote still open this far past a line break is a MISTAKE, like 5'10" (Step 2.15)
 
 const fileInput   = document.getElementById('csvFileInput');   // Choose File button
 const searchInput = document.getElementById('searchInput');    // search bar
@@ -503,16 +505,20 @@ function makeRow(num, cells, query, index) {
 
         const text = cells[col] || '';
 
+        // A HUGE cell? Only use its first SHOW_LETTERS letters, plus "…".
+        // (You can only see about 40. All 50 million in the box froze the page.)
+        const short = text.length > SHOW_LETTERS ? text.slice(0, SHOW_LETTERS) + '…' : text;
+
         // A line break inside the cell? Show it as ↵ so the row stays ONE line tall.
         // (Every row MUST be the same height. All the scrolling math counts on it.)
-        const shown = text.indexOf('\n') === -1 ? text : text.replace(/\r?\n/g, '↵');
+        const shown = /[\r\n]/.test(short) ? short.replace(/\r\n|\r|\n/g, '↵') : short;
 
         const cell = document.createElement('span');
         cell.className = 'cell';
 
-        if (looksLikeNumber(text)) cell.classList.add('num');      // numbers go on the right
+        if (looksLikeNumber(shown)) cell.classList.add('num');     // numbers go on the right
 
-        if (text.length > 40 || shown !== text) cell.title = text; // too long, or has line breaks? hover to read it all
+        if (text.length > 40 || shown !== text) cell.title = short; // too long, or has line breaks? hover to read it
 
         paintMatches(cell, shown, query);
 
@@ -542,8 +548,16 @@ function makeRow(num, cells, query, index) {
 | `index % 2 === 1` | "Is this an odd number?" (`%` = the leftover after dividing.) So every OTHER row gets a stripe. |
 | `.title = text` | The little popup when you hover over something |
 | `.appendChild(x)` | Put `x` inside this piece |
-| `text.replace(/\r?\n/g, '↵')` | "Swap EVERY line break for a ↵." `\r?\n` = a line break, with or without the Windows `\r` in front. `g` = all of them, not just the first. |
+| `/[\r\n]/.test(short)` | "Is there a `\r` OR a `\n` anywhere in here?" Yes or no. |
+| `short.replace(/\r\n\|\r\|\n/g, '↵')` | "Swap EVERY line break for a ↵." `\r\n` (Windows), `\r`, or `\n`, whichever it is. `g` = all of them, not just the first. |
 | `a ? b : c` | "Is `a` true? Then `b`. If not, `c`." A tiny if/else in one line. |
+| `text.slice(0, SHOW_LETTERS)` | Just the first 1,000 letters |
+
+> **Why only 1,000 letters?** A box is at most 40 letters wide, so you never SEE more than that. But the browser still has to hold and lay out EVERY letter you put in it. One 50-million-letter cell (from a broken file) took the page down. Now it takes about 2 seconds. Why not 40? So search can still paint yellow a little past the edge, and the hover has something to read.
+
+> **Why does `short` (not just `text`) go in the hover?** Same reason. A 50-million-letter popup is just as bad as a 50-million-letter box.
+
+> **Why ALSO catch a lone `\r`?** Cutting at 1,000 letters can land right between the `\r` and the `\n` of a Windows line break, leaving a `\r` all alone at the end.
 
 > **Why ↵ instead of a real line break?** The clothes say `white-space: pre` (Step 3.5), so a real line break would make a second line of words, and that row would be TALLER than the others. The treadmill counts on every row being exactly 30px. One tall row, and every row after it lands in the wrong spot. The ↵ keeps it one line. Hover to see the real thing.
 
@@ -1260,6 +1274,14 @@ function finishLoading() {
 Now the brain listens for you picking a file. It cuts the file up **in bites** too, one line at a time, and measures each column's longest thing as it goes:
 
 ```js
+// Clear the button every time you CLICK it.
+// (The browser only says "change" if you pick a DIFFERENT file. So without this,
+//  editing a file in Excel and picking it again would do nothing.)
+fileInput.addEventListener('click', function () {
+    fileInput.value = '';
+});
+
+
 fileInput.addEventListener('change', function (event) {
 
     const file = event.target.files[0];   // the file you picked
@@ -1277,10 +1299,26 @@ fileInput.addEventListener('change', function (event) {
         if (e.lengthComputable) setProgress(0.2 * e.loaded / e.total);
     };
 
-    // Couldn't read it? Put the loader away, and turn search back on (if there's an old file to search).
-    reader.onerror = function () {
+    // Couldn't read it? Put the loader away, turn search back on (if there's an old file to search),
+    // and SAY what happened. (The browser's own reason is no help: it blames "permission problems"
+    // even when the file is just too big.)
+    function couldNotRead() {
+
         searchInput.disabled = headerCells.length === 0;
         finishLoading();
+
+        let message = file.size > 500 * 1000 * 1000
+            ? 'Couldn\'t open "' + file.name + '": it\'s ' + Math.round(file.size / 1000000) + ' MB, and the browser can only read files up to about 500 MB.'
+            : 'Couldn\'t read "' + file.name + '". Was it moved, renamed, or deleted? Try picking it again.';
+
+        if (headerCells.length > 0) message += '  (Your last file is still open.)';
+
+        statusText.textContent = message;
+    }
+
+    reader.onerror = function () {
+        if (myLoad !== loadId) return;    // you picked a newer file in the meantime? Forget this one.
+        couldNotRead();
     };
 
     // This part waits until the file is DONE reading.
@@ -1289,12 +1327,30 @@ fileInput.addEventListener('change', function (event) {
         if (myLoad !== loadId) return;    // you picked a newer file in the meantime? Forget this one.
 
         const text = e.target.result;     // the whole file, as one long string
+
+        // The file HAS stuff in it, but we got nothing back? The read failed.
+        // (A too-big file read from disk does this: no error, just an empty string.)
+        if (text.length === 0 && file.size > 0) {
+            couldNotRead();
+            return;
+        }
+
         let spot = 0;                     // where we are in it
 
 
         // Where the next " is in the file (-1 = there are no more).
         // We REMEMBER it, so each quote in the file only gets looked for once.
         let nextQuote = text.indexOf('"');
+
+        // How many quotes from here up to "end"? (And move nextQuote past them.)
+        function quotesBefore(end) {
+            let count = 0;
+            while (nextQuote !== -1 && nextQuote < end) {
+                count++;
+                nextQuote = text.indexOf('"', nextQuote + 1);
+            }
+            return count;
+        }
 
 
         // Cut off the NEXT line, and move "spot" past it.
@@ -1310,18 +1366,32 @@ fileInput.addEventListener('change', function (event) {
 
             let lineEnd = text.indexOf('\n', spot);         // find the next line break...
             let quotes  = 0;                                // how many " since this row started
+            const firstEnd = lineEnd;                       // the FIRST line break (the end, if there were no quotes)
 
             while (lineEnd !== -1) {
 
-                // Count the quotes before this line break.
-                while (nextQuote !== -1 && nextQuote < lineEnd) {
-                    quotes++;
-                    nextQuote = text.indexOf('"', nextQuote + 1);
-                }
+                quotes += quotesBefore(lineEnd);            // count the quotes before this line break
 
                 if (quotes % 2 === 0) break;                // EVEN? outside quotes. This is the real end.
 
                 lineEnd = text.indexOf('\n', lineEnd + 1);  // ODD? inside a cell. Try the next line break.
+
+                // No more line breaks? Count the quotes in the last bit of the file too.
+                if (lineEnd === -1) quotes += quotesBefore(text.length);
+
+                // Is it a STRAY quote (like 5'10")? Two ways to tell:
+                //   - it's still open WAY past the first line break (no real cell is that long), or
+                //   - the file ENDS with it still open (it never closed).
+                // Then give up: end the row at the FIRST line break.
+                // (And count quotes again from there. The ones we just counted belong to the next rows.)
+                const tooFar      = lineEnd - firstEnd > QUOTE_LIMIT;
+                const neverClosed = lineEnd === -1 && quotes % 2 === 1;
+
+                if (tooFar || neverClosed) {
+                    lineEnd = firstEnd;
+                    nextQuote = text.indexOf('"', firstEnd + 1);
+                    break;
+                }
             }
 
             const found = lineEnd !== -1;
@@ -1423,6 +1493,28 @@ fileInput.addEventListener('change', function (event) {
 
 > **Why remember `nextQuote` instead of just looking each time?** `text.indexOf('"', spot)` keeps looking until it FINDS a quote. In a file with NO quotes, that's all the way to the end of the file... on every single line. A million lines × a 500 MB search = the page freezes forever. Remembering where the next quote is means each quote gets found once, and a file with no quotes costs one search, total.
 
+> **What if a quote NEVER closes?** Like `Bob,5'10"` (inches!). That's 1 quote, so the brain thinks a cell is open, and EVERY line after it would join that one cell. (A 200,000-row test file came out as 1 row.) So the brain calls it a mistake, and ends the row at the first line break, if either:
+>
+> - **`tooFar`**: the "cell" runs `QUOTE_LIMIT` (32,767) letters past the first line break. That's the most Excel can fit in one cell, so no real cell is longer. *(Catches it fast in a big file.)*
+> - **`neverClosed`**: the file ENDS and the quote is still open. *(Catches it in a small file, which ends before 32,767.)*
+
+> **Why count the "last bit of the file" before deciding?** A file doesn't have to end with a line break. In `1,"x⏎y"` the closing quote comes AFTER the last line break. Skip counting it, and the brain would think that quote never closed, and wrongly chop a good cell.
+
+| More code | Baby words |
+|---|---|
+| `function quotesBefore(end) { ... return count; }` | A helper that counts, and hands back the answer. Used in 2 places, so it's written once. |
+| `quotes += ...` | "Add this to `quotes`." Same as `quotes = quotes + ...` |
+| `a \|\| b` | "Is `a` OR `b` true?" Either one is enough. |
+| `a && b` | "Are `a` AND `b` BOTH true?" |
+
+> **Why does `nextQuote` get reset when it gives up?** While looking for the closing quote, the brain counted quotes that really belong to the NEXT rows. If `nextQuote` stayed way out there, those rows would skip their own quotes, and get odd and even wrong. So it starts counting again right after the first line break.
+
+> **Why clear the file button on `click`?** The browser only says `change` when the file is DIFFERENT from last time. Pick `sales.csv`, fix it in Excel, pick `sales.csv` again... same name = no change = nothing happens. Clearing it when you click means ANY pick counts as new.
+
+> **Why our own error words?** For a too-big file, the browser says *"could not be read, typically due to permission problems"*. That's wrong and scary. The brain checks the size itself: over 500 MB? Say so. Otherwise, the file probably moved or got deleted since you picked it.
+
+> **Why check for an EMPTY result in `onload` too?** Sneaky one. A too-big file from your DISK doesn't fail with `onerror` at all. The browser says "done!" (`onload`) and hands back... an empty string. No error. The brain would think it's an empty file and quietly show nothing. So: the file on disk has stuff in it (`file.size > 0`), but we got nothing back? That's a failed read. Same message. (`couldNotRead` is one helper, so both ways of failing say the same thing.)
+
 > **Why swap everything in at the END?** While the new file is being cut, the old one is still on screen and still works. Nothing changes until the new one is completely ready. Then it all switches at once.
 
 **The big new idea: listeners.**
@@ -1455,6 +1547,19 @@ You should see the header and the first few rows with their numbers, and "Rows 1
 > ```
 >
 > You should see **1 row**, not 2. (Once the clothes are on in Part 3, it shows as `123 Main St↵Apt 4`. Hover it to see the real line break.)
+
+> **Test a stray quote.** Same thing, `stray.csv`:
+>
+> ```text
+> name,height
+> Bob,5'10"
+> Cy,6'1
+> Di,5'4
+> ```
+>
+> You should see **3 rows** (Bob, Cy, Di), not 1. Bob's quote never closes, so the brain catches it (`neverClosed`), and Cy and Di stay safe.
+
+> **Test the same file twice.** Pick `breaks.csv`. Change it in Notepad, save, and pick it AGAIN. You should see the change.
 
 > Picked a REALLY big file? You might see the words "Cutting it into rows..." for a moment. That's the loader, with no clothes yet. Part 3 turns it into the cloud and the pie.
 
@@ -2926,6 +3031,8 @@ Refresh. You should have:
 | **Make the pie bigger** | In `#loaderPie`, change both `64px` |
 | **Build more/fewer extra columns** | Change `EXTRA_COLUMNS`. More = safer for fast sideways scrolling, but every row gets a little heavier. |
 | **Change when the scrollbars get "scaled"** | Change `MAX_SCROLL_WIDTH` (sideways) or `MAX_SCROLL_HEIGHT` (up and down). Keep them under about 4,000,000: browsers stop drawing text past ~8 million pixels, and on sharp 2× screens that limit comes twice as soon. |
+| **Show more (or less) of a huge cell** | Change `SHOW_LETTERS`. Keep it in the thousands: every letter you show costs the browser work, on every row. |
+| **Change when a stray quote gets caught** | Change `QUOTE_LIMIT`. Smaller = gives up sooner. Don't go below a few thousand, or real notes with line breaks get chopped. |
 | **Make the page even smoother during big loads** | Lower `CHUNK_TIME` (like `8`). Smaller bites = smoother, but the whole job takes a little longer. |
 
 > ⚠️ The row count lives in 2 places. Change one, change the other (and remember the header counts as 1 more).
@@ -2954,7 +3061,13 @@ Refresh. You should have:
 | A cell with a line break inside quotes splits into 2 rows | `nextLine` (Step 2.15) is missing the quote-counting `while` loop, so it stops at the first line break. |
 | Rows with a line break in them are TALLER, and the rows after them are off | `makeRow` (Step 2.5) is missing the `shown` line, so the real line break gets drawn. |
 | A big file with no quotes freezes on "Cutting it into rows..." | `nextLine` looks for the next quote from `spot` every time, instead of remembering `nextQuote`. |
-| Everything after one row turns into ONE giant row | That row has a quote that never closes (like `5'10",Bob`). The brain thinks the cell is still open. Fix the quote in the file. |
+| Everything after one row turns into ONE giant row | That row has a quote that never closes (like `5'10",Bob`), and the `tooFar` / `neverClosed` check is missing from `nextLine` (Step 2.15). |
+| A stray quote is caught in BIG files but eats the rest of a SMALL file | `neverClosed` is missing. Small files end before `tooFar` ever kicks in. |
+| The last row's quoted line break gets chopped | `nextLine` skips `quotes += quotesBefore(text.length)`, so the closing quote after the last line break never gets counted. |
+| After a stray quote, the NEXT rows split in weird places | The `QUOTE_LIMIT` check gives up but doesn't reset `nextQuote = text.indexOf('"', firstEnd + 1)`. |
+| A file with one HUGE cell freezes the page | `makeRow` (Step 2.5) puts all of `text` in the box or the hover, instead of `short`. |
+| Picking the SAME file again does nothing | The `click` listener that clears `fileInput.value` is missing (Step 2.15). |
+| A too-big file just makes the loader vanish, no message | `couldNotRead` doesn't set `statusText.textContent`, OR `onload` is missing the `text.length === 0 && file.size > 0` check. (From disk, a too-big file comes back EMPTY, not as an error.) (Step 2.15) |
 | The search bar stays greyed out after loading | `searchInput.disabled = false;` is missing from the "ALL DONE" part of Step 2.15. |
 | Rows show the wrong numbers (off by one) | Somewhere is missing the `+ 1`. `matches` holds spots (start at 0), row numbers start at 1. |
 | A very wide file still crashes | `makeRow` still loops `col < columnCount`. It has to loop from `builtColStart` to `builtColEnd`. |
@@ -2979,7 +3092,9 @@ Refresh. You should have:
 ## What it can't do (yet)
 
 - **It expects a header.** The first line is always treated as the column names.
-- **A quote that never closes swallows the rest of the file.** If one cell has a stray `"` with no partner, every line after it becomes part of that cell. (Excel gets confused by this too. The fix is in the file, not the brain.)
+- **A quote that never closes still changes its OWN row.** The brain catches a stray `"` and keeps every other row safe, but in that one row, everything after the `"` lands in one cell. (`Bob,5'10",tall` → `[Bob] [5'10,tall]`.) The real fix is in the file.
+- **A real cell with a line break AND over 32,767 letters after it** gets treated like a stray quote. (Excel couldn't hold that cell either.)
+- **Huge cells only show their first 1,000 letters**, in the box and the hover. Search still finds words past that, but you won't see the yellow.
 - **No typo help.** `Jon` won't find `John`.
 - **Whole rows only.** You can't search just one column.
 - **In Expand mode,** the header doesn't follow you down the page.

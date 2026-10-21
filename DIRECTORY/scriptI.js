@@ -107,6 +107,14 @@ const LOADER_DELAY = 150;        //  the loader only shows up if a job takes lon
                                  //  (in milliseconds).  Small files are done before it would appear,
                                  //  so it never flashes on and off for nothing.
 
+const SHOW_LETTERS = 1000;       //  a cell with MORE letters than this only shows (and hovers) its first 1,000.
+                                 //  You can only SEE about 40 anyway.  Putting 50 million letters
+                                 //  in one box froze the page.
+
+const QUOTE_LIMIT = 32767;       //  a quote that's still open this many letters past a line break is a MISTAKE
+                                 //  (a stray quote, like  5'10"  ).  Excel can't fit more than 32,767 letters
+                                 //  in one cell either.
+
 
 
 // ----------------------------------------------------------
@@ -198,6 +206,14 @@ let loaderTimer    = null;   //  the "wait a moment before showing the loader" t
 //
 // ----------------------------------------------------------
 
+//  Clear the button every time you CLICK it.
+//  (The browser only says "change" if you pick a DIFFERENT file.  So without this,
+//   editing a file in Excel and picking it again would do nothing.)
+fileInput.addEventListener('click', function () {
+    fileInput.value = '';
+});
+
+
 fileInput.addEventListener('change', function (event) {
 
     const file = event.target.files[0];     //  the file you picked
@@ -218,10 +234,26 @@ fileInput.addEventListener('change', function (event) {
         if (e.lengthComputable) setProgress(0.2 * e.loaded / e.total);
     };
 
-    //  Couldn't read it?  Put the loader away, and turn search back on  (if there's an old file to search).
-    reader.onerror = function () {
+    //  Couldn't read it?  Put the loader away, turn search back on  (if there's an old file to search),
+    //  and SAY what happened.  (The browser's own reason is no help:  it blames "permission problems"
+    //  even when the file is just too big.)
+    function couldNotRead() {
+
         searchInput.disabled = headerCells.length === 0;
         finishLoading();
+
+        let message = file.size > 500 * 1000 * 1000
+            ? 'Couldn\'t open "' + file.name + '": it\'s ' + Math.round(file.size / 1000000) + ' MB, and the browser can only read files up to about 500 MB.'
+            : 'Couldn\'t read "' + file.name + '". Was it moved, renamed, or deleted? Try picking it again.';
+
+        if (headerCells.length > 0) message += '  (Your last file is still open.)';
+
+        statusText.textContent = message;
+    }
+
+    reader.onerror = function () {
+        if (myLoad !== loadId) return;      //  you picked a newer file in the meantime?  Forget this one.
+        couldNotRead();
     };
 
 
@@ -231,6 +263,13 @@ fileInput.addEventListener('change', function (event) {
         if (myLoad !== loadId) return;      //  you picked a newer file in the meantime?  Forget this one.
 
         const text = e.target.result;       //  the whole file, as one long string
+
+        //  The file HAS stuff in it, but we got nothing back?  The read failed.
+        //  (A too-big file read from disk does this:  no error, just an empty string.)
+        if (text.length === 0 && file.size > 0) {
+            couldNotRead();
+            return;
+        }
         let spot = 0;                       //  where we are in it
 
 
@@ -239,6 +278,16 @@ fileInput.addEventListener('change', function (event) {
         //  (Looking from scratch every line would search to the END of a no-quotes file
         //   on every single line.  On a huge file, that freezes the page.)
         let nextQuote = text.indexOf('"');
+
+        //  How many quotes from here up to "end"?  (And move nextQuote past them.)
+        function quotesBefore(end) {
+            let count = 0;
+            while (nextQuote !== -1 && nextQuote < end) {
+                count++;
+                nextQuote = text.indexOf('"', nextQuote + 1);
+            }
+            return count;
+        }
 
 
         //  Cut off the NEXT line, and move "spot" past it.
@@ -257,18 +306,32 @@ fileInput.addEventListener('change', function (event) {
 
             let lineEnd = text.indexOf('\n', spot);         //  find the next line break...
             let quotes  = 0;                                //  how many  "  since this row started
+            const firstEnd = lineEnd;                       //  the FIRST line break  (the end, if there were no quotes)
 
             while (lineEnd !== -1) {
 
-                //  Count the quotes before this line break.
-                while (nextQuote !== -1 && nextQuote < lineEnd) {
-                    quotes++;
-                    nextQuote = text.indexOf('"', nextQuote + 1);
-                }
+                quotes += quotesBefore(lineEnd);            //  count the quotes before this line break
 
                 if (quotes % 2 === 0) break;                //  EVEN?  Outside quotes.  This is the real end.
 
                 lineEnd = text.indexOf('\n', lineEnd + 1);  //  ODD?  Inside a cell.  Try the next line break.
+
+                //  No more line breaks?  Count the quotes in the last bit of the file too.
+                if (lineEnd === -1) quotes += quotesBefore(text.length);
+
+                //  Is it a STRAY quote  (like  5'10"  )?  Two ways to tell:
+                //    -  it's still open WAY past the first line break  (no real cell is that long), or
+                //    -  the file ENDS with it still open  (it never closed).
+                //  Then give up:  end the row at the FIRST line break.
+                //  (And count quotes again from there.  The ones we just counted belong to the next rows.)
+                const tooFar      = lineEnd - firstEnd > QUOTE_LIMIT;
+                const neverClosed = lineEnd === -1 && quotes % 2 === 1;
+
+                if (tooFar || neverClosed) {
+                    lineEnd = firstEnd;
+                    nextQuote = text.indexOf('"', firstEnd + 1);
+                    break;
+                }
             }
 
             const found = lineEnd !== -1;
@@ -1486,16 +1549,20 @@ function makeRow(num, cells, query, index) {
 
         const text = cells[col] || '';
 
+        //  A HUGE cell?  Only use its first SHOW_LETTERS letters, plus "…".
+        //  (You can only see about 40.  All 50 million in the box froze the page.)
+        const short = text.length > SHOW_LETTERS ? text.slice(0, SHOW_LETTERS) + '…' : text;
+
         //  A line break inside the cell?  Show it as  ↵  so the row stays ONE line tall.
         //  (Every row MUST be the same height.  All the scrolling math counts on it.)
-        const shown = text.indexOf('\n') === -1 ? text : text.replace(/\r?\n/g, '↵');
+        const shown = /[\r\n]/.test(short) ? short.replace(/\r\n|\r|\n/g, '↵') : short;
 
         const cell = document.createElement('span');
         cell.className = 'cell';
 
-        if (looksLikeNumber(text)) cell.classList.add('num');      //  numbers go on the right
+        if (looksLikeNumber(shown)) cell.classList.add('num');     //  numbers go on the right
 
-        if (text.length > 40 || shown !== text) cell.title = text; //  too long, or has line breaks?  hover to read it all
+        if (text.length > 40 || shown !== text) cell.title = short; //  too long, or has line breaks?  hover to read it
 
         paintMatches(cell, shown, query);
 
