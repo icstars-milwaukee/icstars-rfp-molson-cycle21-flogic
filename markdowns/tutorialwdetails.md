@@ -360,7 +360,7 @@ function splitIntoCells(line) {
             } else if (letter === '"') {
                 insideQuotes = false;       // closing quote. back to normal.
             } else {
-                current += letter;          // anything else (even a comma!) is part of the cell
+                current += letter;          // anything else (even a comma, even a line break!) is part of the cell
             }
 
         } else {
@@ -389,6 +389,8 @@ function splitIntoCells(line) {
 | `current += letter` | Stick this letter on the end of the cell |
 | `.push(x)` | Add `x` to the end of the list |
 | `true` / `false` | Yes / no. `insideQuotes` is like a light switch. |
+
+> **What about a line break inside quotes?** Like `"123 Main St` ⏎ `Apt 4"`. That's ONE cell. This function already keeps it (a line break is just another letter inside quotes). The hard part is making sure the line it gets isn't cut in half first. That's `nextLine`'s job, in Step 2.15.
 
 <br>
 
@@ -501,14 +503,18 @@ function makeRow(num, cells, query, index) {
 
         const text = cells[col] || '';
 
+        // A line break inside the cell? Show it as ↵ so the row stays ONE line tall.
+        // (Every row MUST be the same height. All the scrolling math counts on it.)
+        const shown = text.indexOf('\n') === -1 ? text : text.replace(/\r?\n/g, '↵');
+
         const cell = document.createElement('span');
         cell.className = 'cell';
 
         if (looksLikeNumber(text)) cell.classList.add('num');      // numbers go on the right
 
-        if (text.length > 40) cell.title = text;                   // too long? hover to read it all
+        if (text.length > 40 || shown !== text) cell.title = text; // too long, or has line breaks? hover to read it all
 
-        paintMatches(cell, text, query);
+        paintMatches(cell, shown, query);
 
         row.appendChild(cell);
     }
@@ -536,6 +542,10 @@ function makeRow(num, cells, query, index) {
 | `index % 2 === 1` | "Is this an odd number?" (`%` = the leftover after dividing.) So every OTHER row gets a stripe. |
 | `.title = text` | The little popup when you hover over something |
 | `.appendChild(x)` | Put `x` inside this piece |
+| `text.replace(/\r?\n/g, '↵')` | "Swap EVERY line break for a ↵." `\r?\n` = a line break, with or without the Windows `\r` in front. `g` = all of them, not just the first. |
+| `a ? b : c` | "Is `a` true? Then `b`. If not, `c`." A tiny if/else in one line. |
+
+> **Why ↵ instead of a real line break?** The clothes say `white-space: pre` (Step 3.5), so a real line break would make a second line of words, and that row would be TALLER than the others. The treadmill counts on every row being exactly 30px. One tall row, and every row after it lands in the wrong spot. The ↵ keeps it one line. Hover to see the real thing.
 
 <br>
 
@@ -1282,11 +1292,38 @@ fileInput.addEventListener('change', function (event) {
         let spot = 0;                     // where we are in it
 
 
+        // Where the next " is in the file (-1 = there are no more).
+        // We REMEMBER it, so each quote in the file only gets looked for once.
+        let nextQuote = text.indexOf('"');
+
+
         // Cut off the NEXT line, and move "spot" past it.
         // (Windows ends lines with \r\n, Mac and Linux with just \n. This handles both.)
+        //
+        // A line break INSIDE quotes is part of a cell, not the end of the row:
+        //
+        //     Ana,"123 Main St       <- 1 quote so far  = ODD  = still inside a cell. Keep going.
+        //     Apt 4"                 <- 2 quotes so far = EVEN = the row really ends here.
+        //
+        // ("" is a real quote mark. It's 2 quotes, so it never changes odd or even.)
         function nextLine() {
 
             let lineEnd = text.indexOf('\n', spot);         // find the next line break...
+            let quotes  = 0;                                // how many " since this row started
+
+            while (lineEnd !== -1) {
+
+                // Count the quotes before this line break.
+                while (nextQuote !== -1 && nextQuote < lineEnd) {
+                    quotes++;
+                    nextQuote = text.indexOf('"', nextQuote + 1);
+                }
+
+                if (quotes % 2 === 0) break;                // EVEN? outside quotes. This is the real end.
+
+                lineEnd = text.indexOf('\n', lineEnd + 1);  // ODD? inside a cell. Try the next line break.
+            }
+
             const found = lineEnd !== -1;
             if (!found) lineEnd = text.length;              // ...none left? The line goes to the end.
 
@@ -1376,8 +1413,15 @@ fileInput.addEventListener('change', function (event) {
 | `text.slice(a, b)` | The piece of the text from spot `a` up to (but not including) `b` |
 | `text.charCodeAt(x)` | The letter at spot `x`, as a number. `13` is the invisible `\r` Windows puts before line breaks. |
 | `longest[col] === undefined` | "We've never seen this column before" (a row with MORE cells than any row so far) |
+| `quotes % 2 === 0` | "Is the number of quotes EVEN?" (`% 2` = the leftover after dividing by 2. Even numbers leave 0.) |
+| `while (...) { ... }` | "Keep doing this, over and over, as long as `...` is true." |
+| `break` | "Stop the loop RIGHT NOW, and carry on after it." |
 
 > **Why not just cut the whole file into lines at once?** On a giant file, that one step freezes the page by itself. Finding one line break at a time, in bites, keeps the page alive the whole way.
+
+> **Why count quotes to find the end of a row?** Every `"` that OPENS a quoted cell has one that CLOSES it. So after an even number of quotes, every cell is closed, and a line break means "new row." After an odd number, a cell is still open, and the line break belongs inside it. (Real files do this all the time: addresses and notes from Excel or Salesforce often have line breaks in them.)
+
+> **Why remember `nextQuote` instead of just looking each time?** `text.indexOf('"', spot)` keeps looking until it FINDS a quote. In a file with NO quotes, that's all the way to the end of the file... on every single line. A million lines × a 500 MB search = the page freezes forever. Remembering where the next quote is means each quote gets found once, and a file with no quotes costs one search, total.
 
 > **Why swap everything in at the END?** While the new file is being cut, the old one is still on screen and still works. Nothing changes until the new one is completely ready. Then it all switches at once.
 
@@ -1401,6 +1445,16 @@ A listener is the brain saying: *"Hey Choose File button, when you change, tell 
 Refresh the page. Pick a CSV file.
 
 You should see the header and the first few rows with their numbers, and "Rows 1–… of …" above them. It'll look **squished together**: no columns, no window. **That's fine!** The clothes in Part 3 turn it into a sheet.
+
+> **Test line breaks inside quotes.** Make a file in Notepad with these 3 lines, save it as `breaks.csv`, and pick it:
+>
+> ```text
+> name,address
+> Ana,"123 Main St
+> Apt 4"
+> ```
+>
+> You should see **1 row**, not 2. (Once the clothes are on in Part 3, it shows as `123 Main St↵Apt 4`. Hover it to see the real line break.)
 
 > Picked a REALLY big file? You might see the words "Cutting it into rows..." for a moment. That's the loader, with no clothes yet. Part 3 turns it into the cloud and the pie.
 
@@ -2897,6 +2951,10 @@ Refresh. You should have:
 | The loader flashes on and off for tiny files | `LOADER_DELAY` is `0`, or `startLoading` shows the loader right away instead of using `setTimeout`. |
 | The pie jumps instead of filling smoothly | The `@property --done` block is missing or misspelled (it needs `syntax: "<number>"`). |
 | The pie is just a plain circle that never fills | `setProgress` sets `--done` on the wrong piece. It has to be `loaderPie`. |
+| A cell with a line break inside quotes splits into 2 rows | `nextLine` (Step 2.15) is missing the quote-counting `while` loop, so it stops at the first line break. |
+| Rows with a line break in them are TALLER, and the rows after them are off | `makeRow` (Step 2.5) is missing the `shown` line, so the real line break gets drawn. |
+| A big file with no quotes freezes on "Cutting it into rows..." | `nextLine` looks for the next quote from `spot` every time, instead of remembering `nextQuote`. |
+| Everything after one row turns into ONE giant row | That row has a quote that never closes (like `5'10",Bob`). The brain thinks the cell is still open. Fix the quote in the file. |
 | The search bar stays greyed out after loading | `searchInput.disabled = false;` is missing from the "ALL DONE" part of Step 2.15. |
 | Rows show the wrong numbers (off by one) | Somewhere is missing the `+ 1`. `matches` holds spots (start at 0), row numbers start at 1. |
 | A very wide file still crashes | `makeRow` still loops `col < columnCount`. It has to loop from `builtColStart` to `builtColEnd`. |
@@ -2921,7 +2979,7 @@ Refresh. You should have:
 ## What it can't do (yet)
 
 - **It expects a header.** The first line is always treated as the column names.
-- **No line breaks inside a cell.** A value with a line break inside quotes will split into two rows.
+- **A quote that never closes swallows the rest of the file.** If one cell has a stray `"` with no partner, every line after it becomes part of that cell. (Excel gets confused by this too. The fix is in the file, not the brain.)
 - **No typo help.** `Jon` won't find `John`.
 - **Whole rows only.** You can't search just one column.
 - **In Expand mode,** the header doesn't follow you down the page.

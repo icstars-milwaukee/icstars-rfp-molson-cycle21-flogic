@@ -234,14 +234,43 @@ fileInput.addEventListener('change', function (event) {
         let spot = 0;                       //  where we are in it
 
 
+        //  Where the next  "  is in the file  (-1 = there are no more).
+        //  We REMEMBER it, so each quote in the file only gets looked for once.
+        //  (Looking from scratch every line would search to the END of a no-quotes file
+        //   on every single line.  On a huge file, that freezes the page.)
+        let nextQuote = text.indexOf('"');
+
+
         //  Cut off the NEXT line, and move "spot" past it.
         //  (We don't cut the whole file into lines at once.  On a huge file,
         //   that alone freezes the page.  We cut one line at a time, in bites.)
         //
         //  Windows ends lines with  \r\n,  Mac and Linux with just  \n.  This handles both.
+        //
+        //  A line break INSIDE quotes is part of a cell, not the end of the row:
+        //
+        //      Ana,"123 Main St       <-  1 quote so far  =  ODD   =  still inside a cell.  Keep going.
+        //      Apt 4"                 <-  2 quotes so far  =  EVEN  =  the row really ends here.
+        //
+        //  ("" is a real quote mark.  It's 2 quotes, so it never changes odd or even.)
         function nextLine() {
 
             let lineEnd = text.indexOf('\n', spot);         //  find the next line break...
+            let quotes  = 0;                                //  how many  "  since this row started
+
+            while (lineEnd !== -1) {
+
+                //  Count the quotes before this line break.
+                while (nextQuote !== -1 && nextQuote < lineEnd) {
+                    quotes++;
+                    nextQuote = text.indexOf('"', nextQuote + 1);
+                }
+
+                if (quotes % 2 === 0) break;                //  EVEN?  Outside quotes.  This is the real end.
+
+                lineEnd = text.indexOf('\n', lineEnd + 1);  //  ODD?  Inside a cell.  Try the next line break.
+            }
+
             const found = lineEnd !== -1;
             if (!found) lineEnd = text.length;              //  ...none left?  The line goes to the end.
 
@@ -366,7 +395,7 @@ function splitIntoCells(line) {
             } else if (letter === '"') {
                 insideQuotes = false;       //  closing quote.  Back to normal.
             } else {
-                current += letter;          //  anything else (even a comma!) is part of the cell
+                current += letter;          //  anything else (even a comma, even a line break!) is part of the cell
             }
 
         } else {
@@ -1457,14 +1486,18 @@ function makeRow(num, cells, query, index) {
 
         const text = cells[col] || '';
 
+        //  A line break inside the cell?  Show it as  ↵  so the row stays ONE line tall.
+        //  (Every row MUST be the same height.  All the scrolling math counts on it.)
+        const shown = text.indexOf('\n') === -1 ? text : text.replace(/\r?\n/g, '↵');
+
         const cell = document.createElement('span');
         cell.className = 'cell';
 
         if (looksLikeNumber(text)) cell.classList.add('num');      //  numbers go on the right
 
-        if (text.length > 40) cell.title = text;                   //  too long?  hover to read it all
+        if (text.length > 40 || shown !== text) cell.title = text; //  too long, or has line breaks?  hover to read it all
 
-        paintMatches(cell, text, query);
+        paintMatches(cell, shown, query);
 
         row.appendChild(cell);
     }
