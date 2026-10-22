@@ -258,6 +258,19 @@ const NUM_WIDTH   = 60;     // how wide the row-number column is (in pixels)
 const BIG_FILE    = 20000;  // bigger than this? search waits until you stop typing
 const GLIDE       = 0.25;   // how fast the wheel glide catches up, every 60th of a second (bigger = snappier, smaller = floatier)
 const CHUNK_TIME  = 12;     // big jobs are done in BITES of about 12 milliseconds, so the page never freezes
+
+// "Take the next bite": let the screen breathe (draw, handle a click), then run "fn".
+// Why not setTimeout(fn, 0)? After 5 in a row, browsers make EVERY setTimeout wait at least 4 ms,
+// even with nothing else to do. A big file takes dozens of bites: that's a lot of waiting for nothing.
+// A message to ourselves (a "MessageChannel") has no such wait.
+const biteChannel = new MessageChannel();
+const biteQueue   = [];
+biteChannel.port1.onmessage = function () { biteQueue.shift()(); };
+
+function nextBite(fn) {
+    biteQueue.push(fn);
+    biteChannel.port2.postMessage(0);
+}
 const LOADER_DELAY = 150;   // the loader only shows up if a job takes longer than this (milliseconds)
 const SHOW_LETTERS = 1000;  // a cell with MORE letters than this only shows (and hovers) its first 1,000 (Step 2.5)
 const QUOTE_LIMIT = 32767;  // a quote still open this far past a line break is a MISTAKE, like 5'10" (Step 2.15)
@@ -447,19 +460,22 @@ function measureCells(line, longest) {
 
     if (line.indexOf('"') === -1) {
 
+        // Walk the letters one by one: a comma (letter code 44) or the end of the line = a cell ends.
+        // (Measured on a 125 MB file: ~15% faster than asking indexOf for every comma. Same answers.)
         let col  = 0;
         let from = 0;                       // where this cell starts
+        const end = line.length;
 
-        while (true) {
-            const comma = line.indexOf(',', from);
-            const size  = (comma === -1 ? line.length : comma) - from;
-
-            if (longest[col] === undefined || size > longest[col]) longest[col] = size;
-
-            if (comma === -1) return;       // no more commas? That was the last cell.
-            from = comma + 1;
-            col++;
+        for (let i = 0; i <= end; i++) {
+            if (i === end || line.charCodeAt(i) === 44) {
+                const size = i - from;
+                if (col >= longest.length) longest.push(size);      // a column we haven't seen yet
+                else if (size > longest[col]) longest[col] = size;
+                from = i + 1;
+                col++;
+            }
         }
+        return;
     }
 
     const cells = splitIntoCells(line);
@@ -868,7 +884,7 @@ Above and below those rows sit the two invisible **spacers** from Step 2.1. They
 When you scroll, rows that leave get thrown away and rows that come in get built. **Like a treadmill.**
 
 ```js
-function buildVisibleRows(scrollSpot) {
+function buildVisibleRows(scrollSpot, scrolledTopNow) {
 
     if (matches.length === 0) return;
 
@@ -883,13 +899,15 @@ function buildVisibleRows(scrollSpot) {
         viewTop     = pageViewFor(scrolledTop);
         viewHeight  = window.innerHeight;                       // the whole screen
     } else if (scrollSpot !== undefined) {
+        knowBox();
         viewTop     = scrollSpot;
-        scrolledTop = scrollbarSpotFor(scrollSpot);
-        viewHeight  = outputBox.clientHeight;                   // the window
+        scrolledTop = scrolledTopNow !== undefined ? scrolledTopNow : scrollbarSpotFor(scrollSpot);
+        viewHeight  = boxHeight;                                // the window
     } else {
+        knowBox();
         viewTop     = readViewY();
         scrolledTop = outputBox.scrollTop;
-        viewHeight  = outputBox.clientHeight;
+        viewHeight  = boxHeight;
     }
 
     // Turn that into row numbers (+ extras), kept inside 0 ... the last row.
@@ -1027,6 +1045,30 @@ function columnAt(spot) {
 }
 
 
+// THE WINDOW'S SIZE, REMEMBERED
+// Reading a size (or where the scrollbar is) RIGHT AFTER changing the page makes the browser
+// stop and measure the whole sheet, right then, in the middle of scrolling.
+// So the window's size is measured ONCE, and remembered. It only changes when:
+// a new file or search, a flip, Expand, the screen gets resized, or sizeWindow runs.
+// Those call boxChanged(), and the next one who asks measures it fresh.
+let boxWidth    = 0;        // the window's inside width (without its scrollbar)
+let boxHeight   = 0;        // ...and inside height
+let headHeight  = 0;        // the header's height
+let boxKnown    = false;    // are those up to date?
+
+function boxChanged() {
+    boxKnown = false;
+}
+
+function knowBox() {
+    if (boxKnown) return;
+    boxWidth    = outputBox.clientWidth;
+    boxHeight   = outputBox.clientHeight;
+    headHeight  = headerBox.offsetHeight;
+    boxKnown    = true;
+}
+
+
 // Figure out which columns should be built, and hand the clothes the column list.
 // "force" = rebuild even if nothing moved (for a new file, or a new search).
 function updateColumns(force) {
@@ -1034,8 +1076,9 @@ function updateColumns(force) {
     if (columnStarts === null || columnCount === 0) return;
 
 
-    // 1. Where are we looking?
-    const viewWidth = Math.max(outputBox.clientWidth - NUM_WIDTH, 0);   // how much sheet fits beside the row numbers
+    // 1. Where are we looking? (Read BEFORE changing anything: see "THE WINDOW'S SIZE, REMEMBERED".)
+    knowBox();
+    const viewWidth = Math.max(boxWidth - NUM_WIDTH, 0);                // how much sheet fits beside the row numbers
     const scrolled  = outputBox.scrollLeft;
     const spot      = sheetSpot(scrolled, viewWidth);
 
@@ -1085,23 +1128,26 @@ function updateColumns(force) {
 
     const columns = NUM_WIDTH + 'px ' + left + 'px ' + widths.join(' ') + ' ' + right + 'px';
 
+    const fresh = lastColumns === '';                   // the first column list for this layout?
+
     if (columns !== lastColumns) {
         outputBox.style.setProperty('--columns', columns);
         lastColumns = columns;
     }
 
-    // Handing over new columns can change how wide the WINDOW is (it fits the sheet, up to its max-width).
-    // Wider window = more columns fit. So check again, once, with the new width.
-    // But only for a sheet NARROWER than the window can get: a wider one already fills it, so nothing can change.
-    // (Checking makes the browser lay out the whole sheet RIGHT NOW, in the middle of scrolling. Skip it when we can.)
-    const widest = parseFloat(getComputedStyle(outputBox).maxWidth);       // (from the clothes: 900px)
-    const couldGrow = !(widest > 0) || NUM_WIDTH + sheetWidth < widest + 2;
-
-    if (couldGrow && !updateColumns.again && outputBox.clientWidth - NUM_WIDTH > viewWidth + 1) {
-        updateColumns.again = true;
-        updateColumns(force);
-        updateColumns.again = false;
-        return;
+    // A NEW layout (a new file, a search, a flip) can change how wide the WINDOW is (it fits the sheet, up to its max-width).
+    // Then measure it again, and if the width changed, pick the columns once more, for the new width.
+    // Plain scrolling never changes the window's width (the columns + the 2 spacers always add up to the same total),
+    // so then there's nothing to measure: no stopping the browser in the middle of scrolling.
+    if ((force || fresh) && !updateColumns.again) {
+        boxChanged();
+        knowBox();
+        if (Math.abs(boxWidth - NUM_WIDTH - viewWidth) > 1) {
+            updateColumns.again = true;
+            updateColumns(force);
+            updateColumns.again = false;
+            return;
+        }
     }
 
 
@@ -1134,19 +1180,23 @@ On a normal sheet, `spot` = `scrolled`, so the left spacer is just `columnStarts
 | Code | Baby words |
 |---|---|
 | `scrollLeft` | How far the window is scrolled SIDEWAYS (like `scrollTop`, but left-right) |
-| `clientWidth` | How wide the inside of the window is |
+| `clientWidth` | How wide the inside of the window is (`knowBox` remembers it in `boxWidth`) |
+| `knowBox()` / `boxChanged()` | "Measure the window, if it might have changed" / "It might have changed: measure it next time." |
 | `function` inside a `function` | `leftSpace` and `fits` live inside `updateColumns`, so they can use `spot` and `scrolled` |
 | `updateColumns.again` | A little "I'm already checking again" flag stuck right on the function, so it only re-checks ONCE |
 | `.setProperty('--columns', ...)` | Hand the clothes the new column list (Part 3 reads it) |
 
 > **Why only rebuild when the columns change?** Scrolling a few pixels sideways usually keeps the same columns (the extras on each side cover it). Rebuilding ~45 rows is quick, but skipping it when nothing changed is quicker.
 
+> **Why remember the window's size?** The browser measures the page when it draws it, once a frame. But if the brain CHANGES the page and then ASKS a size (or `scrollTop`), the browser has to stop and measure everything right then, and then again when it draws. On a 3,000-column sheet that was most of the cost of a scroll. So: ask first, change after, and remember the sizes that don't change while you scroll. (Measured: the scroll listener's own time went from ~9 ms to ~5 ms at its slowest.)
+
 <br>
 
 ### Step 2.10: The "Rows 21–35 of 100" words (`updatePosition`)
 
 ```js
-function updatePosition() {
+// "y" is optional: where you're looking, already read (the scroll listener hands it over).
+function updatePosition(y) {
 
     if (headerCells.length === 0) return;               // no file yet? stop.
 
@@ -1161,7 +1211,7 @@ function updatePosition() {
 
     // Every row is the same height.
     // So: how far we scrolled ÷ one row's height = which row is at the top.
-    const first = Math.min(Math.round(readViewY() / rowHeight), matches.length - 1);
+    const first = Math.min(Math.round((y === undefined ? readViewY() : y) / rowHeight), matches.length - 1);
 
     const last = outputBox.classList.contains('expanded')
         ? matches.length - 1                                    // expanded? you see them all
@@ -1199,6 +1249,7 @@ function updatePosition() {
 ```js
 function sizeWindow() {
 
+    boxChanged();                   // the window's size is about to change: measure it fresh next time
     outputBox.style.height = '';    // start fresh
 
     if (outputBox.classList.contains('expanded') || matches.length === 0) return;
@@ -1212,6 +1263,7 @@ function sizeWindow() {
 
     // the header + the rows + the scrollbar
     outputBox.style.height = (headerBox.offsetHeight + rowsToShow * rowHeight + scrollbar) + 'px';
+    boxChanged();
 }
 ```
 
@@ -1285,7 +1337,7 @@ function render() {
         // More to do? Say how far along we are, let the screen breathe, then take the next bite.
         if (i < total) {
             statusText.textContent = 'Searching for "' + searchInput.value.trim() + '"...  ' + Math.floor(100 * i / total) + '%';
-            setTimeout(searchSome, 0);
+            nextBite(searchSome);
             return;
         }
 
@@ -1423,7 +1475,7 @@ function buildSearchText() {
 
         // More to do? Let the screen breathe, then take the next bite.
         if (i < total) {
-            setTimeout(squishSomeRows, 0);
+            nextBite(squishSomeRows);
             return;
         }
 
@@ -1455,7 +1507,7 @@ function buildSearchText() {
 | `for (; i < last; i++)` | Keep counting from wherever `i` already is. (Nothing before the first `;` = don't start over.) |
 | `.join('\u0000')` | Glue the cells into one string, with an invisible wall (`\u0000`) between them |
 | `.toLowerCase()` | Make every letter small |
-| `setTimeout(squishSomeRows, 0)` | "Run the next bite as soon as the screen has had a chance to update." |
+| `nextBite(squishSomeRows)` | "Run the next bite as soon as the screen has had a chance to update." (See `nextBite`, with the numbers at the top of the brain.) |
 | `function` inside a `function` | `squishSomeRows` lives inside `buildSearchText`, so it can see `i`, `rows`, and `built`, and keep going where it left off. |
 
 > **Why check the clock every 500 rows, not every row?** Checking the clock takes a tiny bit of time too. Every 500 rows is often enough to stop on time, and rare enough not to slow things down.
@@ -1815,7 +1867,7 @@ fileInput.addEventListener('change', function (event) {
 
             // More to do? Let the screen breathe, then take the next bite.
             if (spot < text.length) {
-                setTimeout(cutSomeRows, 0);
+                nextBite(cutSomeRows);
                 return;
             }
 
@@ -2120,9 +2172,15 @@ The brain just flips the `expanded` label on and off. The **clothes** decide wha
 // The window scrolls → swap columns (sideways) and rows (up/down), update the words,
 // and start a countdown: still for 0.15 seconds? → snap to a whole row (Step 2.20).
 outputBox.addEventListener('scroll', function () {
-    updateColumns();                // scrolled sideways? swap columns in and out
-    buildVisibleRows();             // scrolled up or down? swap rows in and out
-    updatePosition();
+
+    // READ first, CHANGE after. Where is everything? Ask now, while the page is still measured.
+    knowBox();
+    const scrolledTop = outputBox.scrollTop;
+    const y           = readViewY();
+
+    updateColumns();                        // scrolled sideways? swap columns in and out
+    buildVisibleRows(y, scrolledTop);       // scrolled up or down? swap rows in and out
+    updatePosition(y);
 
     clearTimeout(snapTimer);
     snapTimer = setTimeout(snapToRow, 150);
@@ -2135,6 +2193,7 @@ window.addEventListener('scroll', function () {
 
 // The browser window changes size → more or fewer rows (and columns) might fit.
 window.addEventListener('resize', function () {
+    boxChanged();                   // the window may be a new size now
     updateColumns();                // wider screen = more columns fit
     buildVisibleRows();
 });
@@ -2264,9 +2323,13 @@ function snapToRow() {
     if (outputBox.classList.contains('expanded') || matches.length === 0) return;
 
     // Already on a whole row? Nothing to do.
+    // (A hair off, less than a pixel? Just set it EXACTLY: no glide needed.)
     const now = readViewY();
     const nearest = Math.round(now / rowHeight) * rowHeight;
-    if (Math.abs(now - nearest) < 1) return;
+    if (Math.abs(now - nearest) < 1) {
+        if (now !== nearest) setViewY(nearest);
+        return;
+    }
 
     if (!rowsScaled) {
         outputBox.scrollTo({ top: nearest, behavior: 'smooth' });    // normal file: the browser glides there
@@ -2328,8 +2391,8 @@ function squeeze(spot, squeezedEnd, fullEnd) {
 
 
 // The furthest the window can scroll: squeezed (what the scrollbar knows) and full (the real thing).
-function squeezedEnd() { return headerBox.offsetHeight + rowsHeight - outputBox.clientHeight; }
-function fullEnd()     { return headerBox.offsetHeight + matches.length * rowHeight - outputBox.clientHeight; }
+function squeezedEnd() { knowBox(); return headHeight + rowsHeight - boxHeight; }
+function fullEnd()     { knowBox(); return headHeight + matches.length * rowHeight - boxHeight; }
 
 // The lowest viewY can go (the bottom of the file).
 function lowestViewY() {
@@ -2791,19 +2854,21 @@ This is the biggest rule. It's split into labeled sections so it's easy to follo
     animation: float 6s steps(3) infinite;
 
     /* "I'm going to MOVE." So the browser draws the window (and its big shadow) ONCE,
-       then just slides that finished picture up and down. */
-    will-change: transform;
+       then just slides that finished picture up and down.
+       (2 kinds of moving: "translate" for the float, "transform" for the flip in Part 8.) */
+    will-change: transform, translate;
 }
 
 /* The floating move: up 4 pixels, then back down.
-   A smooth float written out as 10 points on the curve (slow at the top and bottom, faster in the middle). */
+   A smooth float written out as 10 points on the curve (slow at the top and bottom, faster in the middle).
+   It moves "translate" (just the sliding), not "transform", so the flip (Part 8) can run at the same time. */
 @keyframes float {
-    0%, 100% { transform: translateY(0); }
-    10%, 90% { transform: translateY(-0.38px); }
-    20%, 80% { transform: translateY(-1.38px); }
-    30%, 70% { transform: translateY(-2.62px); }
-    40%, 60% { transform: translateY(-3.62px); }
-    50%      { transform: translateY(-4px); }
+    0%, 100% { translate: 0 0; }
+    10%, 90% { translate: 0 -0.38px; }
+    20%, 80% { translate: 0 -1.38px; }
+    30%, 70% { translate: 0 -2.62px; }
+    40%, 60% { translate: 0 -3.62px; }
+    50%      { translate: 0 -4px; }
 }
 
 /* If someone turned off motion on their computer, stay still */
@@ -5933,7 +5998,8 @@ function snapToTarget() {
 
 
     //  2.  Sideways:  the column in the middle.
-    const viewWidth = Math.max(outputBox.clientWidth - NUM_WIDTH, 0);
+    knowBox();                                              //  (the remembered size:  no stopping the browser to measure)
+    const viewWidth = Math.max(boxWidth - NUM_WIDTH, 0);
     const spot      = columnStarts[col] - (viewWidth - columnWidths[col]) / 2;
 
     outputBox.scrollLeft = scrollSpotFor(Math.max(0, spot), viewWidth);
@@ -6603,25 +6669,42 @@ At the end of `<div id="controls" hidden>`, after the Expand button:
 
          ▯   ->   ▏   ->   ▭
 
+    Made to be easy on the eyes:
+      •  ONE smooth motion.  The two halves are the two halves of the same curve:
+         speeding up  ("ease in")  ->  the switch  ->  slowing down  ("ease out"),  at EXACTLY the same speed
+         on both sides of the switch.  (Different speeds there = a little kick your eye feels.)
+      •  It fades a little as it turns,  so the thin edge-on moment is soft,
+         instead of a sharp line swinging at you.
+      •  The float keeps going underneath  (it moves "translate",  the flip moves "transform":  2 different things),
+         so nothing jumps when the flip starts or ends.
+
     "perspective"  =  how far away your eye is:  the near edge looks bigger,  so it reads as 3D.
-    Only "transform" changes:  the cheapest thing to animate.
+    Only "transform" and "opacity" change:  the two cheapest things to animate.
     (Written AFTER  "#output.expanded",  so the flip wins over its  "animation: none".)  */
 #output.flip-away {
-    animation: flip-away 0.2s cubic-bezier(0.4, 0, 1, 1) forwards;     /*  speeding up as it turns away  */
+    animation:
+        float 6s steps(3) infinite,                                     /*  (the SAME float:  it just keeps going)  */
+        flip-away 0.25s cubic-bezier(0.11, 0, 0.5, 0) forwards;         /*  speeding up as it turns away  */
 }
 
 #output.flip-back {
-    animation: flip-back 0.36s cubic-bezier(0.16, 1, 0.3, 1);          /*  slowing down softly as it lands  */
+    animation:
+        float 6s steps(3) infinite,
+        flip-back 0.25s cubic-bezier(0.5, 1, 0.89, 1);                  /*  slowing down as it lands  */
 }
 
+/*  (No float in Expand mode:  just the flip.)  */
+#output.expanded.flip-away { animation: flip-away 0.25s cubic-bezier(0.11, 0, 0.5, 0) forwards; }
+#output.expanded.flip-back { animation: flip-back 0.25s cubic-bezier(0.5, 1, 0.89, 1); }
+
 @keyframes flip-away {
-    from { transform: perspective(2400px) rotateY(0deg); }
-    to   { transform: perspective(2400px) rotateY(90deg); }
+    from { transform: perspective(3000px) rotateY(0deg);   opacity: 1; }
+    to   { transform: perspective(3000px) rotateY(90deg);  opacity: 0.35; }
 }
 
 @keyframes flip-back {
-    from { transform: perspective(2400px) rotateY(-90deg); }
-    to   { transform: perspective(2400px) rotateY(0deg); }
+    from { transform: perspective(3000px) rotateY(-90deg); opacity: 0.35; }
+    to   { transform: perspective(3000px) rotateY(0deg);   opacity: 1; }
 }
 ```
 
@@ -6632,9 +6715,13 @@ At the end of `<div id="controls" hidden>`, after the Expand button:
 | `rotateY(90deg)` | Turn around the up-and-down line, a quarter turn: edge-on, invisible. |
 | `from { ... rotateY(-90deg) }` | Turning back starts from the OTHER side, so it looks like the back of the card coming around. |
 | `forwards` | When the turn-away ends, STAY turned away (until the brain swaps in the turn-back). |
-| `cubic-bezier(0.4, 0, 1, 1)` | Turning away: starts slow, speeds up. `(0.16, 1, 0.3, 1)` turning back: fast, then lands softly. |
+| `cubic-bezier(0.11, 0, 0.5, 0)` / `(0.5, 1, 0.89, 1)` | The SHAPE of each half. Turning away: starts slow, speeds up. Turning back: starts fast, slows down. They're the two halves of ONE curve: at the switch, both go exactly the same speed. |
+| `opacity: 0.35` (edge-on) | As it turns, it fades a little. The edge-on moment is soft, instead of a sharp line swinging at you. |
+| `float 6s steps(3) infinite, flip-away ...` | 2 animations at once: the float keeps going (it moves `translate`), and the flip turns it (it moves `transform`). Same name = the float doesn't restart, so nothing jumps. |
 
 > **Why switch while it's edge-on?** The window gets WIDER (and taller, by the letters row). Animating a size change makes the browser redo the whole layout every frame: slow. Edge-on, nobody can see it change, so it just happens in one go, and only the cheap turning is animated.
+
+> **Why must the two halves go the same speed at the switch?** Your eyes follow motion. If the card turns away at one speed and comes back at TWICE that speed, there's a little kick right in the middle, even if it's only for a moment. Measured: the first version's biggest one-frame jump was 43% of the window's width; matching the halves brought it down to 20%, as even as the frames around it.
 
 > **Why written AFTER `#output.expanded`?** Expand sets `animation: none`. Two rules with the same strength: the LATER one wins. So the flip has to come after it, or it couldn't flip in Expand mode.
 
@@ -6810,6 +6897,7 @@ function layoutColumns() {
     builtColStart = 0;                                  //  no columns built yet
     builtColEnd   = 0;
     lastColumns   = '';
+    boxChanged();                                       //  a new layout:  the window's size may change
 }
 ```
 
@@ -6934,19 +7022,20 @@ viewBtn.addEventListener('click', function () {
     }
 
     //  1.  Turn away  ->  2.  edge-on:  switch  ->  3.  turn back.
-    //  ("animationend" also hears the cells' own animations,  like the snap pulse:  only listen to the WINDOW's.)
+    //  ("animationend" also hears the cells' own animations,  like the snap pulse:  only listen to the WINDOW's FLIP.)
     flipping = true;
     outputBox.classList.add('flip-away');
 
     outputBox.addEventListener('animationend', function turned(e) {
-        if (e.target !== outputBox) return;
+        if (e.target !== outputBox || e.animationName !== 'flip-away') return;
         outputBox.removeEventListener('animationend', turned);
 
         switchLook();
-        outputBox.classList.replace('flip-away', 'flip-back');
+        outputBox.classList.replace('flip-away', 'flip-back');      //  (right away:  parking the card at exactly 90° made
+                                                                    //   the browser draw a whole big sheet at once:  ~100 ms.  Measured.)
 
         outputBox.addEventListener('animationend', function back(e) {
-            if (e.target !== outputBox) return;
+            if (e.target !== outputBox || e.animationName !== 'flip-back') return;
             outputBox.removeEventListener('animationend', back);
             outputBox.classList.remove('flip-back');
             flipping = false;
@@ -6963,7 +7052,12 @@ viewBtn.addEventListener('click', function () {
 | `matchMedia('(prefers-reduced-motion: reduce)')` | "Did this person turn off motion on their computer?" Then: no flip, just switch. |
 | `animationend` | "An animation just finished." The brain waits for the turn-away to end before switching. |
 | `e.target !== outputBox` | `animationend` also hears the CELLS' animations (like the snap pulse). Only the window's own counts. |
+| `e.animationName !== 'flip-away'` | ...and only the FLIP (not the float, which runs on the same window). |
 | `classList.replace('flip-away', 'flip-back')` | Swap one label for the other, in one go. |
+
+> **Why no "sink back a little" (a slight shrink) as it turns?** We tried it. A size change (`scale`) makes the browser redraw the window at a new size, and in the very frame of the switch, the window is brand new and much wider: that frame ran late 3 times out of 4. Fading alone softens the edge just as well, without that cost.
+
+> **Why start turning back RIGHT AWAY?** We tried waiting 2 frames first (so the big switch could be drawn while the card was edge-on). On a huge sheet it backfired: with the card parked at exactly 90°, the browser later had to draw the whole new sheet at once, a 100 ms freeze. Turning back right away: no freeze.
 
 > **Why put the scroll spot back by hand?** The letters row makes the header taller. The browser tries to be helpful ("scroll anchoring") and nudges the scrollbar to make up for it, so you'd land one row off. `setViewY(y)` puts you back exactly.
 
@@ -7142,6 +7236,8 @@ viewBtn.addEventListener('click', function () {
 | The header doesn't match the columns under it | The header isn't rebuilt when the columns change. `updateColumns` has to call `drawHeader()` in step 4. |
 | Columns are squished or overlap | The left and right spacer `span`s are missing from `makeRow`, so the cells land in the spacers' spots in the grid. |
 | Sideways scrolling shows blank space | `updateColumns()` isn't in the `scroll` listener, so the columns never swap in. |
+| After resizing the browser (or a new file), too few or too many columns are built | Something that changes the window's size is missing `boxChanged();` (the resize listener, `sizeWindow`, or `layoutColumns`), so `knowBox` keeps the OLD size. |
+| Scrolling feels heavy on a wide file, even though nothing looks wrong | The scroll listener reads `scrollTop` AFTER `updateColumns()` changed the page. Read first (`knowBox()`, `scrollTop`, `readViewY()`), then change. |
 | The window has empty glass at the bottom | `sizeWindow` still uses `WINDOW_SIZE` instead of `rowsToShow`. |
 | Deep in a huge file, the rows show numbers but the cells are BLANK | The rows area is taller than ~8 million pixels, where browsers stop drawing text. Check `MAX_SCROLL_HEIGHT` and that `render` sets `rowsScaled` and `rowsHeight`. |
 | On a huge file, the wheel jumps hundreds of rows per click | Something still reads `outputBox.scrollTop` directly instead of `readViewY()`, or sets it instead of calling `setViewY()`. |
