@@ -15,6 +15,7 @@ You're going to build a web page that opens a CSV file and shows it like a **min
 - **Spreadsheet View ↔ CSV View**: flip any file between the CSV look and Excel's look (letters on top, Excel's row numbers, a wider grid), like turning a card over (Part 8)
 - It opens **SQL dumps (`.sql`)** too: MySQL, PostgreSQL, and SQLite, one table at a time, in a **table look** (each column's type under its name, a PK badge, faint NULLs) in classic database blue. It flips to the CSV look, too (Part 9)
 - A **query engine** of its own: ask any open table a question in SQL (`WHERE`, `GROUP BY`, `JOIN`, window functions...), or click it together in the **Query** menu's builder. The answer takes the window's place; **← Back to file** brings the file back (Part 10)
+- **Query Flexibility** ("snap to result"): sloppy SQL like `selct * form orders` or `where status = shipped` gets fixed, and it says what it changed. **Type mode**: type your own SQL, then untick it and your SQL snaps back into the builder's buttons. And **click any cell** for its Details: rest the mouse on it and a little black **expand?** tag shows up (Part 11)
 
 You'll build it **one piece at a time**. After each part there's a **✅ Test it** step, so you always know it's working before you move on.
 
@@ -13384,6 +13385,1826 @@ The test tables are in `Castle Claude/small-files/query/`:
 ---
 
 <br>
+
+# PART 11: Query Flexibility, Type Mode, and Click a Cell ✨
+
+Part 10 gave the page a real query engine. But a real engine is STRICT: one wrong word and it says no. And the SQL people type FIRST is hardly ever perfect:
+
+| You type | The strict engine says | With Query Flexibility it runs |
+|---|---|---|
+| `select from orders` | ❌ Expected a value | `select * from orders` |
+| `selct * form orders` | ❌ A query starts with SELECT | `SELECT * FROM orders` |
+| `select * from orders.csv` | ❌ There's no table named csv | `select * from orders` |
+| `select * where qty > 5` | ❌ SELECT * needs a FROM | `select * FROM orders where qty > 5` |
+| `... where status = shipped` | ❌ There's no column named shipped | `... where status = 'shipped'` |
+| `... where status contains 'ship'` | ❌ Expected the query to end here | `... where status LIKE '%ship%'` |
+| `select status, count(*) from orders` | ❌ status has to be in GROUP BY | `... GROUP BY status` |
+| `... where status = 'Shipped'` | ⚠️ **0 rows** (the file says `shipped`) | `... where status = 'shipped'` |
+| `... where ordered > 2024-05-01` | ⚠️ **all 400 rows** (that's MATH: 2024 − 5 − 1 = 2018) | `... where ordered > '2024-05-01'` |
+
+Those last two are the sneaky ones: no error, just a wrong answer.
+
+This part adds 3 things:
+
+```text
+   ┌───────────────────────────────────────────────────────────────┐
+   │ SQL  [✓] Query Flexibility   [ ] Type mode   written for you  │   <- 1. two checkboxes
+   │ ░ select * from orders                                      ░ │
+   │ ┃ The builder can't show:  UPPER(status).  [Drop it] [Keep typing]   <- 2. it ASKS first
+   │ Query Flexibility fixed:   added  *   (all the columns)       │
+   │ [Run ▶] [Copy SQL] [Export CSV]               400 rows · 8 ms │
+   └───────────────────────────────────────────────────────────────┘
+
+   │ Ana     │ 123 Main St, Apt 4…[expand?]│      <- 3. rest the mouse on a cell:  "expand?"
+                                                         click it  ->  the Details panel, for THAT row
+```
+
+1. **Query Flexibility** (on at the start, the tooltip calls it "snap to result"): small mistakes get fixed, and it SAYS what it changed. Your SQL still runs exactly as written whenever it can: fixing only starts when it can't.
+2. **Type mode** (off at the start): click in the SQL box and it turns on. The builder greys out while you type. Untick it, and your SQL **snaps back into the builder's buttons**, so the builder works like a SQL-less GUI. If part of it can't be shown as buttons (a JOIN, a CASE), it asks first.
+3. **Click a cell** → its Details. Before, the Details panel (Part 6) only showed a search match. Now any cell works.
+
+> **Building in order?** Parts 4–10 show the files as they were at their own stage. This part changes a few lines in what Part 10 built: when a step says "replace", find the old lines from Part 10.
+
+<br>
+
+### Step 11.1: The skeleton
+
+**1.** In the query menu, the SQL line gets the 2 checkboxes. ("Use the builder again" is gone: unticking Type mode does that now.) Replace the whole `query-sql-head` line:
+
+```html
+            <div class="query-sql-head">
+                <span class="query-sql-label">SQL</span>
+                <label class="query-option" title="Snap to result:  small SQL mistakes get fixed  (a typo,  a missing FROM,  words without quotes ...),  and what you type snaps into the builder's buttons">
+                    <input type="checkbox" id="queryFlex" checked> Query Flexibility
+                </label>
+                <label class="query-option" title="Type your own SQL  (the builder is greyed out while you do)">
+                    <input type="checkbox" id="queryType"> Type mode
+                </label>
+                <span id="querySqlNote">written for you as you pick</span>
+            </div>
+```
+
+| Code | Baby words |
+|---|---|
+| `<label>` around the box | Clicking the WORDS ticks the box too. |
+| `checked` | Query Flexibility starts ticked. Type mode doesn't. |
+| `title="Snap to result: ..."` | What shows up when you hover it. |
+
+**2.** Right after the SQL box (`<textarea id="querySql" ...>`), the question it asks, and the line that says what got fixed:
+
+```html
+            <!--  Leaving type mode,  but some of your SQL doesn't fit the builder?  It ASKS first.  -->
+            <div id="queryAsk" role="alertdialog" aria-live="polite" hidden>
+                <span id="queryAskWords"></span>
+                <button id="queryAskYes" type="button">Drop them</button>
+                <button id="queryAskNo" type="button">Keep typing</button>
+            </div>
+            <!--  What Query Flexibility fixed  (in words)  -->
+            <div id="queryFixes" hidden></div>
+```
+
+**3.** The "expand?" tag, right after drag mode's anchor (`<div id="dragAnchor" hidden></div>`):
+
+```html
+    <!--  The "expand?" tag:  rest the mouse on a cell for a moment,  and it shows up on its corner.
+          (Click the cell  ->  the Details panel,  for that cell's whole row.)  -->
+    <div id="cellTag" aria-hidden="true" hidden>expand?</div>
+```
+
+> `aria-hidden="true"` tells screen readers to skip it: it's only a hint for the eyes. The cell itself is what you click.
+
+<br>
+
+### Step 11.2: The engine says WHAT went wrong
+
+To fix a mistake, the fixer has to know what the mistake WAS. Words like "There's no column named shipped" are for people. So every problem now carries a second, short note for the code, called `why`:
+
+```js
+//  why  =  the same problem,  for the code  (Query Flexibility reads it to fix the question):
+//      { kind: 'parse', tok }        the words stopped making sense at token number  tok
+//      { kind: 'column', name }      no column with that name
+//      { kind: 'table', name }       no table with that name
+//      { kind: 'group', name }       that column has to be in GROUP BY
+//      { kind: 'nofrom' }            SELECT *  with no FROM
+//      { kind: 'unclosed', close }   a quote never ends
+function queryFail(words, why) {
+    const problem = new QueryError(words);
+    problem.why = why || null;
+    throw problem;
+}
+```
+
+Then give each problem its `why`. Add the second part to these `queryFail(...)` lines (in this order in `queryI.js`):
+
+```js
+            if (end === -1) queryFail(what + ' never ends  (a  ' + close + '  is missing).', { kind: 'unclosed', close: close });
+```
+
+```js
+        if (t.k === 'end') queryFail(words + '  (at the end of the query).', { kind: 'parse', tok: i });
+        const shown = text.slice(t.at, tk[i + 1].at).trim() || t.v;
+        queryFail(words + '  (near  ' + shown + lineNote(text, t.at) + ').', { kind: 'parse', tok: i });
+```
+
+```js
+                queryFail('The column  ' + ref.name + '  has to be in GROUP BY,  or inside a total  (like  MAX(' + ref.name + ')  or  COUNT(' + ref.name + ')).',
+                          { kind: 'group', name: ref.name });
+```
+
+```js
+              { kind: 'column', name: ref.name });
+```
+
+```js
+                      { kind: 'table', name: item.name });
+```
+
+```js
+        if (it.table === null && src.cols.length === 0) queryFail('SELECT *  needs a FROM  (a table to show).', { kind: 'nofrom' });
+```
+
+| `why` | Means | The fix it leads to |
+|---|---|---|
+| `parse`, `tok` | The words stopped making sense at token number `tok` | Look at that word, and the one before it |
+| `column`, `name` | No column with that name | A typo? Words without quotes? No FROM? |
+| `table`, `name` | No table with that name | `orders.csv` → `orders`, or the only table there is |
+| `group` | A plain column next to a total | Add `GROUP BY` |
+| `nofrom` | `SELECT *` with nothing to show | Add `FROM` the open table |
+| `unclosed` | A quote that never ends | Add the missing `'` |
+
+**Every token remembers where it ENDS, too.** (It already knew where it starts: `at`.) Then a fix can swap ONE word for another and leave the rest of your SQL (your spaces, your new lines) just as you wrote it. At the top of the loop in `sqlTokens`:
+
+```js
+        //  (The token just read ends here:  Query Flexibility needs to know,  to swap one word for another.)
+        if (tokens.length > 0 && tokens[tokens.length - 1].to === undefined) tokens[tokens.length - 1].to = p;
+```
+
+<br>
+
+### Step 11.3: Run = try, fix ONE thing, try again
+
+`runQuery` gets a 5th thing, `flexible` (is the box ticked?). Add it to the notes above `runQuery`:
+
+```js
+//    flexible     Query Flexibility  (see FLEXIBILITY below):  small mistakes get fixed,  and the answer also has
+//                     sql:    the question that really ran
+//                     fixes:  what was changed,  in words   ([]  =  nothing:  it ran just as you wrote it)
+```
+
+Then split `runQuery` in 3, so it can TRY a question without running it (replace the whole old `runQuery`):
+
+```js
+async function runQuery(text, catalog, isCurrent, progress, flexible) {
+
+    const flex = { fixes: [], grouped: false };         //  what Query Flexibility changed  (and did it add a GROUP BY?)
+    let sql = flexible ? flexTraps(text, catalog, flex) : text;
+    let ready = null;
+
+    //  Try it.   Wrong?  Fix ONE thing,  and try again  (each try is only reading + compiling:  quick).
+    for (let round = 0; ready === null; round++) {
+        try {
+            ready = await readyQuery(sql, catalog, isCurrent);
+        } catch (problem) {
+            if (!flexible || !(problem instanceof QueryError)) throw problem;
+            const better = round < FLEX_ROUNDS ? flexFix(sql, problem, catalog, flex) : null;
+            if (better === null || better === sql) {
+                problem.sql = sql;                      //  (what it got to,  so the brain can show where it's stuck)
+                problem.fixes = flex.fixes;
+                throw problem;
+            }
+            sql = better;
+        }
+    }
+
+    let answer = await runPlan(ready, isCurrent, progress);
+
+    //  SNAP TO RESULT:  no rows,  but a word you compared to is in the file spelled a little differently?
+    if (flexible && answer.rows.length === 0) {
+        const snapped = await flexSnap(sql, ready.picked, catalog, isCurrent);
+        if (snapped !== null) {
+            const again = await runPlan(await readyQuery(snapped.sql, catalog, isCurrent), isCurrent, progress);
+            if (again.rows.length > 0) {
+                sql = snapped.sql;
+                answer = again;
+                flex.fixes.push.apply(flex.fixes, snapped.fixes);
+            }
+        }
+    }
+
+    answer.ran = ready.statements.length;
+    answer.count = ready.statements.length;
+    answer.sql = sql;
+    answer.fixes = flex.fixes;
+    return answer;
+}
+
+//  Read a question,  get its tables ready,  and compile it.   (Nothing runs yet.)
+async function readyQuery(text, catalog, isCurrent) {
+
+    const statements = parseSql(text);
+    if (statements.length === 0) queryFail('There\'s no question yet.  Try:   SELECT * FROM ' + (catalog.names()[0] || 'your_table'));
+    const picked = statements[statements.length - 1];
+
+    if (picked.t === 'write') {
+        queryFail(picked.verb + '  would change the data,  so it can\'t run here:  this tool only READS  (your file is never changed).  ' +
+                  'Try a SELECT,  like:   SELECT * FROM ' + (catalog.names()[0] || 'your_table') + ' LIMIT 10');
+    }
+
+    //  Which tables does it use?   Get them ready first  (another sheet of the file has to be read).
+    const wanted = new Set();
+    walkQuery(picked, function (item) { if (item.t === 'table') wanted.add(item.name); });
+    await catalog.prepare(Array.from(wanted));
+    if (!isCurrent()) throw QUERY_STALE;
+
+    //  Their column types:  worked out first,  in bites  (then compiling just reads them).
+    let stopAt = performance.now() + CHUNK_TIME;
+    for (const name of wanted) {
+        const table = catalog.find(name);
+        if (table === null) continue;                   //  (a WITH table,  or a mistake:  compiling says so)
+        const looking = lookAtKinds(table);
+        while (!looking.next().done) {
+            if (performance.now() >= stopAt) {
+                await new Promise(function (go) { nextBite(go); });
+                if (!isCurrent()) throw QUERY_STALE;
+                stopAt = performance.now() + CHUNK_TIME;
+            }
+        }
+    }
+
+    const plan = compileQuery(picked, null, { catalog: catalog, ctes: new Map(), owner: null });
+    return { statements: statements, picked: picked, plan: plan };
+}
+
+//  Run a compiled question,  in bites.
+async function runPlan(ready, isCurrent, progress) {
+
+    const plan = ready.plan;
+    const gen = plan.run({ outer: [] }, Infinity);
+    let stopAt = performance.now() + CHUNK_TIME;
+
+    for (;;) {
+        const step = gen.next();
+        if (step.done) {
+            return {
+                columns: plan.cols.map(function (c) { return { name: c.name, type: c.ty }; }),
+                rows: step.value,
+            };
+        }
+        if (performance.now() >= stopAt) {
+            if (typeof step.value === 'number' && progress) progress(step.value);
+            await new Promise(function (go) { nextBite(go); });
+            if (!isCurrent()) throw QUERY_STALE;
+            stopAt = performance.now() + CHUNK_TIME;
+        }
+    }
+}
+```
+
+```text
+   runQuery
+     │
+     ├─ flexTraps         the 2 sneaky ones  (dates without quotes,  a missing comma between 2 columns)
+     │
+     ├─ readyQuery  ──✗──>  flexFix  (ONE fix)  ──>  readyQuery again ...      (up to 10 times)
+     │       │
+     │       ✓  (it reads, and it compiles)
+     │
+     ├─ runPlan          the rows,  in bites  (like before)
+     │
+     └─ 0 rows?  ──>  flexSnap  (a word spelled a little differently in the file?)  ──>  runPlan again
+```
+
+| Code | Baby words |
+|---|---|
+| `readyQuery` | Read it, get its tables ready, compile it. Nothing runs yet, so trying again is quick. |
+| `runPlan` | Run what `readyQuery` made, in bites. |
+| `better === sql` | A "fix" that changes nothing isn't a fix. Stop (or it could go round and round). |
+| `problem.sql` / `problem.fixes` | It couldn't fix everything? The brain still shows how far it got, so the problem's words line up with the SQL in the box. |
+| `statements.length === 0` | An EMPTY box used to crash. Now it says "There's no question yet". |
+
+<br>
+
+### Step 11.4: The fixer (`FLEXIBILITY`, at the end of `queryI.js`)
+
+**1.** What it is, and its lists:
+
+```js
+//    FLEXIBILITY   ("Query Flexibility":  the checkbox in the query menu,  on at the start)
+//
+//    The SQL people type FIRST is hardly ever perfect:
+//
+//        select from orders                     ->   SELECT * FROM orders
+//        selct * form orders                    ->   SELECT * FROM orders
+//        select * from orders.csv               ->   SELECT * FROM orders
+//        select * where qty > 5                 ->   SELECT * FROM orders WHERE qty > 5
+//        ... where status = shipped             ->   ... where status = 'shipped'
+//        ... where statuss = 'shipped'          ->   ... where status = 'shipped'
+//        ... where status contains 'ship'       ->   ... where status LIKE '%ship%'
+//        select status, count(*) from orders    ->   ... GROUP BY status
+//        ... where qty >                        ->   (the unfinished end is left out)
+//
+//    THE RULE:  your SQL runs EXACTLY as you wrote it,  if it can.   Only when it CAN'T  (a mistake),
+//    that one mistake gets fixed,  and it tries again  (up to FLEX_ROUNDS times).
+//    Every fix is written down in words  (flex.fixes),  so the page can tell you what changed.
+//
+//    Two traps are fixed even though they'd run,  because they'd QUIETLY give the wrong answer:
+//        ordered > 2024-05-01      that's MATH  (2024 - 5 - 1 = 2018),  not a date     ->   '2024-05-01'
+//        select status qty ...     that's  status  nicknamed "qty".   But qty is a column:  a comma is missing.
+//
+//    And one after it runs:  SNAP TO RESULT.   No rows,  because you asked for  status = 'Shipped'
+//    and the file only ever says  'shipped'?   It snaps to how the file spells it,  and runs again.
+//
+// ----------------------------------------------------------
+
+const FLEX_ROUNDS = 10;                         //  at most this many fixes  (then it says what's still wrong)
+
+//  The words that start a part of a query:  a typo of one  (form,  wher,  oder,  limt ...)  gets fixed.
+const FLEX_CLAUSES = ['SELECT', 'FROM', 'WHERE', 'ORDER', 'GROUP', 'HAVING', 'LIMIT', 'AND'];
+
+//  Words people use for SELECT.
+const FLEX_SELECT = new Set(['SHOW', 'GET', 'FIND', 'LIST', 'DISPLAY', 'PICK']);
+
+//  A file's ending,  written as part of a table's name   (orders.csv  ->  orders)
+const FLEX_ENDINGS = /\.(csv|tsv|txt|xlsx|xlsm|xls|sql|json|db)$/i;
+
+//  Where an unfinished end gets cut off   (... WHERE qty >   ->   cut from WHERE)
+const FLEX_CUT_AT = new Set(['WHERE', 'AND', 'OR', 'HAVING', 'LIMIT', 'OFFSET', 'ON', 'BY']);
+
+//  The parts that come after FROM  /  after GROUP BY   (a new FROM  /  GROUP BY  goes in front of the first one there is)
+const FLEX_AFTER_FROM  = new Set(['WHERE', 'GROUP', 'HAVING', 'ORDER', 'LIMIT', 'OFFSET', 'FETCH', 'UNION', 'INTERSECT', 'EXCEPT']);
+const FLEX_AFTER_GROUP = new Set(['HAVING', 'ORDER', 'LIMIT', 'OFFSET', 'FETCH', 'UNION', 'INTERSECT', 'EXCEPT']);
+```
+
+**2.** Little helpers. The most important one is `flexClosest`: "which ONE name is this word closest to?" Close means: the same when written loosely (`Customer_ID` = `customer id`), or 1 letter off (2 for longer words). Two names just as close? It doesn't guess.
+
+```js
+//  A name,  as SQL:   status    "customer id"    "order"
+function flexName(name) {
+    const n = String(name);
+    return /^[A-Za-z_][A-Za-z0-9_]*$/.test(n) && !SQL_RESERVED.has(n.toUpperCase()) ? n : '"' + n.split('"').join('""') + '"';
+}
+
+//  Words,  as SQL:   'shipped'    'it''s'
+function flexWords(text) {
+    return "'" + String(text).split("'").join("''") + "'";
+}
+
+//  contains  /  starts with  /  ends with,  as SQL:   LIKE '%ship%'    (a  %  or  _  in the word is marked with  !)
+function flexLike(value, before, after) {
+    const v = String(value);
+    const marked = /[!%_]/.test(v);
+    const safe = marked ? v.replace(/[!%_]/g, function (c) { return '!' + c; }) : v;
+    return 'LIKE ' + flexWords(before + safe + after) + (marked ? " ESCAPE '!'" : '');
+}
+
+//  Names,  compared loosely:   Customer_ID  =  customer id  =  customerid
+function flexKey(name) {
+    return String(name).toLowerCase().replace(/[\s_\-.]+/g, '');
+}
+
+//  Words,  compared loosely:   ' Shipped '  =  'shipped'
+function flexLoose(text) {
+    return String(text).trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+//  How many letters have to change to get from  a  to  b   (put one in,  take one out,  swap one,  or turn 2 around).
+function flexDistance(a, b) {
+    const d = [];
+    for (let x = 0; x <= a.length; x++) d.push([x]);
+    for (let y = 1; y <= b.length; y++) d[0][y] = y;
+    for (let x = 1; x <= a.length; x++) {
+        for (let y = 1; y <= b.length; y++) {
+            d[x][y] = Math.min(d[x - 1][y] + 1, d[x][y - 1] + 1, d[x - 1][y - 1] + (a[x - 1] === b[y - 1] ? 0 : 1));
+            if (x > 1 && y > 1 && a[x - 1] === b[y - 2] && a[x - 2] === b[y - 1]) d[x][y] = Math.min(d[x][y], d[x - 2][y - 2] + 1);
+        }
+    }
+    return d[a.length][b.length];
+}
+
+//  The ONE name closest to a word   (null:  none is close,  or two are just as close:  then don't guess).
+//  Close  =  the same written loosely,  or 1 letter off  (2 for a word of 5 letters or more).
+function flexClosest(word, names) {
+    const key = flexKey(word);
+    const same = names.filter(function (n) { return flexKey(n) === key; });
+    if (same.length > 0) return same.length === 1 ? same[0] : null;
+    const most = key.length <= 4 ? 1 : 2;
+    let best = null, bestDistance = most + 1, tie = false;
+    names.forEach(function (n) {
+        const d = flexDistance(key, flexKey(n));
+        if (d < bestDistance) { best = n; bestDistance = d; tie = false; }
+        else if (d === bestDistance) tie = true;
+    });
+    return best !== null && !tie && bestDistance < key.length ? best : null;
+}
+
+//  How deep inside  ( )  each token is.
+function flexDepths(tk) {
+    const depth = [];
+    let d = 0;
+    tk.forEach(function (t) {
+        if (t.k === 'op' && t.v === ')') d = Math.max(0, d - 1);
+        depth.push(d);
+        if (t.k === 'op' && t.v === '(') d++;
+    });
+    return depth;
+}
+
+function flexIsWord(t, u) { return t !== undefined && t.k === 'id' && t.u === u; }
+function flexIsOp(t, v)   { return t !== undefined && t.k === 'op' && t.v === v; }
+function flexIsName(t)    { return t !== undefined && (t.k === 'qid' || (t.k === 'id' && !SQL_RESERVED.has(t.u))); }
+
+//  Put words in at a spot  (with a space on each side,  if there isn't one already).
+function flexInsert(sql, at, words) {
+    const before = sql.slice(0, at), after = sql.slice(at);
+    return before + (before === '' || /\s$/.test(before) ? '' : ' ') + words + (after === '' || /^[\s;)]/.test(after) ? '' : ' ') + after;
+}
+
+//  The columns of the tables the question reads  (the ones after FROM and JOIN).   None found?  The open table's.
+function flexColumnsFor(tk, catalog) {
+    const list = [];
+    for (let j = 1; j < tk.length; j++) {
+        if ((flexIsWord(tk[j - 1], 'FROM') || flexIsWord(tk[j - 1], 'JOIN')) && (tk[j].k === 'id' || tk[j].k === 'qid')) {
+            const table = catalog.find(tk[j].v);
+            if (table !== null) columnNames(table).forEach(function (c) { if (list.indexOf(c) === -1) list.push(c); });
+        }
+    }
+    if (list.length > 0) return list;
+    const names = catalog.names();
+    const main = names.length > 0 ? catalog.find(names[0]) : null;
+    return main === null ? [] : columnNames(main);
+}
+```
+
+> **`flexDistance`?** How many letters you'd have to change to get from one word to the other. `statuss` → `status` = 1 (take one out). `form` → `from` = 1 (turn 2 around). It fills in a little grid, one letter pair at a time (it's called "edit distance").
+
+**3.** The 2 traps: SQL that RUNS, but means something you didn't. These are fixed before the first try:
+
+```js
+//  THE TRAPS:  SQL that runs,  but means something you didn't.   (Fixed before the first try.)
+function flexTraps(sql, catalog, flex) {
+
+    let tk;
+    try { tk = sqlTokens(sql); } catch (problem) { return sql; }       //  (it can't even be read:  that's fixed later)
+
+    const edits = [];                                                   //  [from, to, new words]
+
+    //  1.  A date without quotes:   2024-05-01   (or  2024/5/1)   ->   '2024-05-01'
+    for (let j = 0; j + 4 < tk.length; j++) {
+        const y = tk[j], d1 = tk[j + 1], m = tk[j + 2], d2 = tk[j + 3], d = tk[j + 4];
+        if (y.k !== 'num' || m.k !== 'num' || d.k !== 'num' || d1.k !== 'op' || d2.k !== 'op') continue;
+        if (!((d1.v === '-' && d2.v === '-') || (d1.v === '/' && d2.v === '/'))) continue;
+        if (y.to !== d1.at || d1.to !== m.at || m.to !== d2.at || d2.to !== d.at) continue;     //  written as ONE thing,  no spaces
+        const ys = sql.slice(y.at, y.to), ms = sql.slice(m.at, m.to), ds = sql.slice(d.at, d.to);
+        if (!/^\d{4}$/.test(ys) || !/^\d{1,2}$/.test(ms) || !/^\d{1,2}$/.test(ds)) continue;
+        if (+ms < 1 || +ms > 12 || +ds < 1 || +ds > 31) continue;
+        const date = flexWords(ys + '-' + ('0' + ms).slice(-2) + '-' + ('0' + ds).slice(-2));
+        edits.push([y.at, d.to, date]);
+        flex.fixes.push(sql.slice(y.at, d.to) + '  ->  ' + date + '   (a date:  without quotes it\'s math)');
+        j += 4;
+    }
+
+    //  2.  Two columns in a SELECT list with no comma:   select status qty   ->   select status, qty
+    const depth = flexDepths(tk);
+    const columns = flexColumnsFor(tk, catalog).map(function (c) { return c.toLowerCase(); });
+    for (let j = 0; j < tk.length; j++) {
+        if (!flexIsWord(tk[j], 'SELECT')) continue;
+        for (let k = j + 1; k + 1 < tk.length; k++) {
+            if (depth[k] < depth[j] || (depth[k] === depth[j] && (flexIsWord(tk[k], 'FROM') || flexIsOp(tk[k], ';')))) break;
+            const a = tk[k], b = tk[k + 1];
+            if (depth[k] !== depth[j] || !flexIsName(a) || !flexIsName(b)) continue;
+            if (flexIsOp(tk[k - 1], '.') || flexIsWord(tk[k - 1], 'AS') || flexIsOp(tk[k + 2], '.') || flexIsOp(tk[k + 2], '(')) continue;
+            if (columns.indexOf(a.v.toLowerCase()) === -1 || columns.indexOf(b.v.toLowerCase()) === -1) continue;
+            edits.push([a.to, a.to, ',']);
+            flex.fixes.push(sql.slice(a.at, b.to) + '  ->  ' + sql.slice(a.at, a.to) + ', ' + sql.slice(b.at, b.to) + '   (a missing comma:  both are columns)');
+        }
+    }
+
+    edits.sort(function (x, y) { return y[0] - x[0]; });                 //  (from the end backward,  so the spots don't move)
+    edits.forEach(function (e) { sql = sql.slice(0, e[0]) + e[2] + sql.slice(e[1]); });
+    return sql;
+}
+```
+
+> **Why only when it's written as ONE thing?** `2024-05-01` (no spaces) is a date. `2024 - 5 - 1` (with spaces) is someone doing math on purpose: left alone.
+
+**4.** ONE fix for a problem. Each `why` has its own list of rules, tried in order:
+
+```js
+//  ONE fix for this problem   ->   the new SQL   (or null:  this one can't be fixed).
+function flexFix(sql, problem, catalog, flex) {
+
+    const why = problem.why;
+    if (!why) return null;
+
+    //  A quote that never ends:  end it  (at the very end,  before a last  ;).
+    if (why.kind === 'unclosed') {
+        const end = sql.replace(/[\s;]+$/, '').length;
+        flex.fixes.push('added the missing  ' + why.close + '  at the end');
+        return sql.slice(0, end) + why.close + sql.slice(end);
+    }
+
+    const tk = sqlTokens(sql);
+    const depth = flexDepths(tk);
+    const names = catalog.names();
+    const main = names.length > 0 ? names[0] : null;
+    const columns = flexColumnsFor(tk, catalog);
+
+    function say(words) { flex.fixes.push(words); }
+    function words(from, to) { return sql.slice(tk[from].at, tk[to].to).replace(/\s+/g, ' '); }
+    function swap(t, to, now) { return sql.slice(0, t.at) + now + sql.slice(to.to); }
+
+    //  The statement a token is in   (between  ;  marks):   [start,  end)
+    function start(i) { let j = i; while (j > 0 && !(flexIsOp(tk[j - 1], ';') && depth[j - 1] === 0)) j--; return j; }
+    function end(i)   { let j = i; while (tk[j].k !== 'end' && !(flexIsOp(tk[j], ';') && depth[j] === 0)) j++; return j; }
+
+    //  The first token from  a  to  b,  at depth  d,  that passes the test   (-1  =  none)
+    function find(a, b, d, test) {
+        for (let j = a; j < b; j++) if (depth[j] === d && test(tk[j])) return j;
+        return -1;
+    }
+    function isFrom(t) { return flexIsWord(t, 'FROM'); }
+
+    function columnFor(word) {
+        const key = flexKey(word);
+        const found = columns.filter(function (c) { return flexKey(c) === key; });
+        return found.length === 1 ? found[0] : null;
+    }
+
+    function tableFor(word) {
+        const exact = names.filter(function (n) { return n.toLowerCase() === String(word).toLowerCase(); });
+        return exact.length === 1 ? exact[0] : flexClosest(String(word).replace(FLEX_ENDINGS, ''), names);
+    }
+
+    //  No FROM:  the open file's table   (in front of WHERE,  GROUP BY ...  or at the end)
+    function addFrom(i) {
+        if (main === null) return null;
+        const s = start(i), e = end(i);
+        const spot = find(s + 1, e, 0, function (t) { return t.k === 'id' && FLEX_AFTER_FROM.has(t.u); });
+        say('added  FROM ' + flexName(main) + '   (the open file\'s table)');
+        return flexInsert(sql, spot === -1 ? tk[e].at : tk[spot].at, 'FROM ' + flexName(main));
+    }
+
+    //  Is token j a VALUE  (not a column)?   After  =  <  LIKE  BETWEEN,  or in an  IN (...)  list.
+    function isValueSpot(j) {
+        const p = tk[j - 1];
+        if (p === undefined) return false;
+        if (p.k === 'op' && COMPARE_SYMBOLS.has(p.v)) return true;
+        if (flexIsWord(p, 'LIKE') || flexIsWord(p, 'ILIKE') || flexIsWord(p, 'BETWEEN')) return true;
+        for (let k = j - 1; k > 0; k--) {
+            const t = tk[k];
+            if (flexIsOp(t, '(')) return flexIsWord(tk[k - 1], 'IN');
+            if (!(flexIsOp(t, ',') || t.k === 'str' || t.k === 'num' || t.k === 'id' || t.k === 'qid')) return false;
+        }
+        return false;
+    }
+
+
+    //  ---- THE WORDS STOPPED MAKING SENSE  (at token i) ----
+    if (why.kind === 'parse') {
+
+        const i = why.tok;
+        const t = tk[i], prev = tk[i - 1], next = tk[i + 1];
+        const s = start(i);
+        const atEnd = t.k === 'end' || flexIsOp(t, ';');
+
+        //  1.  The very start:   selct ...    show ...    from orders    orders    status, qty from orders
+        if (i === s) {
+            if (t.k === 'id' && (FLEX_SELECT.has(t.u) || flexClosest(t.u, ['SELECT']) === 'SELECT')) {
+                say(sql.slice(t.at, t.to) + '  ->  SELECT');
+                return swap(t, t, 'SELECT');
+            }
+            if (flexIsWord(t, 'FROM')) { say('added  SELECT *  in front'); return flexInsert(sql, t.at, 'SELECT *'); }
+            if (flexIsName(t) && catalog.find(t.v) !== null &&
+                (next.k === 'end' || flexIsOp(next, ';') || (next.k === 'id' && FLEX_AFTER_FROM.has(next.u)))) {
+                say('added  SELECT * FROM  in front');
+                return flexInsert(sql, t.at, 'SELECT * FROM');
+            }
+            if (flexIsName(t) || flexIsOp(t, '*')) { say('added  SELECT  in front'); return flexInsert(sql, t.at, 'SELECT'); }
+            return null;
+        }
+
+        //  2.  Nothing to show:   SELECT FROM orders    (SELECT DISTINCT FROM ...)    SELECT  (and nothing)
+        const afterSelect = flexIsWord(prev, 'SELECT') ||
+            ((flexIsWord(prev, 'DISTINCT') || flexIsWord(prev, 'ALL')) && flexIsWord(tk[i - 2], 'SELECT'));
+        if (afterSelect && (atEnd || flexIsOp(t, ')') || (t.k === 'id' && (t.u === 'FROM' || FLEX_AFTER_FROM.has(t.u))))) {
+            say('added  *   (all the columns)');
+            return flexInsert(sql, prev.to, '*');
+        }
+
+        //  3.  No table after FROM  (or JOIN):   FROM    FROM order    FROM WHERE ...
+        if (flexIsWord(prev, 'FROM') || flexIsWord(prev, 'JOIN')) {
+            if (t.k === 'id' && SQL_RESERVED.has(t.u)) {
+                const table = tableFor(t.v);                    //  a table called that  (or nearly):   order  ->  orders
+                if (table !== null) { say(sql.slice(t.at, t.to) + '  ->  ' + flexName(table)); return swap(t, t, flexName(table)); }
+            }
+            if (main !== null && (atEnd || flexIsOp(t, ')') || (t.k === 'id' && SQL_RESERVED.has(t.u)))) {
+                say('added the table  ' + flexName(main));
+                return flexInsert(sql, prev.to, flexName(main));
+            }
+        }
+
+        //  4.  ORDER  /  GROUP  without  BY
+        if ((flexIsWord(prev, 'ORDER') || flexIsWord(prev, 'GROUP')) && !flexIsWord(t, 'BY')) {
+            say('added  BY  after  ' + prev.u);
+            return flexInsert(sql, prev.to, 'BY');
+        }
+
+        //  5.  A  (  that never closes
+        if (atEnd && depth[i] > 0 && problem.message.indexOf('Expected  )') === 0) {
+            say('added the missing  )');
+            return sql.slice(0, prev.to) + ')' + sql.slice(prev.to);
+        }
+
+        //  6.  It stopped at the END:  the end is unfinished.   Leave it out   (... WHERE qty >   ...  LIMIT   select status,)
+        if (atEnd) {
+            let cut = -1;
+            for (let j = i - 1; j > s && cut === -1; j--) {
+                if (depth[j] === depth[i] && ((tk[j].k === 'id' && FLEX_CUT_AT.has(tk[j].u)) || flexIsOp(tk[j], ','))) cut = j;
+            }
+            if (cut === -1) return null;
+            if (flexIsWord(tk[cut], 'BY') && (flexIsWord(tk[cut - 1], 'ORDER') || flexIsWord(tk[cut - 1], 'GROUP'))) cut--;
+            say('left out the unfinished  ' + words(cut, i - 1));
+            return sql.slice(0, tk[cut].at).replace(/\s+$/, '') + sql.slice(prev.to);
+        }
+
+        //  7.  A comma with nothing after it:   select status, from orders
+        if (flexIsOp(prev, ',') && t.k === 'id' && SQL_RESERVED.has(t.u)) {
+            say('took out the extra  ,  before  ' + t.u);
+            return sql.slice(0, tk[i - 2].to) + sql.slice(prev.to);
+        }
+
+        //  8.  The word BEFORE this one was a typo of a part's first word,  read as a NICKNAME:
+        //          from orders wher qty > 5     ("orders,  nicknamed wher")
+        //          from orders oder by qty      select status form orders
+        if (prev.k === 'id' && !SQL_RESERVED.has(prev.u) && catalog.find(prev.v) === null && columnFor(prev.v) === null) {
+            const word = prev.u === 'SORT' ? 'ORDER' : flexClosest(prev.u, FLEX_CLAUSES);
+            if (word !== null && word !== prev.u && word !== 'SELECT') {
+                const now = (word === 'ORDER' || word === 'GROUP') && !flexIsWord(t, 'BY') ? word + ' BY' : word;
+                say(sql.slice(prev.at, prev.to) + '  ->  ' + now);
+                return swap(prev, prev, now);
+            }
+        }
+
+        //  9.  A table's name,  with no FROM in front:   select * orders
+        if (flexIsName(t) && catalog.find(t.v) !== null && find(s, i, depth[i], isFrom) === -1) {
+            say('added  FROM  in front of  ' + sql.slice(t.at, t.to));
+            return flexInsert(sql, t.at, 'FROM');
+        }
+
+        //  10.  Other words for ORDER BY:   sort by qty    orderby qty
+        if (flexIsWord(t, 'SORT') || flexIsWord(t, 'ORDERBY') || flexIsWord(t, 'GROUPBY')) {
+            const now = t.u === 'GROUPBY' ? 'GROUP BY' : 'ORDER BY';
+            const last = t.u === 'SORT' && flexIsWord(next, 'BY') ? next : t;
+            say(sql.slice(t.at, last.to) + '  ->  ' + now);
+            return swap(t, last, now);
+        }
+
+        //  11.  contains  /  starts with  /  ends with   (the builder's words)   ->   LIKE
+        const withWord = t.k === 'id' && (t.u === 'STARTS' || t.u === 'BEGINS' || t.u === 'ENDS') && flexIsWord(next, 'WITH');
+        if (withWord || (t.k === 'id' && (t.u === 'CONTAINS' || t.u === 'HAS' || t.u === 'INCLUDES'))) {
+            const v = withWord ? tk[i + 2] : next;
+            if (v !== undefined && (v.k === 'str' || v.k === 'num' || v.k === 'id' || v.k === 'qid')) {
+                const value = v.k === 'num' ? sql.slice(v.at, v.to) : v.v;
+                const like = flexLike(value, t.u === 'STARTS' || t.u === 'BEGINS' ? '' : '%', t.u === 'ENDS' ? '' : '%');
+                say(sql.slice(t.at, v.to) + '  ->  ' + like);
+                return swap(t, v, like);
+            }
+        }
+
+        //  12.  A typo of a part's first word:   form  ->  FROM    wher  ->  WHERE    oder  ->  ORDER BY
+        //       (Not if it's really a column or a table:  then it's something else.)
+        if (t.k === 'id' && catalog.find(t.v) === null && columnFor(t.v) === null) {
+            const word = flexClosest(t.u, FLEX_CLAUSES);
+            if (word !== null && word !== t.u) {
+                const now = (word === 'ORDER' || word === 'GROUP') && !flexIsWord(next, 'BY') ? word + ' BY' : word;
+                say(sql.slice(t.at, t.to) + '  ->  ' + now);
+                return swap(t, t, now);
+            }
+        }
+
+        //  13.  A name in 2 words:   customer id   ->   customer_id
+        if (flexIsName(prev) && t.k === 'id') {
+            const column = columnFor(prev.v + ' ' + t.v);
+            if (column !== null) { say(sql.slice(prev.at, t.to) + '  ->  ' + flexName(column)); return swap(prev, t, flexName(column)); }
+        }
+
+        //  14.  A missing comma in the SELECT list:   select status count(*)    select status qty count
+        let select = -1;
+        for (let j = i - 1; j >= s && select === -1; j--) if (depth[j] === depth[i] && flexIsWord(tk[j], 'SELECT')) select = j;
+        if (select !== -1 && find(select, i, depth[i], isFrom) === -1) {
+            if (flexIsOp(t, '(') && flexIsName(prev) && i - 2 > select) {
+                say('added a missing  ,  before  ' + sql.slice(prev.at, prev.to));
+                return sql.slice(0, tk[i - 2].to) + ',' + sql.slice(tk[i - 2].to);
+            }
+            if (flexIsName(t) || t.k === 'num' || t.k === 'str') {
+                say('added a missing  ,  before  ' + sql.slice(t.at, t.to));
+                return sql.slice(0, prev.to) + ',' + sql.slice(prev.to);
+            }
+        }
+
+        return null;
+    }
+
+
+    //  ---- SELECT *  WITH NO FROM ----
+    if (why.kind === 'nofrom') return addFrom(0);
+
+
+    //  ---- NO COLUMN WITH THAT NAME ----
+    if (why.kind === 'column') {
+
+        const key = String(why.name).toLowerCase();
+        const spots = [];
+        tk.forEach(function (t, j) {
+            if ((t.k === 'id' || t.k === 'qid') && t.v.toLowerCase() === key && !flexIsOp(tk[j + 1], '(')) spots.push(j);
+        });
+        if (spots.length === 0) return null;
+        const j = spots[0];
+
+        //  a.  No FROM at all   (select status where qty > 5):   it's the open file's table.
+        if (find(start(j), end(j), 0, isFrom) === -1) return addFrom(j);
+
+        //  b.  A name in 2 words:   customer id   ->   customer_id
+        if (flexIsName(tk[j + 1])) {
+            const column = columnFor(tk[j].v + ' ' + tk[j + 1].v);
+            if (column !== null) { say(words(j, j + 1) + '  ->  ' + flexName(column)); return swap(tk[j], tk[j + 1], flexName(column)); }
+        }
+        if (flexIsName(tk[j - 1])) {
+            const column = columnFor(tk[j - 1].v + ' ' + tk[j].v);
+            if (column !== null) { say(words(j - 1, j) + '  ->  ' + flexName(column)); return swap(tk[j - 1], tk[j], flexName(column)); }
+        }
+
+        //  c.  A VALUE without its quotes   (status = shipped,   status = "shipped"):   words
+        if (isValueSpot(j)) {
+            say(sql.slice(tk[j].at, tk[j].to) + '  ->  ' + flexWords(tk[j].v) + '   (words go in single quotes)');
+            return swap(tk[j], tk[j], flexWords(tk[j].v));
+        }
+
+        //  d.  A typo:   statuss  ->  status   (every time it's written)
+        const column = flexClosest(why.name, columns);
+        if (column !== null && column.toLowerCase() !== key) {
+            say(sql.slice(tk[j].at, tk[j].to) + '  ->  ' + flexName(column));
+            let out = sql;
+            for (let k = spots.length - 1; k >= 0; k--) out = out.slice(0, tk[spots[k]].at) + flexName(column) + out.slice(tk[spots[k]].to);
+            return out;
+        }
+        return null;
+    }
+
+
+    //  ---- NO TABLE WITH THAT NAME ----
+    if (why.kind === 'table') {
+
+        const key = String(why.name).toLowerCase();
+        if (names.some(function (n) { return n.toLowerCase() === key; })) return null;     //  (it's there:  something else is wrong)
+
+        const spots = [];
+        tk.forEach(function (t, j) { if ((t.k === 'id' || t.k === 'qid') && t.v.toLowerCase() === key) spots.push(j); });
+        if (spots.length === 0) return null;
+        const j = spots[0];
+
+        //  a.  orders.csv   (read as  "the table csv,  in orders")   ->   orders
+        if (flexIsOp(tk[j - 1], '.') && FLEX_ENDINGS.test('.' + tk[j].v) && flexIsName(tk[j - 2])) {
+            say(words(j - 2, j) + '  ->  ' + sql.slice(tk[j - 2].at, tk[j - 2].to));
+            return sql.slice(0, tk[j - 2].to) + sql.slice(tk[j].to);
+        }
+
+        //  b.  "orders.csv"  /  a near miss  /  the only table there is
+        let now = tableFor(why.name);
+        let note = '';
+        if (now === null && names.length === 1) { now = main; note = '   (the open file\'s table)'; }
+        if (now === null) return null;
+        say(sql.slice(tk[j].at, tk[j].to) + '  ->  ' + flexName(now) + note);
+        let out = sql;
+        for (let k = spots.length - 1; k >= 0; k--) out = out.slice(0, tk[spots[k]].at) + flexName(now) + out.slice(tk[spots[k]].to);
+        return out;
+    }
+
+
+    //  ---- A COLUMN THAT HAS TO BE IN GROUP BY   (select status, count(*) from orders) ----
+    if (why.kind === 'group') {
+
+        const key = String(why.name).toLowerCase();
+        let j = 0;
+        while (tk[j].k !== 'end' && !((tk[j].k === 'id' || tk[j].k === 'qid') && tk[j].v.toLowerCase() === key)) j++;
+        const s = start(j), e = end(j);
+        const group = find(s, e, 0, function (t) { return flexIsWord(t, 'GROUP'); });
+
+        if (group !== -1) {
+            if (!flex.grouped) return null;             //  YOUR GROUP BY:  how you meant it isn't clear.  Don't guess.
+            const after = find(group + 2, e, 0, function (t) { return t.k === 'id' && FLEX_AFTER_GROUP.has(t.u); });
+            const at = tk[(after === -1 ? e : after) - 1].to;
+            say('added  ' + flexName(why.name) + '  to the GROUP BY');
+            return sql.slice(0, at) + ', ' + flexName(why.name) + sql.slice(at);
+        }
+
+        const from = find(s, e, 0, isFrom);
+        if (from === -1) return null;
+        const spot = find(from + 1, e, 0, function (t) { return t.k === 'id' && FLEX_AFTER_GROUP.has(t.u); });
+        flex.grouped = true;
+        say('added  GROUP BY ' + flexName(why.name) + '   (a total needs groups)');
+        return flexInsert(sql, spot === -1 ? tk[e].at : tk[spot].at, 'GROUP BY ' + flexName(why.name));
+    }
+
+    return null;
+}
+```
+
+| Rule | Example | Why it's in THIS order |
+|---|---|---|
+| A table name with no FROM before it | `select * orders` | BEFORE the typo rule: `orders` is 1 letter from `ORDER`! |
+| The word BEFORE was a typo | `from orders wher qty > 5` | SQL reads `orders wher` as "orders, nicknamed wher". The mistake is only noticed at `qty`, one word late. |
+| A typo of a part's first word | `form`, `oder`, `limt` | Not if it's really a column or a table's name. |
+| The unfinished end is left out | `... where qty >` | Cut at the last `WHERE` / `AND` / `,` ... and say so. |
+| Words without quotes | `status = shipped` | Only in a VALUE spot (after `=`, `LIKE`, inside `IN (...)`). Anywhere else, it's more likely a column typo. |
+
+**5.** Fix it without running it (for the builder, Step 11.5):
+
+```js
+//  Fix a question WITHOUT running it   (for the builder:  your SQL,  snapped into its buttons).
+//      ->  { sql,  fixes }     (still wrong at the end?  sql is as far as the fixing got)
+//  (Right away,  not in bites:  it only reads and compiles.   Another sheet that isn't read yet stays as it is.)
+function flexSync(text, catalog) {
+    const flex = { fixes: [], grouped: false };
+    let sql = flexTraps(text, catalog, flex);
+    for (let round = 0; round < FLEX_ROUNDS; round++) {
+        try {
+            const statements = parseSql(sql);
+            const picked = statements[statements.length - 1];
+            if (picked === undefined || picked.t === 'write') break;
+            compileQuery(picked, null, { catalog: catalog, ctes: new Map(), owner: null });
+            break;
+        } catch (problem) {
+            if (!(problem instanceof QueryError)) throw problem;
+            const better = flexFix(sql, problem, catalog, flex);
+            if (better === null || better === sql) break;
+            sql = better;
+        }
+    }
+    return { sql: sql, fixes: flex.fixes };
+}
+```
+
+**6.** SNAP TO RESULT: no rows came back. Was a word spelled differently in the file?
+
+```js
+//  SNAP TO RESULT:  the answer had NO rows.   Was it a word that's spelled a little differently in the file?
+//      status = 'Shipped'    but the file only says  'shipped'    ->   { sql:  ... 'shipped' ...,   fixes:  [...] }
+//  (Only when the file has ONE other spelling,  and never the one you typed.   Otherwise:  null.)
+async function flexSnap(sql, picked, catalog, isCurrent) {
+
+    //  1.  The comparisons to words:    column = 'Shipped'    column IN ('a', 'b')    column IS 'x'
+    const asks = [];
+    (function look(node, core) {
+        if (node === null || typeof node !== 'object') return;
+        if (Array.isArray(node)) { node.forEach(function (x) { look(x, core); }); return; }
+        if (node.t === 'core') core = node;
+        if (core !== null && core.from !== null && core.from.t === 'table') {
+            const pairs = [];
+            if ((node.t === 'cmp' && node.op === '=') || (node.t === 'isdist' && node.not)) pairs.push([node.a, node.b], [node.b, node.a]);
+            if (node.t === 'in' && !node.not) node.list.forEach(function (x) { pairs.push([node.e, x]); });
+            pairs.forEach(function (p) {
+                if (p[0].t !== 'col' || p[1].t !== 'lit' || typeof p[1].v !== 'string') return;
+                const table = catalog.find(core.from.name);
+                if (table === null) return;
+                const col = columnNames(table).map(function (c) { return c.toLowerCase(); }).indexOf(String(p[0].name).toLowerCase());
+                if (col !== -1 && asks.length < 4) asks.push({ table: table, col: col, word: p[1].v });
+            });
+        }
+        for (const k in node) if (node[k] !== null && typeof node[k] === 'object') look(node[k], core);
+    })(picked, null);
+    if (asks.length === 0) return null;
+
+    //  2.  How does the file spell each one?
+    const tk = sqlTokens(sql);
+    const edits = [], fixes = [];
+    for (const ask of asks) {
+        const spelled = await flexSpelling(ask, isCurrent);
+        if (spelled === null) continue;
+        tk.forEach(function (t) { if (t.k === 'str' && t.v === ask.word) edits.push([t.at, t.to, flexWords(spelled)]); });
+        fixes.push(flexWords(ask.word) + '  ->  ' + flexWords(spelled) + '   (no row had it:  that\'s how the file spells it)');
+    }
+    if (edits.length === 0) return null;
+
+    edits.sort(function (x, y) { return y[0] - x[0]; });
+    let out = sql, last = -1;
+    edits.forEach(function (e) { if (e[0] !== last) out = out.slice(0, e[0]) + e[2] + out.slice(e[1]); last = e[0]; });
+    return { sql: out, fixes: fixes };
+}
+
+//  The ONE way the file spells this word  (loosely the same,  but not exactly).   null:  none,  two,  or it's there as typed.
+async function flexSpelling(ask, isCurrent) {
+    const want = flexLoose(ask.word);
+    const table = ask.table, n = table.rowCount, width = Math.max(table.columns.length, 1);
+    let found = null, work = 0, stopAt = performance.now() + CHUNK_TIME;
+    for (let i = 0; i < n; i++) {
+        work += width;
+        if (work >= BITE_CELLS) {
+            work = 0;
+            if (performance.now() >= stopAt) {
+                await new Promise(function (go) { nextBite(go); });
+                if (!isCurrent()) throw QUERY_STALE;
+                stopAt = performance.now() + CHUNK_TIME;
+            }
+        }
+        const v = table.row(i)[ask.col];
+        if (v === undefined || v === '') continue;
+        if (v === ask.word) return null;                //  it IS in the file,  just as you typed it:  something else left no rows
+        if (flexLoose(v) !== want) continue;
+        if (found === null) found = v;
+        else if (found !== v) return null;              //  two different spellings:  which one?  Don't guess.
+    }
+    return found;
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `flexLoose` | `' Shipped '` and `'shipped'` are the same, loosely (spaces and big letters don't count). |
+| `if (v === ask.word) return null` | Your word IS in the file, just as you typed it? Then something ELSE gave no rows. Don't touch it. |
+| `else if (found !== v) return null` | Two different spellings (`Shipped` AND `SHIPPED`)? Which one did you mean? Don't guess. |
+| `work >= BITE_CELLS` | It reads a whole column, so it takes breaths too (Part 10's crash fix). A million rows: about 1 second, and the page never freezes. |
+
+<br>
+
+### Step 11.5: The brain: Type mode, and your SQL back into the builder
+
+**1.** The new pieces, next to the other query names (replace the `queryNote` and `queryReset` lines):
+
+```js
+const queryNote    = document.getElementById('querySqlNote');   //  "written for you as you pick"
+const queryFlex    = document.getElementById('queryFlex');      //  [✓] Query Flexibility
+const queryType    = document.getElementById('queryType');      //  [ ] Type mode
+const queryAsk     = document.getElementById('queryAsk');       //  "The builder can't show ...   [Drop them] [Keep typing]"
+const queryAskWords = document.getElementById('queryAskWords');
+const queryAskYes  = document.getElementById('queryAskYes');
+const queryAskNo   = document.getElementById('queryAskNo');
+const queryFixes   = document.getElementById('queryFixes');     //  "Query Flexibility fixed:  selct  ->  SELECT ..."
+```
+
+And `handWritten` becomes `typeMode` (replace the line, and every `handWritten` in the brain):
+
+```js
+let typeMode    = false;    //  TYPE MODE:  you write the SQL yourself.  (The builder is greyed out,  and stops writing over it.)
+```
+
+In `queryFileChanged`, replace `handWritten = false;`:
+
+```js
+    setTypeMode(false);
+    showFixes([]);
+```
+
+**2.** A total can keep a NICKNAME you typed (`COUNT(*) AS n`), so that very common SQL fits the builder without asking:
+
+```js
+//  The nicknames the totals get  (count,  sum_price ...),  in order.   (A nickname from SQL you typed?  That one.)
+function totalNames(of) {
+    const b = of || build;
+    const used = new Set(b.group.map(function (g) { return g.toLowerCase(); }));
+    return b.totals.map(function (t) {
+        const fn = TOTAL_FNS.find(function (f) { return f[0] === t.fn; });
+        if (t.name) { used.add(t.name.toLowerCase()); return t.name; }
+        let name = t.fn === 'rows' ? 'count' : fn[2] + '_' + String(t.col).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+        let n = name, k = 2;
+        while (used.has(n)) n = name + '_' + k++;
+        used.add(n);
+        return n;
+    });
+}
+```
+
+In `drawBuilder`, the TOTALS part (picking a new total forgets the old nickname; a nickname shows as "as n"):
+
+```js
+    //  TOTALS
+    section('Totals', function (box) {
+        build.totals.forEach(function (t, k) {
+            const line = document.createElement('span');
+            line.className = 'query-line';
+            line.appendChild(pickList(TOTAL_FNS.map(function (f) { return [f[0], TOTAL_WORDS[f[0]]]; }), t.fn, 'Total', function (v) {
+                t.fn = v;
+                t.name = null;                          //  (a nickname you typed was for the OLD total)
+                if (v !== 'rows' && t.col === null) t.col = columns[0];
+                changed();
+            }));
+            if (t.fn !== 'rows') line.appendChild(pickList(colOptions, t.col, 'Of which column', function (v) { t.col = v; t.name = null; changed(); }));
+            if (t.name) {                               //  a nickname from SQL you typed:   COUNT(*) AS n   ->   "as n"
+                const as = document.createElement('span');
+                as.className = 'query-hint';
+                as.textContent = 'as ' + t.name;
+                line.appendChild(as);
+            }
+            line.appendChild(smallButton('×', 'Remove this total', function () { build.totals.splice(k, 1); changed(); }));
+            box.appendChild(line);
+        });
+        box.appendChild(addList('+ total', TOTAL_FNS.map(function (f) { return [f[0], TOTAL_WORDS[f[0]]]; }), 'Add a total', function (v) {
+            build.totals.push({ fn: v, col: v === 'rows' ? null : columns[0] });
+            changed();
+        }));
+    });
+```
+
+**3.** Your SQL → the builder's buttons. It reads your SQL with the engine's own `parseSql` (Part 10), then walks the tree and asks, piece by piece: "can a button show this?"
+
+```js
+//  ---- THE SQL IT READS   (your SQL  ->  the builder's buttons) ----
+//
+//  Leaving type mode,  your SQL is read back into the builder:
+//
+//      SELECT status, COUNT(*) AS n FROM orders WHERE qty > 5 GROUP BY status ORDER BY n DESC LIMIT 10
+//
+//          Keep rows   [qty] [is over] [5]           Group by   [status]
+//          Totals      [count rows]  as n            Sort by    [n] [↓ high to low]          At most   10
+//
+//  ->  { build,  left }      left  =  the parts the builder CAN'T show,  in words   ([]  =  all of it fits)
+//  (SQL with a mistake in it?  It throws the engine's QueryError,  like Run would.)
+
+const FLIP_OP = { '=': '=', '<>': '<>', '<': '>', '<=': '>=', '>': '<', '>=': '<=' };     //  5 < qty   =   qty > 5
+
+function buildFromSql(text) {
+
+    const statements = parseSql(text);
+    const q = statements[statements.length - 1];
+    const b = newBuild();
+    const left = [];
+
+    if (q === undefined || q.t !== 'query') queryFail('The builder only shows a question  (a SELECT).');
+    if (statements.length > 1) left.push('the queries before the last one');
+    if (q.with !== null) left.push('the WITH tables');
+    if (q.body.t !== 'core') {
+        left.push(q.body.t === 'set' ? 'the ' + q.body.op : 'the ( ) around the query');
+        return { build: b, left: left };
+    }
+
+    const c = q.body;
+    const columns = queryColumns();
+    const lower = columns.map(function (n) { return n.toLowerCase(); });
+    const main = fileTable.engine.name.toLowerCase();
+
+    //  FROM:  the open table  (nothing else:  the builder only asks about the open table).
+    if (c.from === null || c.from.t !== 'table' || c.from.name.toLowerCase() !== main) {
+        left.push(c.from === null ? 'a question with no FROM'
+            : c.from.t === 'join' ? 'the JOIN'
+            : c.from.t === 'sub' ? 'the query inside FROM'
+            : 'the table  ' + c.from.name + '   (the builder only uses  ' + fileTable.engine.name + ')');
+        return { build: b, left: left };
+    }
+    const alias = c.from.alias ? c.from.alias.toLowerCase() : null;
+
+    //  A plain column of the open table   ->   its real name   (or null)
+    function columnOf(e) {
+        if (e === null || e.t !== 'col') return null;
+        if (e.table !== null && e.table.toLowerCase() !== main && e.table.toLowerCase() !== alias) return null;
+        const k = lower.indexOf(String(e.name).toLowerCase());
+        return k === -1 ? null : columns[k];
+    }
+
+    //  A value  (words or a number)   ->   what the builder's value box holds   (or null)
+    function valueOf(e) {
+        return e !== null && e.t === 'lit' && (typeof e.v === 'string' || typeof e.v === 'number') ? String(e.v) : null;
+    }
+
+    //  A total the builder has:   COUNT(*)  COUNT(x)  COUNT(DISTINCT x)  SUM  AVG  MIN  MAX  MEDIAN   ->   { fn, col }   (or null)
+    function totalOf(e) {
+        if (e === null || e.t !== 'fn' || e.over || e.filter || e.order) return null;
+        if (e.name === 'COUNT' && e.star) return { fn: 'rows', col: null, name: null };
+        const col = e.args.length === 1 ? columnOf(e.args[0]) : null;
+        if (col === null) return null;
+        if (e.name === 'COUNT') return { fn: e.distinct ? 'distinct' : 'count', col: col, name: null };
+        const fn = { SUM: 'sum', AVG: 'avg', MIN: 'min', MAX: 'max', MEDIAN: 'median' }[e.name];
+        return fn && !e.distinct ? { fn: fn, col: col, name: null } : null;
+    }
+
+
+    //  SELECT   (DISTINCT a, b  is the same rows as  GROUP BY a, b:  so that's how it's shown)
+    const hasTotal = c.items.some(function (it) { return !it.star && isTotal(it.e); });
+    const distinctCols = c.distinct && !hasTotal && c.group === null
+        ? c.items.map(function (it) { return it.star || (it.alias && it.alias.toLowerCase() !== String(it.e.name).toLowerCase()) ? null : columnOf(it.e); })
+        : null;
+    if (distinctCols !== null && distinctCols.every(function (x) { return x !== null; })) b.group = distinctCols;
+    else if (c.distinct && !hasTotal) left.push('DISTINCT');
+
+    const grouped = b.group.length > 0 || c.group !== null || hasTotal;
+
+    if (c.group !== null) {
+        c.group.forEach(function (g) {
+            let col = columnOf(g);
+            if (col === null && g.t === 'lit' && Number.isInteger(g.v)) {                     //  GROUP BY 1   (the 1st thing shown)
+                const it = c.items[g.v - 1];
+                col = it && !it.star ? columnOf(it.e) : null;
+            }
+            if (col === null && g.t === 'col' && g.table === null) {                          //  GROUP BY a nickname
+                const it = c.items.find(function (x) { return x.alias && x.alias.toLowerCase() === String(g.name).toLowerCase(); });
+                col = it ? columnOf(it.e) : null;
+            }
+            if (col === null) left.push('GROUP BY ' + sqlWordsFor(g));
+            else if (b.group.indexOf(col) === -1) b.group.push(col);
+        });
+    }
+
+    if (distinctCols === null || !distinctCols.every(function (x) { return x !== null; })) {
+        c.items.forEach(function (it) {
+            if (it.star) {
+                if (grouped) left.push('SELECT *');
+                else if (c.items.length > 1) left.push('the  *  next to other columns');
+                return;
+            }
+            const col = columnOf(it.e);
+            if (col !== null) {
+                if (it.alias !== null && it.alias.toLowerCase() !== col.toLowerCase()) left.push('the nickname  ' + it.alias + '  for  ' + col);
+                if (grouped) { if (b.group.indexOf(col) === -1) left.push(col + '   (it isn\'t in GROUP BY)'); }
+                else if (b.show.indexOf(col) === -1) b.show.push(col);
+                return;
+            }
+            const t = grouped ? totalOf(it.e) : null;
+            if (t === null) { left.push(sqlWordsFor(it.e)); return; }
+            t.name = it.alias;                                  //  (null  =  the builder names it:  count,  sum_qty ...)
+            b.totals.push(t);
+        });
+    }
+
+    if (c.having !== null) left.push('HAVING ' + sqlWordsFor(c.having));
+
+
+    //  WHERE:  conditions joined by AND only  (or by OR only),  each one  [column] [how] [value]
+    if (c.where !== null) {
+        const flat = function (node, kind, out) {
+            if (node.t === kind) { flat(node.a, kind, out); flat(node.b, kind, out); } else out.push(node);
+            return out;
+        };
+        const any = c.where.t === 'or';
+        let parts = flat(c.where, any ? 'or' : 'and', []);
+        const oneIn = parts.length === 1 && parts[0].t === 'in' && !parts[0].not;           //  status IN ('a', 'b')   =   status is 'a'  OR  'b'
+        parts.forEach(function (p) {
+            const found = filtersOf(p, any || oneIn);
+            if (found === null) left.push('the condition  ' + sqlWordsFor(p));
+            else found.forEach(function (f) { b.filters.push(f); });
+        });
+        b.any = (any || oneIn) && b.filters.length > 1;
+    }
+
+    function filtersOf(p, anyMode) {
+        if (p.t === 'cmp' && FLIP_OP[p.op]) {
+            let col = columnOf(p.a), value = valueOf(p.b), op = p.op;
+            if (col === null) { col = columnOf(p.b); value = valueOf(p.a); op = FLIP_OP[p.op]; }
+            return col !== null && value !== null ? [{ col: col, op: op, value: value }] : null;
+        }
+        if (p.t === 'isnull') {
+            const col = columnOf(p.e);
+            return col !== null ? [{ col: col, op: p.not ? 'filled' : 'empty', value: '' }] : null;
+        }
+        if (p.t === 'isdist') {                                     //  status IS 'shipped'   (SQLite's  IS  =  "the same as")
+            const col = columnOf(p.a), value = valueOf(p.b);
+            if (col === null) return null;
+            if (p.b.t === 'lit' && p.b.v === null) return [{ col: col, op: p.not ? 'empty' : 'filled', value: '' }];
+            return value !== null ? [{ col: col, op: p.not ? '=' : '<>', value: value }] : null;
+        }
+        if (p.t === 'like' && !p.not) {
+            const col = columnOf(p.e), pattern = valueOf(p.pat);
+            const escape = p.esc === null ? null : valueOf(p.esc);
+            if (col === null || pattern === null) return null;
+            //  Read the pattern:  only a  %  at the start and/or the end can be shown   (contains / starts with / ends with)
+            let word = '', first = false, last = false;
+            for (let k = 0; k < pattern.length; k++) {
+                const ch = pattern[k];
+                if (escape !== null && ch === escape && k + 1 < pattern.length) { word += pattern[++k]; continue; }
+                if (ch === '_') return null;
+                if (ch === '%') {
+                    if (k === 0) first = true;
+                    else if (k === pattern.length - 1) last = true;
+                    else return null;
+                    continue;
+                }
+                word += ch;
+            }
+            const op = first && last ? 'contains' : last ? 'starts' : first ? 'ends' : '=';
+            return [{ col: col, op: op, value: word }];
+        }
+        if (p.t === 'between' && !p.not && !anyMode) {
+            const col = columnOf(p.e), lo = valueOf(p.lo), hi = valueOf(p.hi);
+            return col !== null && lo !== null && hi !== null ? [{ col: col, op: '>=', value: lo }, { col: col, op: '<=', value: hi }] : null;
+        }
+        if (p.t === 'in' && !p.not && (anyMode || p.list.length === 1)) {
+            const col = columnOf(p.e), values = p.list.map(valueOf);
+            return col !== null && values.every(function (v) { return v !== null; })
+                ? values.map(function (v) { return { col: col, op: '=', value: v }; })
+                : null;
+        }
+        return null;
+    }
+
+
+    //  ORDER BY:  a column  (or,  grouped:  a group,  or a total)
+    const sortable = grouped ? b.group.concat(totalNames(b)) : columns;
+    const sortLower = sortable.map(function (n) { return n.toLowerCase(); });
+    (q.order || []).forEach(function (o) {
+        let name = null;
+        let e = o.e;
+        if (e.t === 'lit' && Number.isInteger(e.v)) {                              //  ORDER BY 2   (the 2nd thing shown)
+            const it = c.items[e.v - 1];
+            e = it && !it.star ? (it.alias ? { t: 'col', table: null, name: it.alias } : it.e) : null;
+        }
+        if (e !== null && e.t === 'col' && e.table === null) {
+            const it = c.items.find(function (x) { return x.alias && x.alias.toLowerCase() === String(e.name).toLowerCase(); });
+            if (it && !grouped) e = it.e;                                          //  a nickname for a column
+        }
+        if (e !== null && e.t === 'col') {
+            const k = sortLower.indexOf(String(e.name).toLowerCase());
+            if (k !== -1 && (e.table === null || columnOf(e) !== null || grouped)) name = sortable[k];
+        } else if (e !== null && grouped) {                                        //  ORDER BY COUNT(*)   ->   that total's name
+            const t = totalOf(e);
+            const k = t === null ? -1 : b.totals.findIndex(function (x) { return x.fn === t.fn && x.col === t.col; });
+            if (k !== -1) name = totalNames(b)[k];
+        }
+        if (name === null) left.push('ORDER BY ' + sqlWordsFor(o.e));
+        else b.sort.push({ col: name, desc: o.desc });
+        if (o.nulls !== null) left.push('NULLS ' + o.nulls.toUpperCase());
+    });
+
+
+    //  LIMIT   (or SQL Server's  TOP)
+    const limit = q.limit !== null ? q.limit : c.top;
+    if (limit !== null) {
+        if (limit.t === 'lit' && Number.isInteger(limit.v) && limit.v > 0) b.limit = String(limit.v);
+        else left.push('LIMIT ' + sqlWordsFor(limit));
+    }
+    if (q.offset !== null) left.push('OFFSET ' + sqlWordsFor(q.offset));
+
+    return { build: b, left: left };
+}
+
+//  A piece of a question,  back in words   (for "The builder can't show:  UPPER(city)")
+function sqlWordsFor(e) {
+    if (e === null || e === undefined) return '';
+    switch (e.t) {
+        case 'lit':     return e.v === null ? 'NULL' : typeof e.v === 'string' ? sqlWordsOf(e.v) : String(e.v);
+        case 'col':     return (e.table ? e.table + '.' : '') + e.name;
+        case 'fn':      return e.name + '(' + (e.star ? '*' : (e.distinct ? 'DISTINCT ' : '') + e.args.map(sqlWordsFor).join(', ')) + ')' + (e.over ? ' OVER (...)' : '');
+        case 'bin':     return sqlWordsFor(e.a) + ' ' + e.op + ' ' + sqlWordsFor(e.b);
+        case 'cat':     return sqlWordsFor(e.a) + ' || ' + sqlWordsFor(e.b);
+        case 'cmp':     return sqlWordsFor(e.a) + ' ' + e.op + ' ' + sqlWordsFor(e.b);
+        case 'and':
+        case 'or':      return sqlWordsFor(e.a) + ' ' + e.t.toUpperCase() + ' ' + sqlWordsFor(e.b);
+        case 'not':     return 'NOT ' + sqlWordsFor(e.e);
+        case 'neg':     return '-' + sqlWordsFor(e.e);
+        case 'isnull':  return sqlWordsFor(e.e) + (e.not ? ' IS NOT NULL' : ' IS NULL');
+        case 'like':    return sqlWordsFor(e.e) + (e.not ? ' NOT' : '') + ' LIKE ' + sqlWordsFor(e.pat);
+        case 'in':      return sqlWordsFor(e.e) + (e.not ? ' NOT' : '') + ' IN (' + e.list.map(sqlWordsFor).join(', ') + ')';
+        case 'between': return sqlWordsFor(e.e) + (e.not ? ' NOT' : '') + ' BETWEEN ' + sqlWordsFor(e.lo) + ' AND ' + sqlWordsFor(e.hi);
+        case 'case':    return 'CASE ...';
+        case 'cast':    return 'CAST(' + sqlWordsFor(e.e) + ' AS ...)';
+        default:        return 'a query inside the query';
+    }
+}
+```
+
+| SQL | Becomes |
+|---|---|
+| `DISTINCT a, b` | Group by `a`, `b` (the same rows!) |
+| `status IN ('a', 'b')` | Keep rows: status is `a` **OR** is `b` |
+| `qty BETWEEN 3 AND 5` | qty is at least 3 **AND** is at most 5 |
+| `LIKE '%ship%'` / `'ship%'` / `'%ship'` | contains / starts with / ends with `ship` |
+| `5 < qty` | qty is over 5 (turned around: `FLIP_OP`) |
+| `GROUP BY 1`, `ORDER BY 2` | The 1st / 2nd thing shown |
+| `COUNT(*) AS n` | count rows, as n |
+| A JOIN, CASE, `UPPER(...)`, HAVING ... | In `left`: "the builder can't show ..." |
+
+**4.** Type mode itself, the question it asks, and the "fixed" line. Replace the old `input` listener and the old "Use the builder again" listener with:
+
+```js
+//  ---- TYPE MODE ----
+
+function setTypeMode(on) {
+    typeMode = on;
+    queryType.checked = on;
+    queryBuilder.classList.toggle('paused', on);
+    queryNote.textContent = on ? 'type mode  ·  the builder is greyed out' : 'written for you as you pick';
+    askFirst(null);
+}
+
+//  Click in the box  (or type in it)  ->  type mode turns on.
+querySql.addEventListener('pointerdown', function () { if (!typeMode) setTypeMode(true); });
+querySql.addEventListener('input', function () {
+    if (!typeMode) setTypeMode(true);
+    showFixes([]);                                      //  (the fixes were for the SQL before you changed it)
+});
+
+//  The checkbox.   Unticked?  Not right away:  first,  does your SQL fit the builder?
+queryType.addEventListener('change', function () {
+    if (queryType.checked) { setTypeMode(true); querySql.focus(); return; }
+    queryType.checked = true;
+    leaveTypeMode();
+});
+
+//  Back to the builder:  your SQL,  snapped into its buttons.   (Query Flexibility on?  Its mistakes are fixed first.)
+//  Something the buttons can't show  (a JOIN,  a CASE ...)?   ASK first:  drop it,  or keep typing.
+function leaveTypeMode() {
+
+    const typed = querySql.value;
+    if (typed.trim() === '' || typed === builderSql()) { setTypeMode(false); writeSql(); return; }
+
+    let sql = typed, fixes = [];
+    if (queryFlex.checked) {
+        const fixed = flexSync(typed, queryCatalog(function () { return true; }));
+        sql = fixed.sql;
+        fixes = fixed.fixes;
+    }
+
+    function done(newBuild) {
+        build = newBuild;
+        setTypeMode(false);
+        drawBuilder();
+        writeSql();
+        showFixes(fixes);
+    }
+
+    let read;
+    try {
+        read = buildFromSql(sql);
+    } catch (problem) {
+        if (!(problem instanceof QueryError)) throw problem;
+        askFirst('The builder can\'t read this SQL:   ' + problem.message, 'Start the builder fresh', function () { done(newBuild()); });
+        return;
+    }
+
+    if (read.left.length === 0) { done(read.build); return; }
+    askFirst('The builder can\'t show:   ' + read.left.join(',   ') + '.', read.left.length === 1 ? 'Drop it' : 'Drop them',
+             function () { done(read.build); });
+}
+
+//  The question,  under the SQL box:   "The builder can't show:  the JOIN.   [Drop it]  [Keep typing]"
+//  (words  null  =  put it away)
+let askYes = null;
+
+function askFirst(words, yesWords, onYes) {
+    queryAsk.hidden = words === null;
+    askYes = onYes || null;
+    if (words === null) return;
+    queryAskWords.textContent = words;
+    queryAskYes.textContent = yesWords;
+    queryAskYes.focus();
+}
+
+queryAskYes.addEventListener('click', function () {
+    const go = askYes;
+    askFirst(null);
+    if (go !== null) go();
+});
+
+queryAskNo.addEventListener('click', function () {
+    askFirst(null);
+    querySql.focus();                                   //  (still in type mode)
+});
+
+//  What Query Flexibility fixed,  in words,  under the box   ([]  =  nothing:  put the line away)
+function showFixes(list) {
+    queryFixes.hidden = list.length === 0;
+    queryFixes.textContent = list.length === 0 ? '' : 'Query Flexibility fixed:   ' + list.join('   ·   ');
+}
+
+//  After a Run:  Query Flexibility changed the SQL?   Show the SQL that REALLY ran,  and say what changed.
+function afterFlex(sql, fixes) {
+    showFixes(fixes);
+    if (fixes.length === 0) return;
+    if (typeMode) { querySql.value = sql; return; }
+    //  The builder's own SQL  (snap to result:  a word,  spelled the file's way):  its buttons follow along.
+    try {
+        const read = buildFromSql(sql);
+        if (read.left.length === 0) { build = read.build; drawBuilder(); writeSql(); }
+    } catch (problem) {
+        if (!(problem instanceof QueryError)) throw problem;
+    }
+}
+```
+
+> **Why does unticking UN-untick the box first?** (`queryType.checked = true;`) Because you're not out of type mode YET: if your SQL doesn't fit, it asks, and you might say "Keep typing". The box only unticks when you really leave.
+
+**5.** Run passes the checkbox to the engine, and shows the SQL that REALLY ran (replace `runTheQuery`):
+
+```js
+function runTheQuery() {
+
+    if (fileTable === null) return;
+
+    const text   = querySql.value;
+    const myRun  = ++queryId;
+    const myLoad = loadId;
+    function isCurrent() { return myRun === queryId && myLoad === loadId; }
+
+    setQueryStatus('Running...', false);
+    startLoading('Running the query...');
+    const started = performance.now();
+
+    askFirst(null);
+    runQuery(text, queryCatalog(isCurrent), isCurrent, function (done) {
+        setProgress(0.9 * done);
+        setLoadingLabel('Running the query...  ' + Math.floor(100 * done) + '%');
+    }, queryFlex.checked).then(function (result) {
+
+        if (!isCurrent()) return;
+        afterFlex(result.sql, result.fixes);                //  (Query Flexibility changed it?  Show what really ran.)
+        return showAnswer(result, result.sql, performance.now() - started, isCurrent);
+
+    }).then(function () {
+
+        if (!isCurrent()) return;
+        finishLoading();
+
+    }, function (problem) {
+
+        if (!isCurrent() || problem === QUERY_STALE || problem === XLSX_STALE || problem === SQL_STALE) return;
+        finishLoading();
+        if (problem && problem.fixes && problem.fixes.length > 0) afterFlex(problem.sql, problem.fixes);    //  (how far the fixing got:  so the problem lines up)
+        setQueryStatus(queryProblem(problem), true);
+    });
+}
+```
+
+In `showAnswer`, the answer's notes remember the fixes:
+
+```js
+        result: { sql: text, ms: ms, rows: rows.length, from: mainTableName(), fixes: result.fixes || [] },
+```
+
+And the badge says so: `QUERY RESULT · 400 rows · from orders · 8 ms · Query Flexibility fixed 1 thing` (hover it for which). In `showBadge`, replace the `if (showingAnswer())` part:
+
+```js
+    fileBadge.title = '';
+
+    //  A query's answer:   QUERY RESULT  ·  12 rows  ·  from sales  ·  8 ms
+    //  (Query Flexibility fixed something?   ·  Query Flexibility fixed 2 things    hover  ->  what they were)
+    if (showingAnswer()) {
+        const r = sqlInfo.result;
+        fileBadge.textContent = 'QUERY RESULT  ·  ' + r.rows.toLocaleString() + ' row' + (r.rows === 1 ? '' : 's') +
+            (r.from ? '  ·  from ' + r.from : '') + '  ·  ' + formatTime(r.ms) +
+            (r.fixes.length > 0 ? '  ·  Query Flexibility fixed ' + r.fixes.length + (r.fixes.length === 1 ? ' thing' : ' things') : '');
+        fileBadge.title = r.fixes.join('   ·   ');
+        fileBadge.hidden = false;
+        return;
+    }
+```
+
+<br>
+
+### Step 11.6: The brain: click a cell
+
+**1.** A clicked cell, next to the snap menu's other notes (`aimAt`, `aimHits` ...):
+
+```js
+let picked  = null;     //  a cell you CLICKED:  { row, col }.   The Details show it  (until the snap menu moves,  or they close).
+```
+
+**2.** The Details panel used to read the snap menu's target directly (`matches[aimAt]`). Now it asks `detailsTarget()`: a clicked cell first, else the snap target. Replace `showRow`, and the top of `drawRow`:
+
+```js
+function showRow(open) {
+    if (open && detailsTarget() === null) return;       //  (nothing to show)
+    if (open) closeQueryMenu();                         //  (the query menu lives in the same spot)
+    else picked = null;                                 //  (closed:  a clicked cell is forgotten)
+    aimRow.hidden = !open;
+    aimRowBtn.setAttribute('aria-expanded', open);
+    if (open) drawRow();
+}
+
+//  Which cell the Details are about:  one you CLICKED,  or the snap menu's target.   (null  =  neither)
+function detailsTarget() {
+    if (picked !== null) return picked;
+    return aimAt === -1 ? null : { row: matches[aimAt], col: aimHits[aimHit] };
+}
+
+
+function drawRow() {
+
+    const spot = detailsTarget();
+    if (spot === null) return;
+
+    const row   = spot.row;
+    const col   = spot.col;
+```
+
+**3.** When the snap menu MOVES, the Details follow it again. In `aimOn`, at the top:
+
+```js
+    picked  = null;                 //  (the snap menu moved:  the Details follow it again)
+```
+
+In `snapToTarget`, right after `aimed = true;`:
+
+```js
+    if (picked !== null) { picked = null; if (!aimRow.hidden) drawRow(); }     //  (the Details follow the snap again)
+```
+
+And in `drawAim`, "no match" only closes the Details if they're not about a clicked cell:
+
+```js
+        if (picked === null) showRow(false);                //  no match  =  no row to show   (unless it's a cell you clicked)
+        else if (!aimRow.hidden) drawRow();
+```
+
+**4.** The click, and the "expand?" tag. Right after the snap menu's buttons (`aimScope.addEventListener(...)`):
+
+```js
+//    CLICK A CELL   ->   ITS DETAILS
+//
+//    Rest the mouse on a cell  ->  after a moment,  a little black  "expand?"  tag shows up on its corner.
+//    Click the cell  ->  the Details panel opens for it:  the cell big  (the focus card),  and its whole row,
+//    up and down  ("VIEWING ROW VERTICALLY").   No search needed.
+//
+//        ┌──────────────┬────────────[expand?]──┐
+//        │ Ana          │ 123 Main St, Apt 4... │      <-  the mouse rests here
+//        └──────────────┴───────────────────────┘
+//
+//    Not a click:  dragging to select words,  or drag mode  (that's for moving the sheet).
+//    A phone?  No resting mouse:  just tap the cell.
+//
+// ----------------------------------------------------------
+
+const cellTag  = document.getElementById('cellTag');
+const TAG_WAIT = 600;           //  how long the mouse rests on a cell before "expand?" shows up  (ms)
+
+let tagCell  = null;            //  the cell the mouse is resting on
+let tagTimer = null;
+let pressX   = 0;               //  where the last press started  (a click that MOVED is a drag,  not a click)
+let pressY   = 0;
+
+
+//  Where is this cell?   ->   { row  (in the file),  col }    (null:  not a real cell,  like the spreadsheet look's empty columns)
+//  (A row on screen is:  [number] [left spacer] [the built cells ...] [right spacer].   Its name tag is its spot in "matches".)
+function cellSpot(cell) {
+    const line = cell.parentElement;
+    if (line === null || line.dataset.index === undefined) return null;
+    const col = builtColStart + Array.prototype.indexOf.call(line.children, cell) - 2;
+    const at  = Number(line.dataset.index);
+    if (col < 0 || col >= dataColumns || at >= matches.length) return null;
+    return { row: matches[at], col: col };
+}
+
+function hideTag() {
+    if (tagCell === null && cellTag.hidden) return;         //  (already hidden:  this runs on every scroll,  so do nothing)
+    clearTimeout(tagTimer);
+    tagCell = null;
+    cellTag.classList.remove('on');
+    cellTag.hidden = true;
+}
+
+//  The mouse has rested long enough:  show the tag,  on the cell's top-right corner  (inside the window's edge).
+function showTag() {
+    if (tagCell === null || !tagCell.isConnected || dragging || !loader.hidden) return;
+    const cell = tagCell.getBoundingClientRect();
+    const box  = outputBox.getBoundingClientRect();
+    const right = Math.min(cell.right, box.left + outputBox.clientLeft + outputBox.clientWidth);
+    if (right - 40 < Math.max(cell.left, box.left)) return;                 //  (hardly any of it is on screen)
+    cellTag.style.left = right + 'px';
+    cellTag.style.top  = Math.max(cell.top, box.top) + 'px';
+    cellTag.hidden = false;
+    void cellTag.offsetWidth;                               //  (make the browser notice it first,  so it fades in)
+    cellTag.classList.add('on');
+}
+
+//  Open the Details for a cell.   (It pulses,  like a snapped-to target,  so you see which one.)
+function pickCell(spot, cell) {
+    picked = spot;
+    showRow(true);
+    cell.classList.remove('locked');
+    void cell.offsetWidth;
+    cell.classList.add('locked');
+    cell.addEventListener('animationend', function () { cell.classList.remove('locked'); }, { once: true });
+}
+
+rowsBox.addEventListener('pointerover', function (e) {
+    if (e.pointerType === 'touch') return;
+    const cell = e.target.closest('.cell');
+    if (cell === tagCell) return;
+    hideTag();
+    if (cell === null || cellSpot(cell) === null) return;
+    tagCell = cell;
+    tagTimer = setTimeout(showTag, TAG_WAIT);
+});
+
+rowsBox.addEventListener('pointerleave', hideTag);
+rowsBox.addEventListener('pointerdown', function (e) {
+    hideTag();
+    pressX = e.clientX;
+    pressY = e.clientY;
+});
+outputBox.addEventListener('scroll', hideTag, { passive: true });
+outputBox.addEventListener('wheel', hideTag, { passive: true });
+window.addEventListener('scroll', hideTag, { passive: true });         //  (Expand mode:  the page scrolls)
+
+rowsBox.addEventListener('click', function (e) {
+    const cell = e.target.closest('.cell');
+    if (cell === null) return;
+    if (Math.abs(e.clientX - pressX) > 5 || Math.abs(e.clientY - pressY) > 5) return;     //  it moved:  selecting words
+    if (String(window.getSelection()).length > 0) return;                                   //  words are selected:  leave them
+    const spot = cellSpot(cell);
+    if (spot === null) return;
+    hideTag();
+    pickCell(spot, cell);
+});
+```
+
+| Code | Baby words |
+|---|---|
+| `cellSpot` | Which cell is this? Its column: count the boxes in its row. Its file row: the row's name tag is its spot in `matches` (Part 2), so it's `matches[spot]`. **With a search on, the 3rd row on screen isn't the file's 3rd row!** |
+| `col >= dataColumns` | The spreadsheet look's empty columns (Part 8) have nothing in them: not a cell. |
+| `TAG_WAIT = 600` | Rest the mouse 0.6 s. Shorter, and tags flash all over while you move across the sheet. |
+| `e.pointerType === 'touch'` | A finger can't "rest" on a cell. Just tap it. |
+| `> 5` pixels | You pressed, moved, and let go: you were selecting words, not clicking. |
+| `if (tagCell === null && cellTag.hidden) return;` | Scrolling sends LOTS of events. Already hidden? Do nothing at all. |
+
+**5.** A new file (or an answer, or Back) has new rows, so forget a clicked cell. In `swapIn`, after `doneMatches = null;`:
+
+```js
+    picked      = null;                     //  ...and a cell you clicked  (it was in the OLD rows)
+    hideTag();
+```
+
+<br>
+
+### Step 11.7: The clothes
+
+**1.** 3 new colors in the theme block, after `--sql-glow` (Neo-Neutral):
+
+```css
+    --check-box:    #ffffff;                        /*  a checkbox:  a white box  (ticked:  solid SQL blue,  a white ✓)  */
+    --tag-bg:       #020202;                        /*  the "expand?" tag:  OLED-off black  (like the "CSV View" button)  */
+    --tag-glow:     rgba(255, 255, 255, 0.35);      /*  ...and its soft white glow  */
+```
+
+...and in Neo-Dark's:
+
+```css
+    --check-box:    #ffffff;                        /*  still a white box:  it reads as "a box to tick",  even on black  */
+    --tag-bg:       #020202;                        /*  blacker than the page  (#18191c),  so it still stands out  */
+    --tag-glow:     rgba(255, 255, 255, 0.3);
+```
+
+**2.** The checkboxes, the question, and the "fixed" line. Replace the old `#queryReset` rule with:
+
+```css
+/*  The 2 checkboxes:   [✓] Query Flexibility    [ ] Type mode
+    A white box.   Ticked:  solid SQL blue,  with a white  ✓,  and a soft blue glow.  */
+.query-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+    user-select: none;
+}
+
+.query-option input {
+    appearance: none;
+    -webkit-appearance: none;
+    display: grid;
+    place-content: center;
+    flex: none;
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    background: var(--check-box);
+    border: 1px solid var(--glass-edge);
+    border-radius: 4px;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+    cursor: pointer;
+}
+
+.query-option input::after {
+    content: "✓";
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    color: #fff;
+    opacity: 0;                     /*  (not  visibility:  that would show through the closed menu)  */
+}
+
+.query-option input:checked {
+    background: var(--sql);
+    border-color: var(--sql);
+    box-shadow: 0 0 8px var(--sql-glow);
+}
+
+.query-option input:checked::after {
+    opacity: 1;
+}
+
+.query-option input:focus-visible {
+    outline: none;
+    box-shadow:
+        0 0 0 2px var(--check-box),
+        0 0 10px 2px var(--sql-glow);
+}
+
+#querySqlNote {
+    margin-left: auto;
+    font-size: 12px;
+}
+
+/*  "The builder can't show:  the JOIN.   [Drop it]  [Keep typing]"   (a light square,  with an SQL-blue edge)  */
+#queryAsk {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin: 8px 10px 0;
+    padding: 6px 8px 6px 10px;
+    color: var(--text);
+    background: var(--square-light);
+    border: 1px solid var(--glass-edge);
+    border-left: 4px solid var(--sql);
+    border-radius: 8px;
+}
+
+#queryAskWords {
+    flex: 1 1 260px;
+}
+
+#queryAsk button {
+    margin: 0;
+    padding: 0 10px;
+    line-height: 24px;
+    font-size: 12px;
+    border-radius: 8px;
+}
+
+#queryAskYes {
+    color: #fff;
+    background: var(--sql-dark);
+    text-shadow: 0 0 8px var(--sql-glow);
+    box-shadow: 0 0 10px var(--sql-glow);
+}
+
+/*  "Query Flexibility fixed:   selct  ->  SELECT   ·   added  FROM orders"  */
+#queryFixes {
+    margin: 6px 10px 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--sql);
+    white-space: pre-wrap;
+}
+```
+
+> **`appearance: none`?** It takes away the browser's own checkbox drawing, so ours (a white box, solid SQL blue + a white ✓ when ticked) can be drawn instead. The ✓ is `opacity: 0` when unticked, NOT `visibility: hidden`: `visibility: visible` shows through a closed menu (the theme menu's gotcha, Part 4).
+
+**3.** The tag, right after drag mode's anchor (`#dragAnchor::after`):
+
+```css
+/*  The "expand?" tag:  rest the mouse on a cell,  and after a moment it shows up on the cell's top-right corner.
+    A small solid black box  (like the "CSV View" button),  white words,  a soft white glow.
+    It sits ON the screen  (fixed)  and lets clicks through:  clicking the cell opens its Details.  */
+#cellTag {
+    position: fixed;
+    z-index: 12;
+    padding: 0 7px;
+    font-family: "Segoe UI", system-ui, Arial, sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 18px;
+    white-space: nowrap;
+    color: #fff;
+    background: var(--tag-bg);
+    border-radius: 6px;
+    text-shadow: 0 0 6px var(--tag-glow);
+    box-shadow:
+        inset 0 0 8px rgba(255, 255, 255, 0.08),
+        0 0 10px var(--tag-glow);
+    transform: translate(-100%, -60%);  /*  its right edge on the cell's right edge,  poking up over the top  */
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+#cellTag.on {
+    opacity: 1;
+}
+```
+
+> **`transform: translate(-100%, -60%)`?** The brain puts the tag's top-left corner on the cell's top-RIGHT corner. This slides it back by its own width (so its right edge lines up), and up a little (so it pokes over the cell's top, and doesn't hide the words).
+
+<br>
+
+### ✅ Test it
+
+The test tables are in `Castle Claude/small-files/query/`.
+
+1. Open `orders.csv`. Press **Query**. **Query Flexibility** is ticked (solid SQL blue, white ✓). **Type mode** isn't (a white box).
+2. Click in the SQL box: **Type mode** ticks itself, and the builder greys out.
+3. Type `select from orders`. **Run**. You get all 400 rows. Open the menu again: the box says `select * from orders`, and under it: "Query Flexibility fixed: added `*` (all the columns)". The badge says *Query Flexibility fixed 1 thing*.
+4. Try `selct status, count(*) form orders wher qty > 5`. 4 rows. 4 fixes.
+5. Untick **Query Flexibility**, and run `select from orders` again: red words, refused, exactly as written. Tick it back.
+6. Type `select status, count(*) as n from orders where qty > 5 group by status order by n desc limit 3`. Untick **Type mode**: the builder lights up with all of it (Group by status, count rows *as n*, qty is over 5, sort by n, at most 3).
+7. Type mode again, `select upper(status), qty from orders`. Untick: *The builder can't show: UPPER(status).* **Keep typing** (nothing changes), or **Drop it** (the builder shows qty).
+8. In the builder: Keep rows **status is Shipped** (big S). Run: 190 rows, and the builder's box now says `shipped`.
+9. Back to file. Rest the mouse on a cell: after a moment, **expand?** shows up on its corner. Click the cell: the Details open, for that row. Click another: they follow. Escape closes them.
+10. Search `pending`, click the 3rd row: the Details say the FILE's row number (not 3).
+
+<br>
+
+---
+
+<br>
 ## Change stuff yourself
 
 | I want to... | Do this |
@@ -13409,6 +15230,13 @@ The test tables are in `Castle Claude/small-files/query/`:
 | **Look at more rows when guessing column types** | `SAMPLE_ROWS` in `queryI.js` (20,000). More = slower to start, a little surer. |
 | **Make the query menu wider** | `#queryMenu` -> `width: max(100%, 680px)`: change the `680px`. |
 | **Keep the query menu open after Run** | In `showAnswer`, delete `closeQueryMenu();`. (The answer is under the menu then: close it to see.) |
+| **Start with Query Flexibility OFF** | In `testI.html`, take `checked` off `<input type="checkbox" id="queryFlex" checked>`. |
+| **Let Query Flexibility fix more (or fewer) times in a row** | `FLEX_ROUNDS` in `queryI.js` (10). |
+| **Teach it another word for SELECT** | Add it to `FLEX_SELECT` in `queryI.js`: like `'GIVE'`. |
+| **Let it fix a typo in another word** | Add the word to `FLEX_CLAUSES` (like `'OFFSET'`). Short words are risky: `OR` is 1 letter from lots of things. |
+| **Make the "expand?" tag show up sooner (or later)** | `TAG_WAIT` in `scriptI.js` (600 ms). |
+| **Change the tag's words** | In `testI.html`: `<div id="cellTag" ...>expand?</div>`. |
+| **A different color for the ticked checkbox** | `.query-option input:checked` -> `background:` and `border-color:` (it's `var(--sql)`, SQL blue). |
 | **Change the button colors** | `#viewBtn` → `background` (`#185c37`, the green) and `#viewBtn.to-csv` → `background` (`#020202`, the black). |
 | **Build more/fewer extra rows** | Change `EXTRA_ROWS`. More = safer for super-fast scrolling, but a little more work per scroll. |
 | **Make the glow stronger** | In `.cell:hover`, raise `14px 2px` to something like `20px 6px` |
@@ -13498,6 +15326,17 @@ The test tables are in `Castle Claude/small-files/query/`:
 | The tab crashes ("Aw, Snap" / "Out of memory") after `SELECT *` on a big file | `showAnswer` glues each line with `line += cell` instead of `cells.join(',')`. The `+=` pieces stay alive until the end: about 10× the file's size. |
 | Memory stays high after "← Back to file" | `backToFile` is missing `answer = null;`. The old answer (as big as a file) is still kept. |
 | "← Back to file" shows the answer again | `backToFile` has to swap in `fileTable.table` (the file), not `answer.table`. |
+| Query Flexibility never fixes anything | `runTheQuery` isn't passing `queryFlex.checked` as `runQuery`'s 5th thing, or `queryFail` lost its `why` (Step 11.2): no `why`, no fix. |
+| A fix goes round and round, and the query never runs | `runQuery` is missing `better === sql`. A "fix" that changes nothing has to stop the fixing. |
+| `select * orders` becomes `select * ORDER` | In `flexFix`, the typo rule comes BEFORE "a table's name with no FROM". `orders` is 1 letter from `ORDER`: the table rule has to go first. |
+| `from orders wher qty > 5` isn't fixed | The "word BEFORE was a typo" rule is missing: SQL reads `orders wher` as "orders, nicknamed wher", so the problem shows up one word LATE, at `qty`. |
+| Unticking Type mode always loses your SQL | `leaveTypeMode` isn't calling `buildFromSql`, or `done()` is using `newBuild()` instead of `read.build`. |
+| Unticking Type mode unticks the box even when it asks | `queryType.checked = true;` is missing at the start of leaving: you're not out until you say so. |
+| Clicking a cell with a search on shows the WRONG row | `cellSpot` uses the row's name tag as the file row. It's the spot in `matches`: use `matches[spot]`. |
+| Clicking an empty column (the spreadsheet look) opens empty Details | `cellSpot` is missing `col >= dataColumns`. |
+| The "expand?" tag never goes away when you scroll | The `scroll` / `wheel` listeners that call `hideTag` are missing. |
+| The tag blocks clicks on the cell under it | `#cellTag` is missing `pointer-events: none;`. |
+| The ✓ shows up floating when the query menu is closed | `.query-option input::after` uses `visibility`. Use `opacity: 0;` (the theme menu's gotcha, Part 4). |
 | Picking ANY file crashes with `Cannot set properties of null (setting 'hidden')` | The `<div id="fileBadge" hidden></div>` is missing from the skeleton (Step 5.1). |
 | An Excel file shows garbage letters (`PK...`) | The first-bytes check (Step 5.10 #5) is missing, so it got read as text. |
 | Excel dates show as numbers like `43586` | The date style wasn't found: check `styles` in `readXlsx` (it reads `<cellXfs>`), and that `formatKind` returns a kind for the format. |
@@ -13613,6 +15452,10 @@ The test tables are in `Castle Claude/small-files/query/`:
 - **Queries: a column's type is a good guess.** It looks at 20,000 rows. A cell that doesn't fit (a word in a number column) stays words, and a number column with `007` in it is words on purpose (it's a code).
 - **Queries hold the answer in memory.** A question that answers with MILLIONS of rows (like `SELECT *` on a huge file, sorted) needs room for the file AND the answer. A `SELECT *` on a 500 MB file works (about 2 GB at its peak, ~17 s); an answer BIGGER than the browser can hold as text (about 500 MB, like `SELECT *, *` on that file) says "The answer is too big for the browser" instead.
 - **Queries on another sheet or table read it first.** The open one is ready; any other one is read (once) the first time a question asks for it.
+- **Query Flexibility fixes small mistakes, not meaning.** A typo, a missing `FROM` or `*`, words without quotes, a missing `GROUP BY`, an unfinished end. It can't guess what you MEANT: `select status, qty from orders group by status` is still refused (add qty to the GROUP BY? or total it? only you know). When two fixes are just as likely, it doesn't guess either.
+- **Snap to result only fixes spelling, and only for `=` and `IN`.** No rows for `status = 'Shipped'` and the file says `shipped`? Fixed. But if the file has `Shipped` AND `SHIPPED`, or the word just isn't there, it leaves your question alone (0 rows is the right answer then).
+- **The builder shows ONE table's simple questions.** A JOIN, a CASE, a function like `UPPER(...)`, HAVING, OFFSET, or AND mixed with OR can't be buttons. Leaving type mode, it says which parts, and asks before dropping them.
+- **Clicking a cell in drag mode moves the sheet** (that's what drag mode is for). Turn it off to click cells.
 
 - **It expects a header.** The first line is always treated as the column names.
 - **A quote that never closes still changes its OWN row.** The brain catches a stray `"` and keeps every other row safe, but in that one row, everything after the `"` lands in one cell. (`Bob,5'10",tall` → `[Bob] [5'10,tall]`.) The real fix is in the file.

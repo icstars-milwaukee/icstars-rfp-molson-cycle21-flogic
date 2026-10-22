@@ -76,6 +76,10 @@
     --sql:          #336791;                        /*  SQL blue  (the classic database blue):  the table look's lines and PK badge  */
     --sql-dark:     #265174;                        /*  ...a shade darker:  the "Table View" button  */
     --sql-glow:     rgba(58, 126, 202, 0.5);        /*  ...and its glow  (#3a7eca,  brighter)  */
+
+    --check-box:    #ffffff;                        /*  a checkbox:  a white box  (ticked:  solid SQL blue,  a white ✓)  */
+    --tag-bg:       #020202;                        /*  the "expand?" tag:  OLED-off black  (like the "CSV View" button)  */
+    --tag-glow:     rgba(255, 255, 255, 0.35);      /*  ...and its soft white glow  */
 }
 
 
@@ -129,6 +133,10 @@
     --sql:          #3a7eca;                        /*  SQL blue:  the BRIGHTER one  (#336791 is too dark to see on black)  */
     --sql-dark:     #265174;
     --sql-glow:     rgba(58, 126, 202, 0.5);
+
+    --check-box:    #ffffff;                        /*  still a white box:  it reads as "a box to tick",  even on black  */
+    --tag-bg:       #020202;                        /*  blacker than the page  (#18191c),  so it still stands out  */
+    --tag-glow:     rgba(255, 255, 255, 0.3);
 
     --line:         rgba(255, 255, 255, 0.09);      /*  the lines:  barely there  */
     --line-soft:    rgba(255, 255, 255, 0.06);
@@ -807,7 +815,7 @@ h1 {
     box-shadow: inset 0 0 12px var(--inner-glow, rgba(255, 255, 255, 0.8));
 }
 
-/*  You're writing your own SQL?  The builder fades,  and can't be clicked  ("Use the builder again" brings it back).  */
+/*  TYPE MODE  (you're writing your own SQL):  the builder fades,  and can't be clicked  (untick "Type mode" to bring it back).  */
 #queryBuilder.paused {
     opacity: 0.45;
     pointer-events: none;
@@ -908,12 +916,106 @@ h1 {
     border-radius: 4px;
 }
 
-#queryReset {
-    margin: 0 0 0 auto;
+/*  The 2 checkboxes:   [✓] Query Flexibility    [ ] Type mode
+    A white box.   Ticked:  solid SQL blue,  with a white  ✓,  and a soft blue glow.  */
+.query-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+    user-select: none;
+}
+
+.query-option input {
+    appearance: none;
+    -webkit-appearance: none;
+    display: grid;
+    place-content: center;
+    flex: none;
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    background: var(--check-box);
+    border: 1px solid var(--glass-edge);
+    border-radius: 4px;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+    cursor: pointer;
+}
+
+.query-option input::after {
+    content: "✓";
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    color: #fff;
+    opacity: 0;                     /*  (not  visibility:  that would show through the closed menu)  */
+}
+
+.query-option input:checked {
+    background: var(--sql);
+    border-color: var(--sql);
+    box-shadow: 0 0 8px var(--sql-glow);
+}
+
+.query-option input:checked::after {
+    opacity: 1;
+}
+
+.query-option input:focus-visible {
+    outline: none;
+    box-shadow:
+        0 0 0 2px var(--check-box),
+        0 0 10px 2px var(--sql-glow);
+}
+
+#querySqlNote {
+    margin-left: auto;
+    font-size: 12px;
+}
+
+/*  "The builder can't show:  the JOIN.   [Drop it]  [Keep typing]"   (a light square,  with an SQL-blue edge)  */
+#queryAsk {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin: 8px 10px 0;
+    padding: 6px 8px 6px 10px;
+    color: var(--text);
+    background: var(--square-light);
+    border: 1px solid var(--glass-edge);
+    border-left: 4px solid var(--sql);
+    border-radius: 8px;
+}
+
+#queryAskWords {
+    flex: 1 1 260px;
+}
+
+#queryAsk button {
+    margin: 0;
     padding: 0 10px;
-    line-height: 22px;
+    line-height: 24px;
     font-size: 12px;
     border-radius: 8px;
+}
+
+#queryAskYes {
+    color: #fff;
+    background: var(--sql-dark);
+    text-shadow: 0 0 8px var(--sql-glow);
+    box-shadow: 0 0 10px var(--sql-glow);
+}
+
+/*  "Query Flexibility fixed:   selct  ->  SELECT   ·   added  FROM orders"  */
+#queryFixes {
+    margin: 6px 10px 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--sql);
+    white-space: pre-wrap;
 }
 
 /*  The box:  letters that all take the same room  (so the SQL lines up,  like code)  */
@@ -1740,6 +1842,35 @@ mark {
     inset: 10px;
     border-radius: 50%;
     background: var(--square-dark);
+}
+
+/*  The "expand?" tag:  rest the mouse on a cell,  and after a moment it shows up on the cell's top-right corner.
+    A small solid black box  (like the "CSV View" button),  white words,  a soft white glow.
+    It sits ON the screen  (fixed)  and lets clicks through:  clicking the cell opens its Details.  */
+#cellTag {
+    position: fixed;
+    z-index: 12;
+    padding: 0 7px;
+    font-family: "Segoe UI", system-ui, Arial, sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 18px;
+    white-space: nowrap;
+    color: #fff;
+    background: var(--tag-bg);
+    border-radius: 6px;
+    text-shadow: 0 0 6px var(--tag-glow);
+    box-shadow:
+        inset 0 0 8px rgba(255, 255, 255, 0.08),
+        0 0 10px var(--tag-glow);
+    transform: translate(-100%, -60%);  /*  its right edge on the cell's right edge,  poking up over the top  */
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+#cellTag.on {
+    opacity: 1;
 }
 
 /*  "Spreadsheet View" / "CSV View":  the color of the look it flips TO.

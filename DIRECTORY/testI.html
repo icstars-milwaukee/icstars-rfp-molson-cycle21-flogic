@@ -187,8 +187,10 @@
 
         <!--  THE QUERY MENU,  when you press "Query".  It unfolds out of the button:
                 1.  The BUILDER:  pick what you want  (which rows,  grouped how,  what totals,  sorted how).
-                2.  The SQL it writes for you  (or type your own).
+                2.  The SQL it writes for you.   TYPE MODE  =  type your own  (the builder is greyed out while you do).
                 3.  Run it.   The ANSWER takes the window's place  ("← Back to file" brings the file back).
+              QUERY FLEXIBILITY  (on at the start)  =  "snap to result":  small SQL mistakes get fixed,
+              and what you typed snaps back into the builder's buttons when you leave type mode.
               class="folded closed"  =  it starts folded up,  and out of sight.
               (The brain fills in the builder.)  -->
         <div id="queryMenu" class="folded closed" role="dialog" aria-label="Query the open table">
@@ -199,10 +201,23 @@
             <div id="queryBuilder"></div>
             <div class="query-sql-head">
                 <span class="query-sql-label">SQL</span>
-                <span id="querySqlNote">written for you as you pick  ·  or type your own</span>
-                <button id="queryReset" type="button" hidden>Use the builder again</button>
+                <label class="query-option" title="Snap to result:  small SQL mistakes get fixed  (a typo,  a missing FROM,  words without quotes ...),  and what you type snaps into the builder's buttons">
+                    <input type="checkbox" id="queryFlex" checked> Query Flexibility
+                </label>
+                <label class="query-option" title="Type your own SQL  (the builder is greyed out while you do)">
+                    <input type="checkbox" id="queryType"> Type mode
+                </label>
+                <span id="querySqlNote">written for you as you pick</span>
             </div>
             <textarea id="querySql" spellcheck="false" autocomplete="off" rows="6" aria-label="The SQL query"></textarea>
+            <!--  Leaving type mode,  but some of your SQL doesn't fit the builder?  It ASKS first.  -->
+            <div id="queryAsk" role="alertdialog" aria-live="polite" hidden>
+                <span id="queryAskWords"></span>
+                <button id="queryAskYes" type="button">Drop them</button>
+                <button id="queryAskNo" type="button">Keep typing</button>
+            </div>
+            <!--  What Query Flexibility fixed  (in words)  -->
+            <div id="queryFixes" hidden></div>
             <div class="query-foot">
                 <button id="queryRun" type="button" title="Run it  (Ctrl + Enter)">Run ▶</button>
                 <button id="queryCopy" type="button">Copy SQL</button>
@@ -290,6 +305,10 @@
 
     <!--  Drag mode's ANCHOR:  a little glass dot where you pressed.  Drag away from it.  -->
     <div id="dragAnchor" hidden></div>
+
+    <!--  The "expand?" tag:  rest the mouse on a cell for a moment,  and it shows up on its corner.
+          (Click the cell  ->  the Details panel,  for that cell's whole row.)  -->
+    <div id="cellTag" aria-hidden="true" hidden>expand?</div>
 
 
 

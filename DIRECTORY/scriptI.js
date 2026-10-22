@@ -712,6 +712,8 @@ function swapIn(table, look) {
     allRows     = null;                     //  ...and the old "every row" list
     doneQuery   = null;                     //  ...and the last search  (its rows were the OLD rows)
     doneMatches = null;
+    picked      = null;                     //  ...and a cell you clicked  (it was in the OLD rows)
+    hideTag();
 
     //  Clean slate.
     searchInput.value = '';
@@ -761,12 +763,16 @@ function showBadge() {
 
     showSheetTabs();
     backBtn.hidden = !showingAnswer();
+    fileBadge.title = '';
 
     //  A query's answer:   QUERY RESULT  ·  12 rows  ·  from sales  ·  8 ms
+    //  (Query Flexibility fixed something?   ·  Query Flexibility fixed 2 things    hover  ->  what they were)
     if (showingAnswer()) {
         const r = sqlInfo.result;
         fileBadge.textContent = 'QUERY RESULT  ·  ' + r.rows.toLocaleString() + ' row' + (r.rows === 1 ? '' : 's') +
-            (r.from ? '  ·  from ' + r.from : '') + '  ·  ' + formatTime(r.ms);
+            (r.from ? '  ·  from ' + r.from : '') + '  ·  ' + formatTime(r.ms) +
+            (r.fixes.length > 0 ? '  ·  Query Flexibility fixed ' + r.fixes.length + (r.fixes.length === 1 ? ' thing' : ' things') : '');
+        fileBadge.title = r.fixes.join('   ·   ');
         fileBadge.hidden = false;
         return;
     }
@@ -1565,6 +1571,7 @@ let aimAt   = -1;       //  which match the window is locked onto  (its spot in 
 let aimHits = [];       //  the columns in that row that have the word.   Like:  [2, 7]
 let aimHit  = 0;        //  which one of those
 let aimed   = false;    //  has the sheet snapped to it yet?  (Then the first press snaps to THIS one, not the next.)
+let picked  = null;     //  a cell you CLICKED:  { row, col }.   The Details show it  (until the snap menu moves,  or they close).
 
 
 //  New search results  ->  lock onto the first match.   No search  (or no matches)?  "Ready"  /  "No matches".
@@ -1584,6 +1591,7 @@ function aimReset() {
 
 //  Lock onto match number "at",  hit number "hit"  (-1  =  that row's LAST hit).
 function aimOn(at, hit) {
+    picked  = null;                 //  (the snap menu moved:  the Details follow it again)
     aimAt   = at;
     aimHits = hitsIn(matches[at]);
     aimHit  = hit < 0 ? aimHits.length - 1 : hit;
@@ -1631,6 +1639,7 @@ function snapToTarget() {
     if (aimAt === -1) return;
 
     aimed = true;
+    if (picked !== null) { picked = null; if (!aimRow.hidden) drawRow(); }     //  (the Details follow the snap again)
     const col = aimHits[aimHit];
 
 
@@ -1682,7 +1691,8 @@ function drawAim() {
         aimRowBtn.disabled = true;
         aimRowBtn.classList.remove('more');
         toldAbout = '';
-        showRow(false);                                     //  no match  =  no row to show
+        if (picked === null) showRow(false);                //  no match  =  no row to show   (unless it's a cell you clicked)
+        else if (!aimRow.hidden) drawRow();
 
 
 
@@ -1772,6 +1782,7 @@ function tellMore(target, full, which) {
 //    1.  The FOCUS card:  the target's full text,  big,  scrolled to your word.
 //    2.  The whole row:  every column's name and value.
 //  It stays open as you press ▶ / ◀,  following the target.
+//  CLICK A CELL  (see "CLICK A CELL" below)  ->  the Details for THAT cell,  search or no search.
 //
 //  A row with THOUSANDS of columns?  Only the 200 around the target are listed  (so it stays quick),
 //  with a note saying which ones.   A giant cell?  The card shows its first 20,000 letters.
@@ -1779,19 +1790,28 @@ const ROW_LIMIT     = 200;
 const FOCUS_LETTERS = 20000;
 
 function showRow(open) {
+    if (open && detailsTarget() === null) return;       //  (nothing to show)
     if (open) closeQueryMenu();                         //  (the query menu lives in the same spot)
+    else picked = null;                                 //  (closed:  a clicked cell is forgotten)
     aimRow.hidden = !open;
     aimRowBtn.setAttribute('aria-expanded', open);
     if (open) drawRow();
 }
 
+//  Which cell the Details are about:  one you CLICKED,  or the snap menu's target.   (null  =  neither)
+function detailsTarget() {
+    if (picked !== null) return picked;
+    return aimAt === -1 ? null : { row: matches[aimAt], col: aimHits[aimHit] };
+}
+
 
 function drawRow() {
 
-    if (aimAt === -1) return;
+    const spot = detailsTarget();
+    if (spot === null) return;
 
-    const row   = matches[aimAt];
-    const col   = aimHits[aimHit];
+    const row   = spot.row;
+    const col   = spot.col;
     const count = Math.max(headerCells.length, rowInfo(row).count);
 
     //  Which columns:  all of them,  or the ROW_LIMIT around the target.
@@ -1876,6 +1896,108 @@ document.addEventListener('keydown', function (e) {
 aimNext.addEventListener('click', function () { aimStep(1); });
 aimPrev.addEventListener('click', function () { aimStep(-1); });
 aimScope.addEventListener('click', function () { snapToTarget(); });
+
+
+
+// ----------------------------------------------------------
+//
+//    CLICK A CELL   ->   ITS DETAILS
+//
+//    Rest the mouse on a cell  ->  after a moment,  a little black  "expand?"  tag shows up on its corner.
+//    Click the cell  ->  the Details panel opens for it:  the cell big  (the focus card),  and its whole row,
+//    up and down  ("VIEWING ROW VERTICALLY").   No search needed.
+//
+//        ┌──────────────┬────────────[expand?]──┐
+//        │ Ana          │ 123 Main St, Apt 4... │      <-  the mouse rests here
+//        └──────────────┴───────────────────────┘
+//
+//    Not a click:  dragging to select words,  or drag mode  (that's for moving the sheet).
+//    A phone?  No resting mouse:  just tap the cell.
+//
+// ----------------------------------------------------------
+
+const cellTag  = document.getElementById('cellTag');
+const TAG_WAIT = 600;           //  how long the mouse rests on a cell before "expand?" shows up  (ms)
+
+let tagCell  = null;            //  the cell the mouse is resting on
+let tagTimer = null;
+let pressX   = 0;               //  where the last press started  (a click that MOVED is a drag,  not a click)
+let pressY   = 0;
+
+
+//  Where is this cell?   ->   { row  (in the file),  col }    (null:  not a real cell,  like the spreadsheet look's empty columns)
+//  (A row on screen is:  [number] [left spacer] [the built cells ...] [right spacer].   Its name tag is its spot in "matches".)
+function cellSpot(cell) {
+    const line = cell.parentElement;
+    if (line === null || line.dataset.index === undefined) return null;
+    const col = builtColStart + Array.prototype.indexOf.call(line.children, cell) - 2;
+    const at  = Number(line.dataset.index);
+    if (col < 0 || col >= dataColumns || at >= matches.length) return null;
+    return { row: matches[at], col: col };
+}
+
+function hideTag() {
+    if (tagCell === null && cellTag.hidden) return;         //  (already hidden:  this runs on every scroll,  so do nothing)
+    clearTimeout(tagTimer);
+    tagCell = null;
+    cellTag.classList.remove('on');
+    cellTag.hidden = true;
+}
+
+//  The mouse has rested long enough:  show the tag,  on the cell's top-right corner  (inside the window's edge).
+function showTag() {
+    if (tagCell === null || !tagCell.isConnected || dragging || !loader.hidden) return;
+    const cell = tagCell.getBoundingClientRect();
+    const box  = outputBox.getBoundingClientRect();
+    const right = Math.min(cell.right, box.left + outputBox.clientLeft + outputBox.clientWidth);
+    if (right - 40 < Math.max(cell.left, box.left)) return;                 //  (hardly any of it is on screen)
+    cellTag.style.left = right + 'px';
+    cellTag.style.top  = Math.max(cell.top, box.top) + 'px';
+    cellTag.hidden = false;
+    void cellTag.offsetWidth;                               //  (make the browser notice it first,  so it fades in)
+    cellTag.classList.add('on');
+}
+
+//  Open the Details for a cell.   (It pulses,  like a snapped-to target,  so you see which one.)
+function pickCell(spot, cell) {
+    picked = spot;
+    showRow(true);
+    cell.classList.remove('locked');
+    void cell.offsetWidth;
+    cell.classList.add('locked');
+    cell.addEventListener('animationend', function () { cell.classList.remove('locked'); }, { once: true });
+}
+
+rowsBox.addEventListener('pointerover', function (e) {
+    if (e.pointerType === 'touch') return;
+    const cell = e.target.closest('.cell');
+    if (cell === tagCell) return;
+    hideTag();
+    if (cell === null || cellSpot(cell) === null) return;
+    tagCell = cell;
+    tagTimer = setTimeout(showTag, TAG_WAIT);
+});
+
+rowsBox.addEventListener('pointerleave', hideTag);
+rowsBox.addEventListener('pointerdown', function (e) {
+    hideTag();
+    pressX = e.clientX;
+    pressY = e.clientY;
+});
+outputBox.addEventListener('scroll', hideTag, { passive: true });
+outputBox.addEventListener('wheel', hideTag, { passive: true });
+window.addEventListener('scroll', hideTag, { passive: true });         //  (Expand mode:  the page scrolls)
+
+rowsBox.addEventListener('click', function (e) {
+    const cell = e.target.closest('.cell');
+    if (cell === null) return;
+    if (Math.abs(e.clientX - pressX) > 5 || Math.abs(e.clientY - pressY) > 5) return;     //  it moved:  selecting words
+    if (String(window.getSelection()).length > 0) return;                                   //  words are selected:  leave them
+    const spot = cellSpot(cell);
+    if (spot === null) return;
+    hideTag();
+    pickCell(spot, cell);
+});
 
 //  Enter in the search bar  =  ▶.     Shift + Enter  =  ◀.
 searchInput.addEventListener('keydown', function (e) {
@@ -3348,14 +3470,16 @@ measureFold();
 //        │ Sort by    │ [+ column ▾]                                    │
 //        │ At most    │ [     ] rows                                    │
 //        ├────────────┴─────────────────────────────────────────────────┤
-//        │ SQL   written for you as you pick  ·  or type your own       │
+//        │ SQL  [✓] Query Flexibility  [ ] Type mode   written for you  │
 //        │ SELECT city, COUNT(*) AS count FROM sales GROUP BY city      │
 //        ├──────────────────────────────────────────────────────────────┤
 //        │ [Run ▶]  [Copy SQL]  [Export CSV]            12 rows · 8 ms  │
 //        └──────────────────────────────────────────────────────────────┘
 //
 //    1.  The BUILDER:  pick things,  and it writes the SQL for you  (so you can learn it,  too).
-//    2.  Or type your own SQL in the box  (then the builder steps aside).
+//    2.  Or TYPE MODE:  type your own SQL in the box  (click in,  and it turns on:  the builder is greyed out).
+//        Untick it  ->  your SQL snaps back into the builder's buttons.   (A part they can't show?  It asks first.)
+//        QUERY FLEXIBILITY  ("snap to result",  on at the start):  small mistakes get fixed,  and you're told what changed.
 //    3.  Run  ->  the ANSWER takes the window's place:  a little table of its own,
 //        in the table look  (its column types on top,  NULLs shown).   Search it,  flip it,  snap to it.
 //        "← Back to file"  brings the file back,  right away  (it was never gone:  just put aside).
@@ -3374,8 +3498,14 @@ const queryTitle   = document.getElementById('queryTitle');     //  its  "Query 
 const queryClose   = document.getElementById('queryClose');     //  its  ×
 const queryBuilder = document.getElementById('queryBuilder');   //  the builder  (the brain fills it in)
 const querySql     = document.getElementById('querySql');       //  the SQL box
-const queryNote    = document.getElementById('querySqlNote');   //  "written for you as you pick ..."
-const queryReset   = document.getElementById('queryReset');     //  "Use the builder again"
+const queryNote    = document.getElementById('querySqlNote');   //  "written for you as you pick"
+const queryFlex    = document.getElementById('queryFlex');      //  [✓] Query Flexibility
+const queryType    = document.getElementById('queryType');      //  [ ] Type mode
+const queryAsk     = document.getElementById('queryAsk');       //  "The builder can't show ...   [Drop them] [Keep typing]"
+const queryAskWords = document.getElementById('queryAskWords');
+const queryAskYes  = document.getElementById('queryAskYes');
+const queryAskNo   = document.getElementById('queryAskNo');
+const queryFixes   = document.getElementById('queryFixes');     //  "Query Flexibility fixed:  selct  ->  SELECT ..."
 const queryRun     = document.getElementById('queryRun');       //  "Run ▶"
 const queryCopy    = document.getElementById('queryCopy');      //  "Copy SQL"
 const queryExport  = document.getElementById('queryExport');    //  "Export CSV"
@@ -3386,7 +3516,7 @@ let fileTable   = null;     //  the open file's table  (what a query asks about)
 let answer      = null;     //  the answer on screen:  { table, csv }   (null  =  the file is on screen)
 let fileLook    = false;    //  the file's look,  to go back to
 let queryId     = 0;        //  counts every Run.  (Run again while one is going?  The old one sees the number changed,  and quits.)
-let handWritten = false;    //  did you type in the SQL box yourself?  (Then the builder stops writing over it.)
+let typeMode    = false;    //  TYPE MODE:  you write the SQL yourself.  (The builder is greyed out,  and stops writing over it.)
 let queryFold   = null;     //  the "hide it once it's done folding" timer
 
 //  What you picked in the builder.
@@ -3553,7 +3683,8 @@ function queryFileChanged() {
     answer = null;
     queryExport.disabled = true;
     build = newBuild();
-    handWritten = false;
+    setTypeMode(false);
+    showFixes([]);
 
     queryTitle.textContent = 'Query  ·  ' + name + '  ·  ' + fileTable.table.count.toLocaleString() + ' row' + (fileTable.table.count === 1 ? '' : 's');
     setQueryStatus('', false);
@@ -3636,11 +3767,13 @@ function chip(words, onRemove) {
     return c;
 }
 
-//  The nicknames the totals get  (count,  sum_price ...),  in order.
-function totalNames() {
-    const used = new Set(build.group.map(function (g) { return g.toLowerCase(); }));
-    return build.totals.map(function (t) {
+//  The nicknames the totals get  (count,  sum_price ...),  in order.   (A nickname from SQL you typed?  That one.)
+function totalNames(of) {
+    const b = of || build;
+    const used = new Set(b.group.map(function (g) { return g.toLowerCase(); }));
+    return b.totals.map(function (t) {
         const fn = TOTAL_FNS.find(function (f) { return f[0] === t.fn; });
+        if (t.name) { used.add(t.name.toLowerCase()); return t.name; }
         let name = t.fn === 'rows' ? 'count' : fn[2] + '_' + String(t.col).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
         let n = name, k = 2;
         while (used.has(n)) n = name + '_' + k++;
@@ -3739,10 +3872,17 @@ function drawBuilder() {
             line.className = 'query-line';
             line.appendChild(pickList(TOTAL_FNS.map(function (f) { return [f[0], TOTAL_WORDS[f[0]]]; }), t.fn, 'Total', function (v) {
                 t.fn = v;
+                t.name = null;                          //  (a nickname you typed was for the OLD total)
                 if (v !== 'rows' && t.col === null) t.col = columns[0];
                 changed();
             }));
-            if (t.fn !== 'rows') line.appendChild(pickList(colOptions, t.col, 'Of which column', function (v) { t.col = v; changed(); }));
+            if (t.fn !== 'rows') line.appendChild(pickList(colOptions, t.col, 'Of which column', function (v) { t.col = v; t.name = null; changed(); }));
+            if (t.name) {                               //  a nickname from SQL you typed:   COUNT(*) AS n   ->   "as n"
+                const as = document.createElement('span');
+                as.className = 'query-hint';
+                as.textContent = 'as ' + t.name;
+                line.appendChild(as);
+            }
             line.appendChild(smallButton('×', 'Remove this total', function () { build.totals.splice(k, 1); changed(); }));
             box.appendChild(line);
         });
@@ -3786,7 +3926,7 @@ function drawBuilder() {
         box.append(limit, words);
     });
 
-    queryBuilder.classList.toggle('paused', handWritten);
+    queryBuilder.classList.toggle('paused', typeMode);
 }
 
 
@@ -3876,28 +4016,367 @@ function builderSql() {
     return lines.join('\n');
 }
 
-//  Put the builder's SQL in the box  (unless you're writing your own).
+//  Put the builder's SQL in the box  (unless you're in type mode:  then it's yours).
 function writeSql() {
-    if (fileTable === null || handWritten) return;
+    if (fileTable === null || typeMode) return;
     querySql.value = builderSql();
 }
 
-//  You typed in the box?  Then it's YOUR SQL now:  the builder steps aside.
+
+//  ---- THE SQL IT READS   (your SQL  ->  the builder's buttons) ----
+//
+//  Leaving type mode,  your SQL is read back into the builder:
+//
+//      SELECT status, COUNT(*) AS n FROM orders WHERE qty > 5 GROUP BY status ORDER BY n DESC LIMIT 10
+//
+//          Keep rows   [qty] [is over] [5]           Group by   [status]
+//          Totals      [count rows]  as n            Sort by    [n] [↓ high to low]          At most   10
+//
+//  ->  { build,  left }      left  =  the parts the builder CAN'T show,  in words   ([]  =  all of it fits)
+//  (SQL with a mistake in it?  It throws the engine's QueryError,  like Run would.)
+
+const FLIP_OP = { '=': '=', '<>': '<>', '<': '>', '<=': '>=', '>': '<', '>=': '<=' };     //  5 < qty   =   qty > 5
+
+function buildFromSql(text) {
+
+    const statements = parseSql(text);
+    const q = statements[statements.length - 1];
+    const b = newBuild();
+    const left = [];
+
+    if (q === undefined || q.t !== 'query') queryFail('The builder only shows a question  (a SELECT).');
+    if (statements.length > 1) left.push('the queries before the last one');
+    if (q.with !== null) left.push('the WITH tables');
+    if (q.body.t !== 'core') {
+        left.push(q.body.t === 'set' ? 'the ' + q.body.op : 'the ( ) around the query');
+        return { build: b, left: left };
+    }
+
+    const c = q.body;
+    const columns = queryColumns();
+    const lower = columns.map(function (n) { return n.toLowerCase(); });
+    const main = fileTable.engine.name.toLowerCase();
+
+    //  FROM:  the open table  (nothing else:  the builder only asks about the open table).
+    if (c.from === null || c.from.t !== 'table' || c.from.name.toLowerCase() !== main) {
+        left.push(c.from === null ? 'a question with no FROM'
+            : c.from.t === 'join' ? 'the JOIN'
+            : c.from.t === 'sub' ? 'the query inside FROM'
+            : 'the table  ' + c.from.name + '   (the builder only uses  ' + fileTable.engine.name + ')');
+        return { build: b, left: left };
+    }
+    const alias = c.from.alias ? c.from.alias.toLowerCase() : null;
+
+    //  A plain column of the open table   ->   its real name   (or null)
+    function columnOf(e) {
+        if (e === null || e.t !== 'col') return null;
+        if (e.table !== null && e.table.toLowerCase() !== main && e.table.toLowerCase() !== alias) return null;
+        const k = lower.indexOf(String(e.name).toLowerCase());
+        return k === -1 ? null : columns[k];
+    }
+
+    //  A value  (words or a number)   ->   what the builder's value box holds   (or null)
+    function valueOf(e) {
+        return e !== null && e.t === 'lit' && (typeof e.v === 'string' || typeof e.v === 'number') ? String(e.v) : null;
+    }
+
+    //  A total the builder has:   COUNT(*)  COUNT(x)  COUNT(DISTINCT x)  SUM  AVG  MIN  MAX  MEDIAN   ->   { fn, col }   (or null)
+    function totalOf(e) {
+        if (e === null || e.t !== 'fn' || e.over || e.filter || e.order) return null;
+        if (e.name === 'COUNT' && e.star) return { fn: 'rows', col: null, name: null };
+        const col = e.args.length === 1 ? columnOf(e.args[0]) : null;
+        if (col === null) return null;
+        if (e.name === 'COUNT') return { fn: e.distinct ? 'distinct' : 'count', col: col, name: null };
+        const fn = { SUM: 'sum', AVG: 'avg', MIN: 'min', MAX: 'max', MEDIAN: 'median' }[e.name];
+        return fn && !e.distinct ? { fn: fn, col: col, name: null } : null;
+    }
+
+
+    //  SELECT   (DISTINCT a, b  is the same rows as  GROUP BY a, b:  so that's how it's shown)
+    const hasTotal = c.items.some(function (it) { return !it.star && isTotal(it.e); });
+    const distinctCols = c.distinct && !hasTotal && c.group === null
+        ? c.items.map(function (it) { return it.star || (it.alias && it.alias.toLowerCase() !== String(it.e.name).toLowerCase()) ? null : columnOf(it.e); })
+        : null;
+    if (distinctCols !== null && distinctCols.every(function (x) { return x !== null; })) b.group = distinctCols;
+    else if (c.distinct && !hasTotal) left.push('DISTINCT');
+
+    const grouped = b.group.length > 0 || c.group !== null || hasTotal;
+
+    if (c.group !== null) {
+        c.group.forEach(function (g) {
+            let col = columnOf(g);
+            if (col === null && g.t === 'lit' && Number.isInteger(g.v)) {                     //  GROUP BY 1   (the 1st thing shown)
+                const it = c.items[g.v - 1];
+                col = it && !it.star ? columnOf(it.e) : null;
+            }
+            if (col === null && g.t === 'col' && g.table === null) {                          //  GROUP BY a nickname
+                const it = c.items.find(function (x) { return x.alias && x.alias.toLowerCase() === String(g.name).toLowerCase(); });
+                col = it ? columnOf(it.e) : null;
+            }
+            if (col === null) left.push('GROUP BY ' + sqlWordsFor(g));
+            else if (b.group.indexOf(col) === -1) b.group.push(col);
+        });
+    }
+
+    if (distinctCols === null || !distinctCols.every(function (x) { return x !== null; })) {
+        c.items.forEach(function (it) {
+            if (it.star) {
+                if (grouped) left.push('SELECT *');
+                else if (c.items.length > 1) left.push('the  *  next to other columns');
+                return;
+            }
+            const col = columnOf(it.e);
+            if (col !== null) {
+                if (it.alias !== null && it.alias.toLowerCase() !== col.toLowerCase()) left.push('the nickname  ' + it.alias + '  for  ' + col);
+                if (grouped) { if (b.group.indexOf(col) === -1) left.push(col + '   (it isn\'t in GROUP BY)'); }
+                else if (b.show.indexOf(col) === -1) b.show.push(col);
+                return;
+            }
+            const t = grouped ? totalOf(it.e) : null;
+            if (t === null) { left.push(sqlWordsFor(it.e)); return; }
+            t.name = it.alias;                                  //  (null  =  the builder names it:  count,  sum_qty ...)
+            b.totals.push(t);
+        });
+    }
+
+    if (c.having !== null) left.push('HAVING ' + sqlWordsFor(c.having));
+
+
+    //  WHERE:  conditions joined by AND only  (or by OR only),  each one  [column] [how] [value]
+    if (c.where !== null) {
+        const flat = function (node, kind, out) {
+            if (node.t === kind) { flat(node.a, kind, out); flat(node.b, kind, out); } else out.push(node);
+            return out;
+        };
+        const any = c.where.t === 'or';
+        let parts = flat(c.where, any ? 'or' : 'and', []);
+        const oneIn = parts.length === 1 && parts[0].t === 'in' && !parts[0].not;           //  status IN ('a', 'b')   =   status is 'a'  OR  'b'
+        parts.forEach(function (p) {
+            const found = filtersOf(p, any || oneIn);
+            if (found === null) left.push('the condition  ' + sqlWordsFor(p));
+            else found.forEach(function (f) { b.filters.push(f); });
+        });
+        b.any = (any || oneIn) && b.filters.length > 1;
+    }
+
+    function filtersOf(p, anyMode) {
+        if (p.t === 'cmp' && FLIP_OP[p.op]) {
+            let col = columnOf(p.a), value = valueOf(p.b), op = p.op;
+            if (col === null) { col = columnOf(p.b); value = valueOf(p.a); op = FLIP_OP[p.op]; }
+            return col !== null && value !== null ? [{ col: col, op: op, value: value }] : null;
+        }
+        if (p.t === 'isnull') {
+            const col = columnOf(p.e);
+            return col !== null ? [{ col: col, op: p.not ? 'filled' : 'empty', value: '' }] : null;
+        }
+        if (p.t === 'isdist') {                                     //  status IS 'shipped'   (SQLite's  IS  =  "the same as")
+            const col = columnOf(p.a), value = valueOf(p.b);
+            if (col === null) return null;
+            if (p.b.t === 'lit' && p.b.v === null) return [{ col: col, op: p.not ? 'empty' : 'filled', value: '' }];
+            return value !== null ? [{ col: col, op: p.not ? '=' : '<>', value: value }] : null;
+        }
+        if (p.t === 'like' && !p.not) {
+            const col = columnOf(p.e), pattern = valueOf(p.pat);
+            const escape = p.esc === null ? null : valueOf(p.esc);
+            if (col === null || pattern === null) return null;
+            //  Read the pattern:  only a  %  at the start and/or the end can be shown   (contains / starts with / ends with)
+            let word = '', first = false, last = false;
+            for (let k = 0; k < pattern.length; k++) {
+                const ch = pattern[k];
+                if (escape !== null && ch === escape && k + 1 < pattern.length) { word += pattern[++k]; continue; }
+                if (ch === '_') return null;
+                if (ch === '%') {
+                    if (k === 0) first = true;
+                    else if (k === pattern.length - 1) last = true;
+                    else return null;
+                    continue;
+                }
+                word += ch;
+            }
+            const op = first && last ? 'contains' : last ? 'starts' : first ? 'ends' : '=';
+            return [{ col: col, op: op, value: word }];
+        }
+        if (p.t === 'between' && !p.not && !anyMode) {
+            const col = columnOf(p.e), lo = valueOf(p.lo), hi = valueOf(p.hi);
+            return col !== null && lo !== null && hi !== null ? [{ col: col, op: '>=', value: lo }, { col: col, op: '<=', value: hi }] : null;
+        }
+        if (p.t === 'in' && !p.not && (anyMode || p.list.length === 1)) {
+            const col = columnOf(p.e), values = p.list.map(valueOf);
+            return col !== null && values.every(function (v) { return v !== null; })
+                ? values.map(function (v) { return { col: col, op: '=', value: v }; })
+                : null;
+        }
+        return null;
+    }
+
+
+    //  ORDER BY:  a column  (or,  grouped:  a group,  or a total)
+    const sortable = grouped ? b.group.concat(totalNames(b)) : columns;
+    const sortLower = sortable.map(function (n) { return n.toLowerCase(); });
+    (q.order || []).forEach(function (o) {
+        let name = null;
+        let e = o.e;
+        if (e.t === 'lit' && Number.isInteger(e.v)) {                              //  ORDER BY 2   (the 2nd thing shown)
+            const it = c.items[e.v - 1];
+            e = it && !it.star ? (it.alias ? { t: 'col', table: null, name: it.alias } : it.e) : null;
+        }
+        if (e !== null && e.t === 'col' && e.table === null) {
+            const it = c.items.find(function (x) { return x.alias && x.alias.toLowerCase() === String(e.name).toLowerCase(); });
+            if (it && !grouped) e = it.e;                                          //  a nickname for a column
+        }
+        if (e !== null && e.t === 'col') {
+            const k = sortLower.indexOf(String(e.name).toLowerCase());
+            if (k !== -1 && (e.table === null || columnOf(e) !== null || grouped)) name = sortable[k];
+        } else if (e !== null && grouped) {                                        //  ORDER BY COUNT(*)   ->   that total's name
+            const t = totalOf(e);
+            const k = t === null ? -1 : b.totals.findIndex(function (x) { return x.fn === t.fn && x.col === t.col; });
+            if (k !== -1) name = totalNames(b)[k];
+        }
+        if (name === null) left.push('ORDER BY ' + sqlWordsFor(o.e));
+        else b.sort.push({ col: name, desc: o.desc });
+        if (o.nulls !== null) left.push('NULLS ' + o.nulls.toUpperCase());
+    });
+
+
+    //  LIMIT   (or SQL Server's  TOP)
+    const limit = q.limit !== null ? q.limit : c.top;
+    if (limit !== null) {
+        if (limit.t === 'lit' && Number.isInteger(limit.v) && limit.v > 0) b.limit = String(limit.v);
+        else left.push('LIMIT ' + sqlWordsFor(limit));
+    }
+    if (q.offset !== null) left.push('OFFSET ' + sqlWordsFor(q.offset));
+
+    return { build: b, left: left };
+}
+
+//  A piece of a question,  back in words   (for "The builder can't show:  UPPER(city)")
+function sqlWordsFor(e) {
+    if (e === null || e === undefined) return '';
+    switch (e.t) {
+        case 'lit':     return e.v === null ? 'NULL' : typeof e.v === 'string' ? sqlWordsOf(e.v) : String(e.v);
+        case 'col':     return (e.table ? e.table + '.' : '') + e.name;
+        case 'fn':      return e.name + '(' + (e.star ? '*' : (e.distinct ? 'DISTINCT ' : '') + e.args.map(sqlWordsFor).join(', ')) + ')' + (e.over ? ' OVER (...)' : '');
+        case 'bin':     return sqlWordsFor(e.a) + ' ' + e.op + ' ' + sqlWordsFor(e.b);
+        case 'cat':     return sqlWordsFor(e.a) + ' || ' + sqlWordsFor(e.b);
+        case 'cmp':     return sqlWordsFor(e.a) + ' ' + e.op + ' ' + sqlWordsFor(e.b);
+        case 'and':
+        case 'or':      return sqlWordsFor(e.a) + ' ' + e.t.toUpperCase() + ' ' + sqlWordsFor(e.b);
+        case 'not':     return 'NOT ' + sqlWordsFor(e.e);
+        case 'neg':     return '-' + sqlWordsFor(e.e);
+        case 'isnull':  return sqlWordsFor(e.e) + (e.not ? ' IS NOT NULL' : ' IS NULL');
+        case 'like':    return sqlWordsFor(e.e) + (e.not ? ' NOT' : '') + ' LIKE ' + sqlWordsFor(e.pat);
+        case 'in':      return sqlWordsFor(e.e) + (e.not ? ' NOT' : '') + ' IN (' + e.list.map(sqlWordsFor).join(', ') + ')';
+        case 'between': return sqlWordsFor(e.e) + (e.not ? ' NOT' : '') + ' BETWEEN ' + sqlWordsFor(e.lo) + ' AND ' + sqlWordsFor(e.hi);
+        case 'case':    return 'CASE ...';
+        case 'cast':    return 'CAST(' + sqlWordsFor(e.e) + ' AS ...)';
+        default:        return 'a query inside the query';
+    }
+}
+
+
+//  ---- TYPE MODE ----
+
+function setTypeMode(on) {
+    typeMode = on;
+    queryType.checked = on;
+    queryBuilder.classList.toggle('paused', on);
+    queryNote.textContent = on ? 'type mode  ·  the builder is greyed out' : 'written for you as you pick';
+    askFirst(null);
+}
+
+//  Click in the box  (or type in it)  ->  type mode turns on.
+querySql.addEventListener('pointerdown', function () { if (!typeMode) setTypeMode(true); });
 querySql.addEventListener('input', function () {
-    if (handWritten) return;
-    handWritten = true;
-    queryBuilder.classList.add('paused');
-    queryNote.textContent = 'you\'re writing it yourself  ·  the builder is paused';
-    queryReset.hidden = false;
+    if (!typeMode) setTypeMode(true);
+    showFixes([]);                                      //  (the fixes were for the SQL before you changed it)
 });
 
-queryReset.addEventListener('click', function () {
-    handWritten = false;
-    queryBuilder.classList.remove('paused');
-    queryNote.textContent = 'written for you as you pick  ·  or type your own';
-    queryReset.hidden = true;
-    writeSql();
+//  The checkbox.   Unticked?  Not right away:  first,  does your SQL fit the builder?
+queryType.addEventListener('change', function () {
+    if (queryType.checked) { setTypeMode(true); querySql.focus(); return; }
+    queryType.checked = true;
+    leaveTypeMode();
 });
+
+//  Back to the builder:  your SQL,  snapped into its buttons.   (Query Flexibility on?  Its mistakes are fixed first.)
+//  Something the buttons can't show  (a JOIN,  a CASE ...)?   ASK first:  drop it,  or keep typing.
+function leaveTypeMode() {
+
+    const typed = querySql.value;
+    if (typed.trim() === '' || typed === builderSql()) { setTypeMode(false); writeSql(); return; }
+
+    let sql = typed, fixes = [];
+    if (queryFlex.checked) {
+        const fixed = flexSync(typed, queryCatalog(function () { return true; }));
+        sql = fixed.sql;
+        fixes = fixed.fixes;
+    }
+
+    function done(newBuild) {
+        build = newBuild;
+        setTypeMode(false);
+        drawBuilder();
+        writeSql();
+        showFixes(fixes);
+    }
+
+    let read;
+    try {
+        read = buildFromSql(sql);
+    } catch (problem) {
+        if (!(problem instanceof QueryError)) throw problem;
+        askFirst('The builder can\'t read this SQL:   ' + problem.message, 'Start the builder fresh', function () { done(newBuild()); });
+        return;
+    }
+
+    if (read.left.length === 0) { done(read.build); return; }
+    askFirst('The builder can\'t show:   ' + read.left.join(',   ') + '.', read.left.length === 1 ? 'Drop it' : 'Drop them',
+             function () { done(read.build); });
+}
+
+//  The question,  under the SQL box:   "The builder can't show:  the JOIN.   [Drop it]  [Keep typing]"
+//  (words  null  =  put it away)
+let askYes = null;
+
+function askFirst(words, yesWords, onYes) {
+    queryAsk.hidden = words === null;
+    askYes = onYes || null;
+    if (words === null) return;
+    queryAskWords.textContent = words;
+    queryAskYes.textContent = yesWords;
+    queryAskYes.focus();
+}
+
+queryAskYes.addEventListener('click', function () {
+    const go = askYes;
+    askFirst(null);
+    if (go !== null) go();
+});
+
+queryAskNo.addEventListener('click', function () {
+    askFirst(null);
+    querySql.focus();                                   //  (still in type mode)
+});
+
+//  What Query Flexibility fixed,  in words,  under the box   ([]  =  nothing:  put the line away)
+function showFixes(list) {
+    queryFixes.hidden = list.length === 0;
+    queryFixes.textContent = list.length === 0 ? '' : 'Query Flexibility fixed:   ' + list.join('   ·   ');
+}
+
+//  After a Run:  Query Flexibility changed the SQL?   Show the SQL that REALLY ran,  and say what changed.
+function afterFlex(sql, fixes) {
+    showFixes(fixes);
+    if (fixes.length === 0) return;
+    if (typeMode) { querySql.value = sql; return; }
+    //  The builder's own SQL  (snap to result:  a word,  spelled the file's way):  its buttons follow along.
+    try {
+        const read = buildFromSql(sql);
+        if (read.left.length === 0) { build = read.build; drawBuilder(); writeSql(); }
+    } catch (problem) {
+        if (!(problem instanceof QueryError)) throw problem;
+    }
+}
 
 //  Ctrl + Enter  (or Cmd + Enter on a Mac)  in the box  =  Run.
 querySql.addEventListener('keydown', function (e) {
@@ -3928,13 +4407,15 @@ function runTheQuery() {
     startLoading('Running the query...');
     const started = performance.now();
 
+    askFirst(null);
     runQuery(text, queryCatalog(isCurrent), isCurrent, function (done) {
         setProgress(0.9 * done);
         setLoadingLabel('Running the query...  ' + Math.floor(100 * done) + '%');
-    }).then(function (result) {
+    }, queryFlex.checked).then(function (result) {
 
         if (!isCurrent()) return;
-        return showAnswer(result, text, performance.now() - started, isCurrent);
+        afterFlex(result.sql, result.fixes);                //  (Query Flexibility changed it?  Show what really ran.)
+        return showAnswer(result, result.sql, performance.now() - started, isCurrent);
 
     }).then(function () {
 
@@ -3945,6 +4426,7 @@ function runTheQuery() {
 
         if (!isCurrent() || problem === QUERY_STALE || problem === XLSX_STALE || problem === SQL_STALE) return;
         finishLoading();
+        if (problem && problem.fixes && problem.fixes.length > 0) afterFlex(problem.sql, problem.fixes);    //  (how far the fixing got:  so the problem lines up)
         setQueryStatus(queryProblem(problem), true);
     });
 }
@@ -4012,7 +4494,7 @@ async function showAnswer(result, text, ms, isCurrent) {
         nullCount: nullRows.length,
         nullRows: Uint32Array.from(nullRows),
         nullCols: Uint16Array.from(nullCols),
-        result: { sql: text, ms: ms, rows: rows.length, from: mainTableName() },
+        result: { sql: text, ms: ms, rows: rows.length, from: mainTableName(), fixes: result.fixes || [] },
     };
 
     const table = {
