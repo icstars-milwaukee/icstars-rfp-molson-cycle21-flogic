@@ -196,7 +196,7 @@
 
 
     <!--
-        5.  "Drag mode"  +  "Go to row"  +  "Expand"
+        5.  "Drag mode"  +  "Go to row"  +  "Expand"  +  "Spreadsheet View" / "CSV View"
 
             "hidden"  =  you can't see it yet.
             It shows up after you pick a file.
@@ -204,6 +204,10 @@
             DRAG MODE:  hold on the sheet and drag,  any direction.  Let go  ->  it stops.
             (Like the middle-click scroll on Windows,  for every mouse,  trackpad,  and phone.)
             aria-pressed  =  tells screen readers it's an on/off switch,  and which one it is now.
+
+            SPREADSHEET VIEW  /  CSV VIEW:  flips the window between the CSV look
+            and the spreadsheet look  (like Excel:  letters on top,  Excel's row numbers).
+            The brain changes its words to say which look you'd flip TO.
 
             type="number"  ->  the box only takes numbers
     -->
@@ -213,6 +217,7 @@
         <input type="number" id="jumpInput" min="1" placeholder="Row #">
         <button id="jumpBtn">Go to row</button>
         <button id="expandBtn">Expand (show all)</button>
+        <button id="viewBtn" type="button" title="Flip between the spreadsheet look (like Excel) and the CSV look">Spreadsheet View</button>
     </div>
 
 

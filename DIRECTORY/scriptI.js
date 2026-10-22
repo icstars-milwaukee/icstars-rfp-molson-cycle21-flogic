@@ -156,6 +156,7 @@ const dragAnchor  = document.getElementById('dragAnchor');     //  drag mode's a
 const jumpInput   = document.getElementById('jumpInput');      //  the "Row #" box
 const jumpBtn     = document.getElementById('jumpBtn');        //  the "Go to row" button
 const expandBtn   = document.getElementById('expandBtn');      //  the "Expand" button
+const viewBtn     = document.getElementById('viewBtn');        //  "Spreadsheet View"  /  "CSV View"
 const topBtn      = document.getElementById('topBtn');         //  the "Top" button
 const loader      = document.getElementById('loader');         //  the cloudy loading screen
 const loaderPie   = document.getElementById('loaderPie');      //  the pie circle that fills up
@@ -192,7 +193,8 @@ let rowCache    = new Map();            //  rows looked at lately:  where their 
 let cacheCells  = 0;                    //  how many cells are in rowCache, all together  (too many?  it gets emptied)
 
 let searchText  = null;   //  every row squished into small letters, ready to search.  (made the first time you search)
-let columnCount = 0;      //  how many columns the widest row has
+let columnCount = 0;      //  how many columns to lay out  (the real ones,  + the empty ones in the spreadsheet look)
+let dataColumns = 0;      //  how many REAL columns:  the widest row has this many
 let matches     = [];     //  ALL the rows that pass the search, as their row number  (0, 1, 2...).  Like:  [0, 4, 9]
                           //  (Just numbers!  Way lighter than building a little object for every row.)
 let allRows     = null;   //  the list for "no search":  [0, 1, 2, 3 ...]  every row.  Made once, then reused.
@@ -208,7 +210,8 @@ let viewY       = 0;      //  where you're looking, in "full height" pixels:  ro
                           //  This is the brain's own exact number.  (The scrollbar only knows a squeezed one.)
 let expectedTop = 0;      //  where the brain last PUT the scrollbar.  If it's somewhere else, YOU moved it.
 
-let columnWidths  = null; //  how wide each column is, in pixels.             Like:  [96, 64, 150]
+let dataWidths    = null; //  how wide each REAL column is, in pixels.         Like:  [96, 64, 150]
+let columnWidths  = null; //  how wide each column is  (real + empty ones).   Like:  [96, 64, 150, 100, 100]
 let columnStarts  = null; //  where each column STARTS  (a running total).   Like:  [0, 96, 160, 310]
                           //  (one extra at the end  =  where the last column ends  =  the whole sheet's width)
 let sheetWidth    = 0;    //  how wide ALL the columns are, added up
@@ -232,6 +235,7 @@ let glideLast   = 0;      //  the time of the glide's last step  (0 = it's just 
 let loadId         = 0;      //  counts every file you pick.  If you pick a NEW file while an old one
                              //  is still loading, the old one sees the number changed, and quits.
 let fileNote       = '';     //  a note added to the "Rows 1–15" words about how the file was read  (or nothing)
+let excelLook      = false;  //  showing the file like EXCEL?  ("Spreadsheet View":  letters on top,  Excel's row numbers)
 let buildingSearch = false;  //  is the brain getting the search ready right now?
 let loaderTimer    = null;   //  the "wait a moment before showing the loader" timer
 
@@ -567,10 +571,13 @@ function loadFile(file, sheet) {
                 : encoding === 'windows-1252'
                 ? '  ·  read as Windows-1252  (an older Excel format)'
                 : '';
-            showBadge();                        //  "XLSX SPREADSHEET"  (or nothing, for a CSV)
+            //  Which look?  A NEW file:  Excel files look like Excel,  CSVs like a CSV.
+            //  Another sheet tab of the same file  (sheet !== null):  keep the look you picked.
+            if (sheet === null) excelLook = excel !== null;
+            applyLook();                        //  the window,  the button,  and the badge  ("XLSX SPREADSHEET")
             readingName.textContent = file.name;
             readingFrom.hidden = false;         //  "Reading from...  sales.csv"
-            columnCount = longest.length;       //  the widest row decides how many columns there are
+            dataColumns = longest.length;       //  the widest row decides how many columns there are
             searchText  = null;                 //  new file  =  throw away the old search copy
             allRows     = null;                 //  ...and the old "every row" list
             doneQuery   = null;                 //  ...and the last search  (its rows were the OLD file's rows)
@@ -662,6 +669,7 @@ function loadFile(file, sheet) {
 //  (It shows the first sheet that isn't hidden.  "2 of 3"  =  the 1st one was hidden.)
 //
 //    A CSV?  No badge.
+//    (An Excel file keeps its badge in BOTH looks,  so flipping never moves anything above the window.)
 //
 // ----------------------------------------------------------
 
@@ -983,20 +991,50 @@ function setColumnWidths(longest) {
 
     const letter = measureLetterWidth();                //  how many pixels one letter takes up
 
-    columnWidths = new Float64Array(columnCount);
-    columnStarts = new Float64Array(columnCount + 1);   //  (a "Float64Array" is a list of numbers that's
+    dataWidths = new Float64Array(dataColumns);         //  (a "Float64Array" is a list of numbers that's
                                                         //   super fast and light.  Good for a million of them.)
 
-    for (let col = 0; col < columnCount; col++) {
+    for (let col = 0; col < dataColumns; col++) {
 
         //  Squeeze it between 6 and 40.
         //  (+2 extra, because some letters like "W" and "$" are wider than normal.)
         const letters = Math.min(Math.max(longest[col] + 2, 6), 40);
 
         //  The letters  +16px for the padding on both sides.
-        columnWidths[col] = letters * letter + 16;
+        dataWidths[col] = letters * letter + 16;
+    }
 
-        //  This column starts where the last one started, plus the last one's width.
+    layoutColumns();
+}
+
+
+//  Lay the columns out,  one after another.
+//  The spreadsheet look:  add EMPTY columns after the real ones until the window is full,
+//  like Excel  (its grid keeps going past your data:  G, H, I ...).
+const EXCEL_WINDOW = 1320;      //  the spreadsheet look's widest window  (the clothes say the same:  #output.excel)
+const EMPTY_COLUMN = 100;       //  how wide each empty column is
+
+function layoutColumns() {
+
+    let dataWidth = 0;
+    for (let col = 0; col < dataColumns; col++) dataWidth += dataWidths[col];
+
+    //  Room left in the spreadsheet look's window  (minus the row numbers,  its 2 edges,  and room for a scrollbar).
+    const room  = excelLook ? EXCEL_WINDOW - NUM_WIDTH - 2 - 18 - dataWidth : 0;
+    const empty = room > 0 ? Math.ceil(room / EMPTY_COLUMN) : 0;
+
+    columnCount  = dataColumns + empty;
+    columnWidths = new Float64Array(columnCount);
+    columnStarts = new Float64Array(columnCount + 1);
+    columnWidths.set(dataWidths);
+
+    //  The empty ones:  100px each,  and the last one takes whatever room is left  (so it fills EXACTLY).
+    for (let col = dataColumns; col < columnCount; col++) {
+        columnWidths[col] = col < columnCount - 1 ? EMPTY_COLUMN : room - EMPTY_COLUMN * (empty - 1);
+    }
+
+    //  Each column starts where the last one started, plus the last one's width.
+    for (let col = 0; col < columnCount; col++) {
         columnStarts[col + 1] = columnStarts[col] + columnWidths[col];
     }
 
@@ -1213,6 +1251,22 @@ function drawHeader(measure) {
 
     headerBox.appendChild(row);
 
+    //  The spreadsheet look:  a row of column LETTERS on top  (A, B, C ... Z, AA ...),  like Excel's.
+    //  Copy the names row  (so every box is exactly the same size),  then swap in the letters.
+    if (excelLook) {
+        const letters = row.cloneNode(true);
+        letters.classList.add('letters-row');
+        delete letters.dataset.index;
+        letters.firstChild.textContent = '';            //  the top-left corner:  empty,  like Excel's
+        for (let col = builtColStart; col < builtColEnd; col++) {
+            const cell = letters.children[2 + col - builtColStart];
+            cell.className = 'cell';
+            cell.removeAttribute('title');
+            cell.textContent = columnName(col);
+        }
+        headerBox.prepend(letters);
+    }
+
     //  The header is the same height as every row.
     //  Measure it  (only for a NEW file:  "measure" = true),  so the brain knows exactly how tall one row is.
     //  (Measuring makes the browser lay out the whole sheet RIGHT NOW.  Doing that every time you
@@ -1266,7 +1320,7 @@ jumpInput.addEventListener('keydown', function (e) {
 
 function jumpToLine() {
 
-    const target = parseInt(jumpInput.value, 10);       //  the number you typed
+    const target = parseInt(jumpInput.value, 10) - rowShift();     //  the number you typed  (the spreadsheet look:  Excel's number,  1 higher)
 
     if (isNaN(target) || matches.length === 0) return;  //  not a number?  nothing to show?  Stop.
 
@@ -1488,9 +1542,9 @@ function drawAim() {
         (aimHits.length > 1 ? '  ·  hit ' + (aimHit + 1) + ' of ' + aimHits.length : '');
 
     //  Where:  the row number  (like the sheet's),  and the column's name.
-    //  An Excel file?  Its own address too, like  K43.   (Excel's row 1 is our header,  so Excel's row  =  ours + 1.)
-    aimWhere.textContent = 'Row ' + (row + 1) + '  ·  ' + (headerCells[col] || 'column ' + (col + 1)) +
-        (xlsxInfo !== null ? '  (' + columnName(col) + (row + 2) + ')' : '');
+    //  The spreadsheet look?  Excel's address too, like  K43.   (Excel's row 1 is our header,  so Excel's row  =  ours + 1.)
+    aimWhere.textContent = 'Row ' + (row + 1 + rowShift()) + '  ·  ' + (headerCells[col] || 'column ' + (col + 1)) +
+        (excelLook ? '  (' + columnName(col) + (row + 2) + ')' : '');
 
     //  The scope:  the 3 × 3 cells around the target,  straight from the file  (so you see its real neighbors).
     let target = null;
@@ -1580,13 +1634,13 @@ function drawRow() {
     const from = Math.max(0, Math.min(col - ROW_LIMIT / 2, count - ROW_LIMIT));
     const to   = Math.min(count, from + ROW_LIMIT);
 
-    aimRowTitle.textContent = 'Row ' + (row + 1) + '  ·  ' + count + ' column' + (count === 1 ? '' : 's');
+    aimRowTitle.textContent = 'Row ' + (row + 1 + rowShift()) + '  ·  ' + count + ' column' + (count === 1 ? '' : 's');
 
     //  1.  The FOCUS card:   the column's name  ("NOTES")   and the full text,  your word in yellow.
     const full = cellAt(row, col);
 
     aimFocusName.textContent = (headerCells[col] || 'column ' + (col + 1)) +
-        (xlsxInfo !== null ? '  ·  ' + columnName(col) + (row + 2) : '');
+        (excelLook ? '  ·  ' + columnName(col) + (row + 2) : '');
 
     aimFocusText.textContent = '';
     paintMatches(aimFocusText, full.length > FOCUS_LETTERS ? full.slice(0, FOCUS_LETTERS) + '…' : full, query);
@@ -1613,7 +1667,7 @@ function drawRow() {
 
         const name = document.createElement('div');
         name.className = 'row-name';
-        name.textContent = (headerCells[c] || 'column ' + (c + 1)) + (xlsxInfo !== null ? '  ·  ' + columnName(c) : '');
+        name.textContent = (headerCells[c] || 'column ' + (c + 1)) + (excelLook ? '  ·  ' + columnName(c) : '');
         name.title = name.textContent;
 
         const text  = cellAt(row, c);
@@ -1697,6 +1751,101 @@ expandBtn.addEventListener('click', function () {
 
 // ----------------------------------------------------------
 //
+//    SPREADSHEET VIEW   <->   CSV VIEW
+//
+//    The same file,  two ways to look at it:
+//
+//      CSV look           the glass sheet.   Row 0 = the column names.
+//      Spreadsheet look   EXCEL's way:  a row of column LETTERS on top  (A, B, C ...),
+//                         Excel's row numbers  (the column names are row 1),
+//                         Excel addresses in the snap menu  (like K43),
+//                         the green  ƒ  on formulas,  and a WIDER window.
+//
+//    A CSV opens in the CSV look.   An Excel file opens in the spreadsheet look.
+//    The button FLIPS between them,  like turning a card over:
+//
+//         ▯   ->   ▏   ->   ▭      the window turns away until it's edge-on  (you can't see it),
+//                                   changes into the other look  (and width)  right then,
+//                                   and turns back.
+//
+//    Nothing is read again:  the file,  the Excel notes,  your search,  where you are:  all kept.
+//    Another sheet tab keeps the look you picked  (so you can look at every sheet "as a CSV" too).
+//
+// ----------------------------------------------------------
+
+let flipping = false;       //  mid-flip?  (Then a second click waits.)
+
+
+//  Dress the page for the look we're in:  the window,  the button,  the badge.
+function applyLook() {
+    outputBox.classList.toggle('excel', excelLook);
+    viewBtn.textContent = excelLook ? 'CSV View' : 'Spreadsheet View';
+    viewBtn.classList.toggle('to-csv', excelLook);     //  the clothes:  Excel green  ->  or  ->  black
+    showBadge();
+}
+
+
+//  Excel's row numbers start 1 higher  (its row 1 is the column names).   "How much to add?"
+function rowShift() {
+    return excelLook ? 1 : 0;
+}
+
+
+//  Switch to the other look,  right now.
+function switchLook() {
+
+    //  Remember where you are.  (The header gets taller or shorter,  and the browser "helpfully"
+    //  nudges the scrollbar to make up for it:  you'd land a row off.  So put it back after.)
+    const expanded = outputBox.classList.contains('expanded');
+    const y = expanded ? 0 : readViewY();
+
+    excelLook = !excelLook;
+    applyLook();
+    layoutColumns();            //  the spreadsheet look:  empty columns fill the wider window  (or take them away)
+    updateColumns(true);        //  new width,  the letters row,  Excel's row numbers:  rebuild the header and the rows
+    sizeWindow();               //  the letters row makes the header 1 row taller
+    if (!expanded) setViewY(y);
+    buildVisibleRows();
+    updatePosition();
+    drawAim();                  //  the snap menu:  Excel addresses  (or not)
+}
+
+
+viewBtn.addEventListener('click', function () {
+
+    if (flipping) return;
+
+    //  Turned off motion?  Just switch.
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        switchLook();
+        return;
+    }
+
+    //  1.  Turn away  ->  2.  edge-on:  switch  ->  3.  turn back.
+    //  ("animationend" also hears the cells' own animations,  like the snap pulse:  only listen to the WINDOW's.)
+    flipping = true;
+    outputBox.classList.add('flip-away');
+
+    outputBox.addEventListener('animationend', function turned(e) {
+        if (e.target !== outputBox) return;
+        outputBox.removeEventListener('animationend', turned);
+
+        switchLook();
+        outputBox.classList.replace('flip-away', 'flip-back');
+
+        outputBox.addEventListener('animationend', function back(e) {
+            if (e.target !== outputBox) return;
+            outputBox.removeEventListener('animationend', back);
+            outputBox.classList.remove('flip-back');
+            flipping = false;
+        });
+    });
+});
+
+
+
+// ----------------------------------------------------------
+//
 //    MAKE THE WINDOW EXACTLY  HEADER + 15 ROWS  TALL
 //    (or shorter, if there are fewer than 15 rows to show)
 //
@@ -1764,10 +1913,12 @@ function updatePosition() {
 
 
     //  matches holds row numbers  (0, 1, 2...).  Row numbers start at 1  (the header is 0).  So:  +1.
-    let message = 'Rows ' + (matches[first] + 1) + '–' + (matches[last] + 1);
+    //  (The spreadsheet look:  Excel's numbers,  1 more:  rowShift.)
+    const shift = 1 + rowShift();
+    let message = 'Rows ' + (matches[first] + shift) + '–' + (matches[last] + shift);
 
     if (word === '') {
-        message += ' of ' + rowCount;
+        message += ' of ' + (rowCount + rowShift());
     } else {
         message += ' (' + matches.length + ' matching row(s) for "' + word + '")';
     }
@@ -2632,10 +2783,10 @@ function makeRow(num, cells, query, index) {
     if (index % 2 === 1) row.classList.add('zebra');               //  every other row:  stripe
 
 
-    //  The row number, on the far left.
+    //  The row number, on the far left.   (The spreadsheet look:  Excel's number,  1 higher.)
     const numCell = document.createElement('span');
     numCell.className = 'line-num';
-    numCell.textContent = num;
+    numCell.textContent = num + rowShift();
     row.appendChild(numCell);
 
 

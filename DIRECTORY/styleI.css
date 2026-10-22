@@ -846,6 +846,48 @@ h1 {
 
 /*  ----------------------------------------------------------
 
+        THE SPREADSHEET LOOK  ("Spreadsheet View",  and every Excel file)
+
+        Wider:  room for more columns,  like a real spreadsheet.
+        (The brain adds the row of letters and Excel's row numbers.)
+
+    ----------------------------------------------------------  */
+
+#output.excel {
+    max-width: 1320px;
+}
+
+
+/*  THE FLIP  (switching looks):  the window turns away like a card,  until it's edge-on  (invisible),
+    the brain switches the look right then  (so the widening is never seen),  and it turns back.
+
+         ▯   ->   ▏   ->   ▭
+
+    "perspective"  =  how far away your eye is:  the near edge looks bigger,  so it reads as 3D.
+    Only "transform" changes:  the cheapest thing to animate.
+    (Written AFTER  "#output.expanded",  so the flip wins over its  "animation: none".)  */
+#output.flip-away {
+    animation: flip-away 0.2s cubic-bezier(0.4, 0, 1, 1) forwards;     /*  speeding up as it turns away  */
+}
+
+#output.flip-back {
+    animation: flip-back 0.36s cubic-bezier(0.16, 1, 0.3, 1);          /*  slowing down softly as it lands  */
+}
+
+@keyframes flip-away {
+    from { transform: perspective(2400px) rotateY(0deg); }
+    to   { transform: perspective(2400px) rotateY(90deg); }
+}
+
+@keyframes flip-back {
+    from { transform: perspective(2400px) rotateY(-90deg); }
+    to   { transform: perspective(2400px) rotateY(0deg); }
+}
+
+
+
+/*  ----------------------------------------------------------
+
         HIDE THE WINDOW UNTIL THERE'S A FILE
 
         No rows?  No window.
@@ -1023,6 +1065,11 @@ h1 {
         0 0 14px var(--formula-glow);
 }
 
+/*  The CSV look:  no  ƒ  (a CSV has no formulas).   The formula is still kept:  hover to read it.  */
+#output:not(.excel) .cell.formula::before {
+    content: none;
+}
+
 
 /*  Put your mouse on a box  ->  it GLOWS, like light inside the glass.  */
 .cell:hover {
@@ -1069,6 +1116,22 @@ h1 {
 /*  The top-left corner box  (the "0")  */
 .header-row .line-num {
     background: var(--corner-bg);
+}
+
+
+/*  The spreadsheet look:  the row of column LETTERS  (A, B, C ...),  on top of the names.
+    The same header row,  but quieter:  small letters in the middle of each box,
+    and a thin line of Excel's own green underneath.  */
+.letters-row .cell {
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    color: var(--text-soft);
+}
+
+.letters-row,
+.letters-row:hover {
+    border-bottom-color: var(--formula);
 }
 
 
@@ -1199,6 +1262,43 @@ mark {
     border-radius: 50%;
     background: var(--square-dark);
 }
+
+/*  "Spreadsheet View" / "CSV View":  the color of the look it flips TO.
+    Spreadsheet View  =  Excel's green,  a bit darker,  solid,  with a soft green glow.
+    CSV View          =  black  (as black as a screen gets),  white words,  a soft white glow.
+    It changes the WHOLE window,  so it sits a little apart.  */
+#viewBtn {
+    margin: 0 0 0 12px;
+    color: #fff;
+    background: #185c37;
+    border-color: rgba(255, 255, 255, 0.22);
+    text-shadow: 0 0 6px rgba(255, 255, 255, 0.35);
+    box-shadow:
+        inset 0 0 10px rgba(255, 255, 255, 0.12),
+        0 0 12px rgba(33, 163, 102, 0.5);
+}
+
+#viewBtn:hover {
+    filter: brightness(1.12);
+    box-shadow:
+        inset 0 0 10px rgba(255, 255, 255, 0.16),
+        0 0 18px 2px rgba(33, 163, 102, 0.65);
+}
+
+#viewBtn.to-csv {
+    background: #020202;
+    box-shadow:
+        inset 0 0 10px rgba(255, 255, 255, 0.08),
+        0 0 12px rgba(255, 255, 255, 0.35);
+}
+
+#viewBtn.to-csv:hover {
+    filter: none;
+    box-shadow:
+        inset 0 0 10px rgba(255, 255, 255, 0.12),
+        0 0 18px 2px rgba(255, 255, 255, 0.5);
+}
+
 
 
 

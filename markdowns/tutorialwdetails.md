@@ -12,6 +12,7 @@ You're going to build a web page that opens a CSV file and shows it like a **min
 - It opens **Excel files (`.xlsx`)** too, with dates done carefully (Part 5)
 - A **snap menu** ("the aimbot") locks onto search matches and snaps the sheet right to them, even thousands of columns away (Part 6)
 - **Drag mode**: hold on the sheet and drag it in any direction, with a mouse, a trackpad, or a finger (Part 7)
+- **Spreadsheet View ↔ CSV View**: flip any file between the CSV look and Excel's look (letters on top, Excel's row numbers, a wider grid), like turning a card over (Part 8)
 
 You'll build it **one piece at a time**. After each part there's a **✅ Test it** step, so you always know it's working before you move on.
 
@@ -3742,7 +3743,7 @@ Refresh. You should have:
 - [ ] Open it, close it, open it again: it unfolds every time
 - [ ] Open a CSV with the menu open: the menu is made of the same glass as the CSV window
 
-**The CSV reader is done!** 🎉 Three more parts: Part 5 teaches it to open Excel files, Part 6 adds the snap menu, and Part 7 adds drag mode.
+**The CSV reader is done!** 🎉 Four more parts: Part 5 teaches it to open Excel files, Part 6 adds the snap menu, Part 7 adds drag mode, and Part 8 adds Spreadsheet View.
 
 <br>
 
@@ -4771,8 +4772,13 @@ function xlsxProblem(problem, name) {
                 : encoding === 'windows-1252'
                 ? '  ·  read as Windows-1252  (an older Excel format)'
                 : '';
-            showBadge();                        //  "XLSX SPREADSHEET"  (or nothing, for a CSV)
+            //  Which look?  A NEW file:  Excel files look like Excel,  CSVs like a CSV.
+            //  Another sheet tab of the same file  (sheet !== null):  keep the look you picked.
+            if (sheet === null) excelLook = excel !== null;
+            applyLook();                        //  the window,  the button,  and the badge  ("XLSX SPREADSHEET")
 ```
+
+> **Building in order?** `excelLook` and `applyLook()` arrive in Part 8 (Spreadsheet View). Until then, write just `showBadge();` in place of the `if (sheet === null) ...` and `applyLook();` lines.
 
 **5.** At the very bottom of the listener: check WHAT KIND of file it is (by its first bytes, not its name), then the badge itself:
 
@@ -4848,6 +4854,7 @@ function xlsxProblem(problem, name) {
 //  (It shows the first sheet that isn't hidden.  "2 of 3"  =  the 1st one was hidden.)
 //
 //    A CSV?  No badge.
+//    (An Excel file keeps its badge in BOTH looks,  so flipping never moves anything above the window.)
 //
 // ----------------------------------------------------------
 
@@ -5789,7 +5796,7 @@ chooseBtn.addEventListener('click', function () {
 });
 ```
 
-**3.** When a file is swapped in ("ALL DONE", Step 2.15), show "Reading from...". Add these lines right after `showBadge();`:
+**3.** When a file is swapped in ("ALL DONE", Step 2.15), show "Reading from...". Add these lines right after `applyLook();` (or `showBadge();`, before Part 8):
 
 ```js
             readingName.textContent = file.name;
@@ -5984,9 +5991,9 @@ function drawAim() {
         (aimHits.length > 1 ? '  ·  hit ' + (aimHit + 1) + ' of ' + aimHits.length : '');
 
     //  Where:  the row number  (like the sheet's),  and the column's name.
-    //  An Excel file?  Its own address too, like  K43.   (Excel's row 1 is our header,  so Excel's row  =  ours + 1.)
-    aimWhere.textContent = 'Row ' + (row + 1) + '  ·  ' + (headerCells[col] || 'column ' + (col + 1)) +
-        (xlsxInfo !== null ? '  (' + columnName(col) + (row + 2) + ')' : '');
+    //  The spreadsheet look?  Excel's address too, like  K43.   (Excel's row 1 is our header,  so Excel's row  =  ours + 1.)
+    aimWhere.textContent = 'Row ' + (row + 1 + rowShift()) + '  ·  ' + (headerCells[col] || 'column ' + (col + 1)) +
+        (excelLook ? '  (' + columnName(col) + (row + 2) + ')' : '');
 
     //  The scope:  the 3 × 3 cells around the target,  straight from the file  (so you see its real neighbors).
     let target = null;
@@ -6076,13 +6083,13 @@ function drawRow() {
     const from = Math.max(0, Math.min(col - ROW_LIMIT / 2, count - ROW_LIMIT));
     const to   = Math.min(count, from + ROW_LIMIT);
 
-    aimRowTitle.textContent = 'Row ' + (row + 1) + '  ·  ' + count + ' column' + (count === 1 ? '' : 's');
+    aimRowTitle.textContent = 'Row ' + (row + 1 + rowShift()) + '  ·  ' + count + ' column' + (count === 1 ? '' : 's');
 
     //  1.  The FOCUS card:   the column's name  ("NOTES")   and the full text,  your word in yellow.
     const full = cellAt(row, col);
 
     aimFocusName.textContent = (headerCells[col] || 'column ' + (col + 1)) +
-        (xlsxInfo !== null ? '  ·  ' + columnName(col) + (row + 2) : '');
+        (excelLook ? '  ·  ' + columnName(col) + (row + 2) : '');
 
     aimFocusText.textContent = '';
     paintMatches(aimFocusText, full.length > FOCUS_LETTERS ? full.slice(0, FOCUS_LETTERS) + '…' : full, query);
@@ -6109,7 +6116,7 @@ function drawRow() {
 
         const name = document.createElement('div');
         name.className = 'row-name';
-        name.textContent = (headerCells[c] || 'column ' + (c + 1)) + (xlsxInfo !== null ? '  ·  ' + columnName(c) : '');
+        name.textContent = (headerCells[c] || 'column ' + (c + 1)) + (excelLook ? '  ·  ' + columnName(c) : '');
         name.title = name.textContent;
 
         const text  = cellAt(row, c);
@@ -6162,6 +6169,8 @@ searchInput.addEventListener('keydown', function (e) {
 
 drawAim();                          //  start out "Ready"
 ```
+
+> **Building in order?** A few lines here use `excelLook` and `rowShift()`: they come in Part 8 (Spreadsheet View). Until then, read `excelLook` as `false` and `rowShift()` as `0`.
 
 | Code | Baby words |
 |---|---|
@@ -6534,6 +6543,452 @@ function stopDragging() {
 
 <br>
 
+# PART 8: Spreadsheet View ↔ CSV View 📗
+
+The same file, two ways to look at it, and a button that **flips** between them like turning over a card.
+
+```text
+   CSV look  (a CSV opens like this)                Spreadsheet look  (an Excel file opens like this)
+
+   ┌───┬──────┬────────┬────────┐                   ┌───┬──────┬────────┬────────┬──────┬──────┬──────┐
+   │ 0 │ id   │ name   │ city   │                   │   │  A   │   B    │   C    │  D   │  E   │  F   │  ← the letters
+   ├───┼──────┼────────┼────────┤        flip       ├───┼──────┼────────┼────────┼──────┼──────┼──────┤
+   │ 1 │ 1    │ Ana    │ Denver │      ───────▶     │ 1 │ id   │ name   │ city   │      │      │      │  ← the names are row 1
+   │ 2 │ 2    │ Bo     │ Austin │      ◀───────     │ 2 │ 1    │ Ana    │ Denver │      │      │      │
+   └───┴──────┴────────┴────────┘                   │ 3 │ 2    │ Bo     │ Austin │      │      │      │
+                                                    └───┴──────┴────────┴────────┴──────┴──────┴──────┘
+   [Spreadsheet View]  (dark Excel green)            WIDER, with empty columns, like Excel's grid.   [CSV View]  (black)
+```
+
+The spreadsheet look is **Excel's way** of showing a sheet:
+
+- a row of column **letters** on top (A, B, C ... Z, AA ...)
+- Excel's **row numbers**: the column names are row 1, so the first real row is row 2
+- Excel **addresses** in the snap menu (like `B78`), for a CSV too
+- the green **ƒ** on formulas
+- a **wider** window, filled out with empty lettered columns, like Excel's grid that keeps going past your data
+
+**The flip:** the window turns away until it's edge-on (you can't see it), switches looks right then (so the widening is never seen), and turns back. Nothing is read again: the file, the Excel notes, your search, and where you are all stay.
+
+**Sheet tabs** keep the look you picked: flip an Excel file to the CSV look, and every sheet you click opens "as a CSV" too.
+
+This part touches **3 files**.
+
+<br>
+
+### Step 8.1: The skeleton
+
+At the end of `<div id="controls" hidden>`, after the Expand button:
+
+```html
+        <button id="viewBtn" type="button" title="Flip between the spreadsheet look (like Excel) and the CSV look">Spreadsheet View</button>
+```
+
+> **Why does it start out saying "Spreadsheet View"?** The button always says the look it flips **to**. The brain changes its words (and color) every time.
+
+<br>
+
+### Step 8.2: The clothes
+
+**1.** The wider window, and the flip. Right after the `#output.expanded` rule:
+
+```css
+#output.excel {
+    max-width: 1320px;
+}
+
+
+/*  THE FLIP  (switching looks):  the window turns away like a card,  until it's edge-on  (invisible),
+    the brain switches the look right then  (so the widening is never seen),  and it turns back.
+
+         ▯   ->   ▏   ->   ▭
+
+    "perspective"  =  how far away your eye is:  the near edge looks bigger,  so it reads as 3D.
+    Only "transform" changes:  the cheapest thing to animate.
+    (Written AFTER  "#output.expanded",  so the flip wins over its  "animation: none".)  */
+#output.flip-away {
+    animation: flip-away 0.2s cubic-bezier(0.4, 0, 1, 1) forwards;     /*  speeding up as it turns away  */
+}
+
+#output.flip-back {
+    animation: flip-back 0.36s cubic-bezier(0.16, 1, 0.3, 1);          /*  slowing down softly as it lands  */
+}
+
+@keyframes flip-away {
+    from { transform: perspective(2400px) rotateY(0deg); }
+    to   { transform: perspective(2400px) rotateY(90deg); }
+}
+
+@keyframes flip-back {
+    from { transform: perspective(2400px) rotateY(-90deg); }
+    to   { transform: perspective(2400px) rotateY(0deg); }
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `max-width: 1320px` | The spreadsheet look can be up to 1320px wide (the CSV look: 900px). |
+| `perspective(2400px)` | How far away your eye is. The near edge of the turning window looks bigger, so it reads as 3D. |
+| `rotateY(90deg)` | Turn around the up-and-down line, a quarter turn: edge-on, invisible. |
+| `from { ... rotateY(-90deg) }` | Turning back starts from the OTHER side, so it looks like the back of the card coming around. |
+| `forwards` | When the turn-away ends, STAY turned away (until the brain swaps in the turn-back). |
+| `cubic-bezier(0.4, 0, 1, 1)` | Turning away: starts slow, speeds up. `(0.16, 1, 0.3, 1)` turning back: fast, then lands softly. |
+
+> **Why switch while it's edge-on?** The window gets WIDER (and taller, by the letters row). Animating a size change makes the browser redo the whole layout every frame: slow. Edge-on, nobody can see it change, so it just happens in one go, and only the cheap turning is animated.
+
+> **Why written AFTER `#output.expanded`?** Expand sets `animation: none`. Two rules with the same strength: the LATER one wins. So the flip has to come after it, or it couldn't flip in Expand mode.
+
+**2.** The letters row. Right after the `.header-row .line-num` corner rule:
+
+```css
+/*  The spreadsheet look:  the row of column LETTERS  (A, B, C ...),  on top of the names.
+    The same header row,  but quieter:  small letters in the middle of each box,
+    and a thin line of Excel's own green underneath.  */
+.letters-row .cell {
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    color: var(--text-soft);
+}
+
+.letters-row,
+.letters-row:hover {
+    border-bottom-color: var(--formula);
+}
+```
+
+**3.** No ƒ in the CSV look. Right after the `.cell.formula:hover::before` rule:
+
+```css
+/*  The CSV look:  no  ƒ  (a CSV has no formulas).   The formula is still kept:  hover to read it.  */
+#output:not(.excel) .cell.formula::before {
+    content: none;
+}
+```
+
+> **Why hide it with the clothes, instead of not adding it?** The brain still marks formula cells (and keeps the formula for hovering) in both looks. The clothes decide whether the ƒ shows. Switching looks then needs no brain work for it at all.
+
+**4.** The button. After the `#dragAnchor::after` rule:
+
+```css
+/*  "Spreadsheet View" / "CSV View":  the color of the look it flips TO.
+    Spreadsheet View  =  Excel's green,  a bit darker,  solid,  with a soft green glow.
+    CSV View          =  black  (as black as a screen gets),  white words,  a soft white glow.
+    It changes the WHOLE window,  so it sits a little apart.  */
+#viewBtn {
+    margin: 0 0 0 12px;
+    color: #fff;
+    background: #185c37;
+    border-color: rgba(255, 255, 255, 0.22);
+    text-shadow: 0 0 6px rgba(255, 255, 255, 0.35);
+    box-shadow:
+        inset 0 0 10px rgba(255, 255, 255, 0.12),
+        0 0 12px rgba(33, 163, 102, 0.5);
+}
+
+#viewBtn:hover {
+    filter: brightness(1.12);
+    box-shadow:
+        inset 0 0 10px rgba(255, 255, 255, 0.16),
+        0 0 18px 2px rgba(33, 163, 102, 0.65);
+}
+
+#viewBtn.to-csv {
+    background: #020202;
+    box-shadow:
+        inset 0 0 10px rgba(255, 255, 255, 0.08),
+        0 0 12px rgba(255, 255, 255, 0.35);
+}
+
+#viewBtn.to-csv:hover {
+    filter: none;
+    box-shadow:
+        inset 0 0 10px rgba(255, 255, 255, 0.12),
+        0 0 18px 2px rgba(255, 255, 255, 0.5);
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `#185c37` | Excel's green, a shade darker. |
+| `#020202` | Almost pure black: on a phone or laptop with an OLED screen, those pixels are practically OFF. |
+| `0 0 12px rgba(33, 163, 102, 0.5)` | A soft green glow all around (no shadow offset = a glow). |
+| `.to-csv` | The brain adds this label when the button says "CSV View": black instead of green. |
+
+<br>
+
+### Step 8.3: The brain
+
+**1.** The new pieces. Next to the other buttons (Step 2.1):
+
+```js
+const viewBtn     = document.getElementById('viewBtn');        //  "Spreadsheet View"  /  "CSV View"
+```
+
+With the other notes, near the top (Step 2.2):
+
+```js
+let excelLook      = false;  //  showing the file like EXCEL?  ("Spreadsheet View":  letters on top,  Excel's row numbers)
+```
+
+**2.** Columns: the real ones, and empty ones. Change the `columnCount` note into these two:
+
+```js
+let columnCount = 0;      //  how many columns to lay out  (the real ones,  + the empty ones in the spreadsheet look)
+let dataColumns = 0;      //  how many REAL columns:  the widest row has this many
+```
+
+and add this one right above `columnWidths`:
+
+```js
+let dataWidths    = null; //  how wide each REAL column is, in pixels.         Like:  [96, 64, 150]
+```
+
+In "ALL DONE" (Step 2.15), the widest row now sets `dataColumns`:
+
+```js
+            dataColumns = longest.length;       //  the widest row decides how many columns there are
+```
+
+**3.** Swap `setColumnWidths` (Step 2.8) for this pair. It works out the real columns' widths ONCE, then `layoutColumns` lays them out, plus the empty ones in the spreadsheet look:
+
+```js
+function setColumnWidths(longest) {
+
+    const letter = measureLetterWidth();                //  how many pixels one letter takes up
+
+    dataWidths = new Float64Array(dataColumns);         //  (a "Float64Array" is a list of numbers that's
+                                                        //   super fast and light.  Good for a million of them.)
+
+    for (let col = 0; col < dataColumns; col++) {
+
+        //  Squeeze it between 6 and 40.
+        //  (+2 extra, because some letters like "W" and "$" are wider than normal.)
+        const letters = Math.min(Math.max(longest[col] + 2, 6), 40);
+
+        //  The letters  +16px for the padding on both sides.
+        dataWidths[col] = letters * letter + 16;
+    }
+
+    layoutColumns();
+}
+
+
+//  Lay the columns out,  one after another.
+//  The spreadsheet look:  add EMPTY columns after the real ones until the window is full,
+//  like Excel  (its grid keeps going past your data:  G, H, I ...).
+const EXCEL_WINDOW = 1320;      //  the spreadsheet look's widest window  (the clothes say the same:  #output.excel)
+const EMPTY_COLUMN = 100;       //  how wide each empty column is
+
+function layoutColumns() {
+
+    let dataWidth = 0;
+    for (let col = 0; col < dataColumns; col++) dataWidth += dataWidths[col];
+
+    //  Room left in the spreadsheet look's window  (minus the row numbers,  its 2 edges,  and room for a scrollbar).
+    const room  = excelLook ? EXCEL_WINDOW - NUM_WIDTH - 2 - 18 - dataWidth : 0;
+    const empty = room > 0 ? Math.ceil(room / EMPTY_COLUMN) : 0;
+
+    columnCount  = dataColumns + empty;
+    columnWidths = new Float64Array(columnCount);
+    columnStarts = new Float64Array(columnCount + 1);
+    columnWidths.set(dataWidths);
+
+    //  The empty ones:  100px each,  and the last one takes whatever room is left  (so it fills EXACTLY).
+    for (let col = dataColumns; col < columnCount; col++) {
+        columnWidths[col] = col < columnCount - 1 ? EMPTY_COLUMN : room - EMPTY_COLUMN * (empty - 1);
+    }
+
+    //  Each column starts where the last one started, plus the last one's width.
+    for (let col = 0; col < columnCount; col++) {
+        columnStarts[col + 1] = columnStarts[col] + columnWidths[col];
+    }
+
+    sheetWidth  = columnStarts[columnCount];
+    scrollWidth = Math.min(sheetWidth, MAX_SCROLL_WIDTH);
+
+    builtColStart = 0;                                  //  no columns built yet
+    builtColEnd   = 0;
+    lastColumns   = '';
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `EXCEL_WINDOW - NUM_WIDTH - 2 - 18 - dataWidth` | How much room is left in a 1320px window: minus the row numbers, the 2 edges, room for a scrollbar, and the real columns. |
+| `Math.ceil(room / EMPTY_COLUMN)` | How many 100px columns it takes to fill that (rounding UP). |
+| `room - EMPTY_COLUMN * (empty - 1)` | The last empty column gets whatever is left, so they fill the window EXACTLY: no sideways scrollbar. |
+| `columnWidths.set(dataWidths)` | Copy all the real widths in, in one go. |
+
+> **Why can the empty columns just "be there"?** Every row is built with `cells[col] || ''`: a column past the end of the row is simply empty. So the treadmills, the search, and the snap menu need no changes at all.
+
+**4.** When a file is swapped in ("ALL DONE"), pick the look, and dress the page for it (this replaces `showBadge();`):
+
+```js
+            //  Which look?  A NEW file:  Excel files look like Excel,  CSVs like a CSV.
+            //  Another sheet tab of the same file  (sheet !== null):  keep the look you picked.
+            if (sheet === null) excelLook = excel !== null;
+            applyLook();                        //  the window,  the button,  and the badge  ("XLSX SPREADSHEET")
+```
+
+**5.** The letters row. At the end of `drawHeader` (Step 2.10), after `headerBox.appendChild(row);`:
+
+```js
+    //  The spreadsheet look:  a row of column LETTERS on top  (A, B, C ... Z, AA ...),  like Excel's.
+    //  Copy the names row  (so every box is exactly the same size),  then swap in the letters.
+    if (excelLook) {
+        const letters = row.cloneNode(true);
+        letters.classList.add('letters-row');
+        delete letters.dataset.index;
+        letters.firstChild.textContent = '';            //  the top-left corner:  empty,  like Excel's
+        for (let col = builtColStart; col < builtColEnd; col++) {
+            const cell = letters.children[2 + col - builtColStart];
+            cell.className = 'cell';
+            cell.removeAttribute('title');
+            cell.textContent = columnName(col);
+        }
+        headerBox.prepend(letters);
+    }
+```
+
+| Code | Baby words |
+|---|---|
+| `row.cloneNode(true)` | Make an exact copy of the names row, with everything inside it. So every letter box is EXACTLY as wide as the name under it. |
+| `delete letters.dataset.index` | Take off its "I'm row 0" name tag: it's not a real row. |
+| `columnName(col)` | 0 → `A`, 25 → `Z`, 26 → `AA` (from Part 5). |
+| `headerBox.prepend(letters)` | Put it FIRST in the header, above the names. |
+
+**6.** Excel's row numbers. In `makeRow` (Step 2.5):
+
+```js
+    numCell.textContent = num + rowShift();
+```
+
+In `updatePosition` (the "Rows 1–15" words):
+
+```js
+    //  matches holds row numbers  (0, 1, 2...).  Row numbers start at 1  (the header is 0).  So:  +1.
+    //  (The spreadsheet look:  Excel's numbers,  1 more:  rowShift.)
+    const shift = 1 + rowShift();
+    let message = 'Rows ' + (matches[first] + shift) + '–' + (matches[last] + shift);
+
+    if (word === '') {
+        message += ' of ' + (rowCount + rowShift());
+```
+
+And in `jumpToLine` (Go to row): in the spreadsheet look, you type Excel's number:
+
+```js
+    const target = parseInt(jumpInput.value, 10) - rowShift();     //  the number you typed  (the spreadsheet look:  Excel's number,  1 higher)
+```
+
+**7.** And the switch itself, right after the Expand button's listener:
+
+```js
+let flipping = false;       //  mid-flip?  (Then a second click waits.)
+
+
+//  Dress the page for the look we're in:  the window,  the button,  the badge.
+function applyLook() {
+    outputBox.classList.toggle('excel', excelLook);
+    viewBtn.textContent = excelLook ? 'CSV View' : 'Spreadsheet View';
+    viewBtn.classList.toggle('to-csv', excelLook);     //  the clothes:  Excel green  ->  or  ->  black
+    showBadge();
+}
+
+
+//  Excel's row numbers start 1 higher  (its row 1 is the column names).   "How much to add?"
+function rowShift() {
+    return excelLook ? 1 : 0;
+}
+
+
+//  Switch to the other look,  right now.
+function switchLook() {
+
+    //  Remember where you are.  (The header gets taller or shorter,  and the browser "helpfully"
+    //  nudges the scrollbar to make up for it:  you'd land a row off.  So put it back after.)
+    const expanded = outputBox.classList.contains('expanded');
+    const y = expanded ? 0 : readViewY();
+
+    excelLook = !excelLook;
+    applyLook();
+    layoutColumns();            //  the spreadsheet look:  empty columns fill the wider window  (or take them away)
+    updateColumns(true);        //  new width,  the letters row,  Excel's row numbers:  rebuild the header and the rows
+    sizeWindow();               //  the letters row makes the header 1 row taller
+    if (!expanded) setViewY(y);
+    buildVisibleRows();
+    updatePosition();
+    drawAim();                  //  the snap menu:  Excel addresses  (or not)
+}
+
+
+viewBtn.addEventListener('click', function () {
+
+    if (flipping) return;
+
+    //  Turned off motion?  Just switch.
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        switchLook();
+        return;
+    }
+
+    //  1.  Turn away  ->  2.  edge-on:  switch  ->  3.  turn back.
+    //  ("animationend" also hears the cells' own animations,  like the snap pulse:  only listen to the WINDOW's.)
+    flipping = true;
+    outputBox.classList.add('flip-away');
+
+    outputBox.addEventListener('animationend', function turned(e) {
+        if (e.target !== outputBox) return;
+        outputBox.removeEventListener('animationend', turned);
+
+        switchLook();
+        outputBox.classList.replace('flip-away', 'flip-back');
+
+        outputBox.addEventListener('animationend', function back(e) {
+            if (e.target !== outputBox) return;
+            outputBox.removeEventListener('animationend', back);
+            outputBox.classList.remove('flip-back');
+            flipping = false;
+        });
+    });
+});
+```
+
+| Code | Baby words |
+|---|---|
+| `classList.toggle('excel', excelLook)` | Add the `excel` label when `excelLook` is true, take it off when it's false. |
+| `rowShift()` | `1` in the spreadsheet look (Excel's numbers start 1 higher), `0` in the CSV look. |
+| `const y = ... readViewY()` then `setViewY(y)` | Remember where you are, and put it back after (see below). |
+| `matchMedia('(prefers-reduced-motion: reduce)')` | "Did this person turn off motion on their computer?" Then: no flip, just switch. |
+| `animationend` | "An animation just finished." The brain waits for the turn-away to end before switching. |
+| `e.target !== outputBox` | `animationend` also hears the CELLS' animations (like the snap pulse). Only the window's own counts. |
+| `classList.replace('flip-away', 'flip-back')` | Swap one label for the other, in one go. |
+
+> **Why put the scroll spot back by hand?** The letters row makes the header taller. The browser tries to be helpful ("scroll anchoring") and nudges the scrollbar to make up for it, so you'd land one row off. `setViewY(y)` puts you back exactly.
+
+> **Why does a sheet tab keep the look?** `loadFile(file, sheet)`: a brand-new file comes with `sheet = null`, a sheet tab with its number. Only a NEW file picks its look (`if (sheet === null) ...`).
+
+> **Why doesn't anything above the window move when you flip?** An Excel file has its badge in BOTH looks, and a CSV in neither. If a badge came and went, the search bar and the buttons would jump, and you'd have to chase the button to flip back.
+
+<br>
+
+### ✅ Test it
+
+1. Open a CSV: the CSV look, and a dark green **Spreadsheet View** button with a soft green glow, at the end of the controls row.
+2. Click it: the window turns away, and comes back as a spreadsheet: wider, letters on top (A, B, C ... with empty ones past your data), the names on row 1, the rows numbered from 2. The button is now a black **CSV View**, with white words and a soft white glow, in the SAME spot.
+3. The words under the search bar count Excel's way (`Rows 2–16 of 31`). Go to row **10** lands on Excel's row 10.
+4. Search for something: the snap menu shows Excel addresses (`Row 78 · name (B78)`).
+5. Click **CSV View**: it flips back. You're on the same row, your search is still there.
+6. Open an Excel file: it opens in the spreadsheet look, with the green ƒ on formulas. Flip it: no ƒ (hover a formula cell: the formula is still there). Click another sheet tab: it stays in the CSV look.
+7. Try it in Expand mode, and on a huge, wide file: same flip, just as smooth.
+
+<br>
+
+---
+
+<br>
+
 ## Change stuff yourself
 
 | I want to... | Do this |
@@ -6547,6 +7002,11 @@ function stopDragging() {
 | **Make drag mode reach top speed sooner** | Lower `DRAG_FULL_AT` (how far from the anchor = top speed). |
 | **Give your hand more (or less) resting room** | `DRAG_DEAD_ZONE`: the pixels around the anchor where nothing moves. |
 | **Move Drag mode to the end of the row** | Move the `<button id="dragBtn">` to the end of `#controls`, and flip its `margin` to `0 0 0 28px` (the gap on its left). |
+| **Make the spreadsheet look wider (or narrower)** | Change BOTH: `EXCEL_WINDOW` (brain) and `#output.excel` → `max-width` (clothes). Keep them the same number. |
+| **Make the empty columns wider** | `EMPTY_COLUMN` (100 = about 11 letters). |
+| **Make the flip slower (or faster)** | `#output.flip-away` → `0.2s` and `#output.flip-back` → `0.36s`. Keep the turn-away the shorter one. |
+| **Open Excel files in the CSV look, too** | In "ALL DONE", change `excelLook = excel !== null;` to `excelLook = false;`. |
+| **Change the button colors** | `#viewBtn` → `background` (`#185c37`, the green) and `#viewBtn.to-csv` → `background` (`#020202`, the black). |
 | **Build more/fewer extra rows** | Change `EXTRA_ROWS`. More = safer for super-fast scrolling, but a little more work per scroll. |
 | **Make the glow stronger** | In `.cell:hover`, raise `14px 2px` to something like `20px 6px` |
 | **Let columns get wider** | In `setColumnWidths`, change the `40` |
@@ -6603,6 +7063,14 @@ function stopDragging() {
 | Drag mode fights you, snapping back to rows mid-drag | `snapToRow` is missing `if (dragging) return;` at the top. |
 | Drag mode barely moves on a slow drag | The brain is reading the spot back from the scrollbar every step, instead of keeping its own `dragX` / `dragY` (the scrollbar drops the fractions). |
 | On a phone, dragging scrolls the PAGE instead of the sheet | `#output.drag` is missing `touch-action: none;`. |
+| The flip happens, but nothing changes | `switchLook` is missing `layoutColumns();` or `updateColumns(true);` (without `true`, the built columns look "fine" and nothing is rebuilt). |
+| The window flips away and never comes back | The first `animationend` listener is missing `classList.replace('flip-away', 'flip-back')`, or `@keyframes flip-back` is misspelled. |
+| Flipping sometimes switches twice | The `animationend` listeners are missing `if (e.target !== outputBox) return;`: a cell's snap pulse ending counted as the flip ending. |
+| After flipping, you're one row lower | `switchLook` is missing the `readViewY()` / `setViewY(y)` pair ("scroll anchoring" nudged you). |
+| The letters don't line up with the columns | The letters row isn't a `cloneNode(true)` of the names row, or `drawHeader` builds it before the names row. |
+| The spreadsheet look has a sideways scrollbar on a small file | `layoutColumns` doesn't give the LAST empty column the leftover room (`room - EMPTY_COLUMN * (empty - 1)`), or `EXCEL_WINDOW` doesn't match `#output.excel`'s `max-width`. |
+| Clicking another sheet tab jumps back to the spreadsheet look | "ALL DONE" is missing the `if (sheet === null)` in front of `excelLook = ...`. |
+| Go to row lands 1 row off in the spreadsheet look | `jumpToLine` is missing `- rowShift()`. |
 | Stripes jump around while scrolling | The CSS still uses `.line:nth-child(even)` instead of `.line.zebra`. |
 | The window isn't header + 15 rows | The numbers don't match in both places, or the row height isn't 30. |
 | Picking a file does nothing, and the Console says `startLoading is not defined` | Step 2.14 (the loader) is missing from the brain. |
@@ -6716,6 +7184,8 @@ function stopDragging() {
 - **No typo help.** `Jon` won't find `John`.
 - **Whole rows only.** You can't search just one column.
 - **In Expand mode,** the header doesn't follow you down the page.
+- **Spreadsheet View is a LOOK, not Excel.** No cell picking, no editing, no formulas being worked out. It shows the sheet the way Excel lays it out (letters, row numbers, addresses).
+- **Spreadsheet View can't save a CSV as an `.xlsx`** (or an Excel sheet as a `.csv`). The file is only ever read.
 - **Search can find a match you can't see.** On a wide file, a row might match because of something way off to the side. It shows up in the results, but the yellow is off-screen until you press ▶ in the snap menu (Part 6).
 - **The Details panel lists 200 columns at most** (the ones around the match). A giant cell shows its first 2,000 letters in the list, and its first 20,000 in the focus card.
 - **The focus card shows one cell at a time.** A row with your word in 3 cells: press ▶ to move the card to the next one (`hit 2 of 3`).
