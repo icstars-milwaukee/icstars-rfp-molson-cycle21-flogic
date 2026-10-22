@@ -13,6 +13,7 @@ You're going to build a web page that opens a CSV file and shows it like a **min
 - A **snap menu** ("the aimbot") locks onto search matches and snaps the sheet right to them, even thousands of columns away (Part 6)
 - **Drag mode**: hold on the sheet and drag it in any direction, with a mouse, a trackpad, or a finger (Part 7)
 - **Spreadsheet View ↔ CSV View**: flip any file between the CSV look and Excel's look (letters on top, Excel's row numbers, a wider grid), like turning a card over (Part 8)
+- It opens **SQL dumps (`.sql`)** too: MySQL, PostgreSQL, and SQLite, one table at a time, in a **table look** (each column's type under its name, a PK badge, faint NULLs) in classic database blue. It flips to the CSV look, too (Part 9)
 
 You'll build it **one piece at a time**. After each part there's a **✅ Test it** step, so you always know it's working before you move on.
 
@@ -32,7 +33,7 @@ A web page is usually 3 files working together:
 | `styleI.css` | **the clothes** | How it LOOKS |
 | `scriptI.js` | **the brain** | What it DOES |
 
-(Later, Part 5 adds a 4th file: `xlsxI.js`, **the translator**, which reads Excel files.)
+(Later, Part 5 adds a 4th file: `xlsxI.js`, **the translator**, which reads Excel files. And Part 9 adds a 5th: `sqlI.js`, a second translator, for SQL dumps.)
 
 **We build them in this order:**
 
@@ -3859,6 +3860,10 @@ border-bottom: 1px solid var(--line-soft, rgba(255, 255, 255, 0.45));
     --formula:      #a3212c;                        /*  forest red  (the BRIGHT Excel green's twin)  */
     --formula-glow: rgba(163, 33, 44, 0.6);         /*  ...and its glow  */
 
+    --sql:          #3a7eca;                        /*  SQL blue:  the BRIGHTER one  (#336791 is too dark to see on black)  */
+    --sql-dark:     #265174;
+    --sql-glow:     rgba(58, 126, 202, 0.5);
+
     --line:         rgba(255, 255, 255, 0.09);      /*  the lines:  barely there  */
     --line-soft:    rgba(255, 255, 255, 0.06);
     --line-grid:    rgba(255, 255, 255, 0.06);
@@ -3929,10 +3934,10 @@ And at the very end of `styleI.css`, just above the `[hidden]` rule:
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.24), 0 0 18px 2px rgba(255, 255, 255, 0.2);
 }
 
-/*  The theme names:  light,  so they read on the dark squares.  */
-[data-theme="neo-dark"] .theme-name {
-    color: var(--text);
-    text-shadow: none;
+/*  "Table View"  (a SQL dump):  stays SQL blue  (not the forest red,  which is Excel's).  */
+[data-theme="neo-dark"] #viewBtn.to-table {
+    background: var(--sql-dark);
+    box-shadow: 0 0 12px var(--sql-glow);
 }
 ```
 
@@ -3970,7 +3975,7 @@ Refresh. You should have:
 - [ ] In Neo-Dark, open the Details panel over the sheet: the rows behind it ripple through the glass
 - [ ] Pick **Neo-Neutral** again: everything is back to normal
 
-**The CSV reader is done!** 🎉 Four more parts: Part 5 teaches it to open Excel files, Part 6 adds the snap menu, Part 7 adds drag mode, and Part 8 adds Spreadsheet View.
+**The CSV reader is done!** 🎉 Five more parts: Part 5 teaches it to open Excel files, Part 6 adds the snap menu, Part 7 adds drag mode, Part 8 adds Spreadsheet View, and Part 9 opens SQL dumps.
 
 <br>
 
@@ -4038,7 +4043,7 @@ Make a 4th file next to the others: **`xlsxI.js`**. Then 3 changes in `testI.htm
 **1.** The file picker also shows Excel files (add `,.xlsx` to `accept`):
 
 ```html
-            <input type="file" id="csvFileInput" accept=".csv,.xlsx" tabindex="-1" aria-hidden="true">
+            <input type="file" id="csvFileInput" accept=".csv,.xlsx,.sql" tabindex="-1" aria-hidden="true">
 ```
 
 ...and the badge (and the sheet tabs, Step 5.13) get their spots under the file bar:
@@ -4052,6 +4057,7 @@ Make a 4th file next to the others: **`xlsxI.js`**. Then 3 changes in `testI.htm
 
 ```html
     <script src="xlsxI.js"></script>
+    <script src="sqlI.js"></script>
     <script src="scriptI.js"></script>
 ```
 
@@ -4976,7 +4982,7 @@ function xlsxProblem(problem, name) {
 **3.** Split "done reading" in two. The end of `onload` hands the text to a new `useText`, which does the cutting. (So an Excel file's CSV text can go straight to `useText` too.) Replace `let spot = 0;` near the top of `onload` with:
 
 ```js
-        useText(text);                      //  the text is good.  Cut it up!
+        else useText(text);                 //  the text is good.  Cut it up!
     };
 
 
@@ -4986,26 +4992,31 @@ function xlsxProblem(problem, name) {
         let spot = 0;                       //  where we are in it
 ```
 
+> **Building in order?** Write that first line as just `useText(text);`. The `if (isSql) ...` part (and its `else`) comes in Part 9 (SQL dumps).
+
 ...and at the very end of the cutting part, the `};` after `cutSomeRows();` becomes just `}` (it now closes `useText`, not `onload`).
 
 **4.** When the new file is swapped in ("ALL DONE"), remember its Excel notes, and show the badge:
 
 ```js
             xlsxInfo    = excel;                //  the Excel notes  (null for a CSV)
+            sqlInfo     = sql;                  //  the SQL notes    (null if it's not a SQL dump)
             fileNote    = excel !== null
                 ? (excel.hasDates ? '  ·  dates shown as YYYY-MM-DD  (originals kept)' : '') +
                   (excel.unsolved > 0 ? '  ·  ' + excel.unsolved + ' formula(s) had no saved answer  (shown as formulas)' : '') +
                   (excel.recalc ? '  ·  ⚠ this file asks Excel to recalculate:  formula answers may be out of date' : '')
+                : sql !== null
+                ? (sql.nullCount > 0 ? '  ·  ' + sql.nullCount.toLocaleString() + ' NULL' + (sql.nullCount === 1 ? '' : 's') + ' kept' : '')
                 : encoding === 'windows-1252'
                 ? '  ·  read as Windows-1252  (an older Excel format)'
                 : '';
-            //  Which look?  A NEW file:  Excel files look like Excel,  CSVs like a CSV.
-            //  Another sheet tab of the same file  (sheet !== null):  keep the look you picked.
-            if (sheet === null) excelLook = excel !== null;
-            applyLook();                        //  the window,  the button,  and the badge  ("XLSX SPREADSHEET")
+            //  Which look?  A NEW file:  Excel files look like Excel,  SQL dumps like a database table,  CSVs like a CSV.
+            //  Another sheet tab  (or table)  of the same file  (sheet !== null):  keep the look you picked.
+            if (sheet === null) excelLook = excel !== null || sql !== null;
+            applyLook();                        //  the window,  the button,  and the badge  ("XLSX SPREADSHEET",  "SQL DUMP")
 ```
 
-> **Building in order?** `excelLook` and `applyLook()` arrive in Part 8 (Spreadsheet View). Until then, write just `showBadge();` in place of the `if (sheet === null) ...` and `applyLook();` lines.
+> **Building in order?** `excelLook` and `applyLook()` arrive in Part 8 (Spreadsheet View). Until then, write just `showBadge();` in place of the `if (sheet === null) ...` and `applyLook();` lines. And the `sql` lines (`sqlInfo = sql;`, the NULL note) arrive in Part 9 (SQL dumps): leave them out until then.
 
 **5.** At the very bottom of the listener: check WHAT KIND of file it is (by its first bytes, not its name), then the badge itself:
 
@@ -5066,6 +5077,25 @@ function xlsxProblem(problem, name) {
             couldNotRead(xlsxProblem(problem, file.name));
         });
     }
+
+
+    //  A SQL dump:  sqlI.js turns one of its tables into CSV text.  Then it's cut up like any CSV.
+    function readAsSql(text) {
+
+        setLoadingLabel('Reading the SQL...');
+
+        readSql(text, file, function () { return myLoad === loadId; }, sheet).then(function (result) {
+
+            if (myLoad !== loadId) return;
+            sql = result.info;
+            useText(result.text);
+
+        }, function (problem) {
+
+            if (myLoad !== loadId || problem === SQL_STALE) return;      //  a newer file?  Not a real problem.
+            couldNotRead(sqlProblem(problem, file.name));
+        });
+    }
 }
 
 
@@ -5080,8 +5110,12 @@ function xlsxProblem(problem, name) {
 //
 //  (It shows the first sheet that isn't hidden.  "2 of 3"  =  the 1st one was hidden.)
 //
+//    A SQL dump says so too:
+//
+//        SQL DUMP  ·  MySQL  ·  users  ·  2 of 5 tables
+//
 //    A CSV?  No badge.
-//    (An Excel file keeps its badge in BOTH looks,  so flipping never moves anything above the window.)
+//    (An Excel file or a SQL dump keeps its badge in BOTH looks,  so flipping never moves anything above the window.)
 //
 // ----------------------------------------------------------
 
@@ -5091,6 +5125,13 @@ const sheetTabs = document.getElementById('sheetTabs');
 function showBadge() {
 
     showSheetTabs();
+
+    if (sqlInfo !== null) {
+        fileBadge.textContent = 'SQL DUMP' + (sqlInfo.dialect ? '  ·  ' + sqlInfo.dialect : '') + '  ·  ' + sqlInfo.sheetName +
+            (sqlInfo.sheetCount > 1 ? '  ·  ' + sqlInfo.sheetNumber + ' of ' + sqlInfo.sheetCount + ' tables' : '');
+        fileBadge.hidden = false;
+        return;
+    }
 
     if (xlsxInfo === null) {
         fileBadge.hidden = true;
@@ -5197,14 +5238,14 @@ A formula cell looks just like any other cell (it shows the answer). So it gets 
     line-height: 14px;
     color: var(--formula);
     text-shadow:
-        0 0 2px #fff,                                   /*  a white rim, so it's sharp on the glass  */
+        0 0 2px var(--formula-rim, #fff),                                   /*  a white rim, so it's sharp on the glass  */
         0 0 6px var(--formula-glow);                    /*  the green glow  */
     pointer-events: none;                               /*  (so it doesn't get in the way of hovering the cell)  */
 }
 
 .cell.formula:hover::before {
     text-shadow:                                        /*  mouse on it?  glow brighter  */
-        0 0 2px #fff,
+        0 0 2px var(--formula-rim, #fff),
         0 0 8px var(--formula-glow),
         0 0 14px var(--formula-glow);
 }
@@ -5264,20 +5305,22 @@ function showSheetTabs() {
 
     sheetTabs.textContent = '';                                 //  wipe the old tabs
 
-    if (xlsxInfo === null || xlsxInfo.sheets.length < 2) {      //  a CSV, or just 1 sheet?  No tabs.
+    const book = xlsxInfo !== null ? xlsxInfo : sqlInfo;        //  an Excel file's sheets,  or a SQL dump's tables
+
+    if (book === null || book.sheets.length < 2) {              //  a CSV, or just 1 sheet?  No tabs.
         sheetTabs.hidden = true;
         return;
     }
 
-    xlsxInfo.sheets.forEach(function (sheet, i) {
+    book.sheets.forEach(function (sheet, i) {
 
         const tab     = document.createElement('button');
-        const current = i + 1 === xlsxInfo.sheetNumber;
+        const current = i + 1 === book.sheetNumber;
 
         tab.className = 'sheet-tab';
         tab.setAttribute('role', 'tab');
         tab.setAttribute('aria-selected', current);
-        tab.textContent = sheet.name + (sheet.hidden ? '  (hidden)' : '') + (sheet.chart ? '  (chart)' : '');
+        tab.textContent = sheet.name + (sheet.hidden ? '  (hidden)' : '') + (sheet.chart ? '  (chart)' : '') + (sheet.empty ? '  (empty)' : '');
 
         if (sheet.hidden) tab.classList.add('hidden-sheet');
 
@@ -5285,8 +5328,8 @@ function showSheetTabs() {
             tab.disabled = true;
             tab.title = 'A chart sheet:  it has no rows to show.';
         } else if (!current) {
-            const file = xlsxInfo.file;                         //  (the file, as it is right now)
-            tab.title = 'Open the sheet "' + sheet.name + '"';
+            const file = book.file;                             //  (the file, as it is right now)
+            tab.title = 'Open the ' + (book === sqlInfo ? 'table' : 'sheet') + ' "' + sheet.name + '"';
             tab.addEventListener('click', function () {
                 loadFile(file, i);
             });
@@ -5426,7 +5469,7 @@ The browser's own file picker can't be split in two (its button and its file nam
 
         <div id="fileBar">
             <button id="chooseBtn" type="button">Choose File</button>
-            <input type="file" id="csvFileInput" accept=".csv,.xlsx" tabindex="-1" aria-hidden="true">
+            <input type="file" id="csvFileInput" accept=".csv,.xlsx,.sql" tabindex="-1" aria-hidden="true">
 
             <div id="aimbot" role="group" aria-label="Snap to search matches">
                 <div class="aim-head">
@@ -5532,9 +5575,9 @@ In `styleI.css`, the old Choose File rules (`#csvFileInput`, `#csvFileInput::fil
     margin: 0;
     padding: 0 18px;
     border: none;
-    border-right: 1px solid rgba(255, 255, 255, 0.6);  /*  the white line between the 2 squares  */
+    border-right: 1px solid var(--line, rgba(255, 255, 255, 0.6));  /*  the white line between the 2 squares  */
     border-radius: 0;
-    box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.55);
+    box-shadow: inset 0 0 12px var(--inner-glow-soft, rgba(255, 255, 255, 0.55));
 }
 
 /*  The light square:  the aimbot window  */
@@ -5547,7 +5590,7 @@ In `styleI.css`, the old Choose File rules (`#csvFileInput`, `#csvFileInput::fil
     font-size: 13px;
     color: var(--text);
     background: var(--square-light);
-    box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.8);   /*  glowing white from inside  */
+    box-shadow: inset 0 0 12px var(--inner-glow, rgba(255, 255, 255, 0.8));   /*  glowing white from inside  */
 }
 
 /*  The top line:   ⌖  3 / 128  ·  hit 1 of 2              Row 42 · City  */
@@ -5651,8 +5694,8 @@ In `styleI.css`, the old Choose File rules (`#csvFileInput`, `#csvFileInput::fil
     white-space: pre;
     overflow: hidden;
     text-overflow: ellipsis;
-    border-right: 1px solid rgba(255, 255, 255, 0.5);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+    border-right: 1px solid var(--line-grid, rgba(255, 255, 255, 0.5));
+    border-bottom: 1px solid var(--line-soft, rgba(255, 255, 255, 0.45));
 }
 
 .scope-cell:nth-child(3n) { border-right: none; }           /*  the last column:  no line on the right  */
@@ -5758,7 +5801,7 @@ In `styleI.css`, the old Choose File rules (`#csvFileInput`, `#csvFileInput::fil
     border-radius: 12px;
     box-shadow:
         0 12px 40px rgba(0, 0, 0, 0.18),
-        inset 0 1px 0 rgba(255, 255, 255, 0.9);
+        inset 0 1px 0 var(--shine, rgba(255, 255, 255, 0.9));
     animation: row-drop 0.22s ease-out;
 }
 
@@ -5777,7 +5820,7 @@ In `styleI.css`, the old Choose File rules (`#csvFileInput`, `#csvFileInput::fil
     color: #fff;
     text-shadow: 0 0 8px var(--theme-glow);
     background: var(--square-dark);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+    border-bottom: 1px solid var(--line-soft, rgba(255, 255, 255, 0.45));
 }
 
 #aimRowTitle {
@@ -5801,8 +5844,8 @@ In `styleI.css`, the old Choose File rules (`#csvFileInput`, `#csvFileInput::fil
     flex-direction: column;
     max-height: 200px;
     background: var(--square-light);
-    box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.8);   /*  glowing white from inside  */
-    border-bottom: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow: inset 0 0 12px var(--inner-glow, rgba(255, 255, 255, 0.8));   /*  glowing white from inside  */
+    border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.6));
 }
 
 /*  "NOTES"  (the column's name)  */
@@ -5842,7 +5885,7 @@ In `styleI.css`, the old Choose File rules (`#csvFileInput`, `#csvFileInput::fil
     line-height: 22px;
     color: var(--text-soft);
     background: var(--header-bg);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+    border-bottom: 1px solid var(--line-soft, rgba(255, 255, 255, 0.45));
 }
 
 /*  2.  The list:   [column name]  [its full value],  one line each  (or more, when it wraps).  It scrolls.  */
@@ -5858,7 +5901,7 @@ In `styleI.css`, the old Choose File rules (`#csvFileInput`, `#csvFileInput::fil
 .row-value {
     padding: 4px 10px;
     line-height: 20px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+    border-bottom: 1px solid var(--line-soft, rgba(255, 255, 255, 0.45));
 }
 
 .row-name {
@@ -5867,9 +5910,9 @@ In `styleI.css`, the old Choose File rules (`#csvFileInput`, `#csvFileInput::fil
     text-overflow: ellipsis;
     white-space: nowrap;
     font-weight: 600;
-    color: #333;
+    color: var(--ink, #333);
     background: var(--line-num-bg);                     /*  like the sheet's row-number column  */
-    border-right: 1px solid rgba(255, 255, 255, 0.6);
+    border-right: 1px solid var(--line, rgba(255, 255, 255, 0.6));
 }
 
 .row-value {
@@ -6221,7 +6264,7 @@ function drawAim() {
     //  Where:  the row number  (like the sheet's),  and the column's name.
     //  The spreadsheet look?  Excel's address too, like  K43.   (Excel's row 1 is our header,  so Excel's row  =  ours + 1.)
     aimWhere.textContent = 'Row ' + (row + 1 + rowShift()) + '  ·  ' + (headerCells[col] || 'column ' + (col + 1)) +
-        (excelLook ? '  (' + columnName(col) + (row + 2) + ')' : '');
+        (spreadsheetLook() ? '  (' + columnName(col) + (row + 2) + ')' : '');
 
     //  The scope:  the 3 × 3 cells around the target,  straight from the file  (so you see its real neighbors).
     let target = null;
@@ -6317,7 +6360,7 @@ function drawRow() {
     const full = cellAt(row, col);
 
     aimFocusName.textContent = (headerCells[col] || 'column ' + (col + 1)) +
-        (excelLook ? '  ·  ' + columnName(col) + (row + 2) : '');
+        (spreadsheetLook() ? '  ·  ' + columnName(col) + (row + 2) : tableLook() ? sqlType(col) : '');
 
     aimFocusText.textContent = '';
     paintMatches(aimFocusText, full.length > FOCUS_LETTERS ? full.slice(0, FOCUS_LETTERS) + '…' : full, query);
@@ -6344,7 +6387,7 @@ function drawRow() {
 
         const name = document.createElement('div');
         name.className = 'row-name';
-        name.textContent = (headerCells[c] || 'column ' + (c + 1)) + (excelLook ? '  ·  ' + columnName(c) : '');
+        name.textContent = (headerCells[c] || 'column ' + (c + 1)) + (spreadsheetLook() ? '  ·  ' + columnName(c) : tableLook() ? sqlType(c) : '');
         name.title = name.textContent;
 
         const text  = cellAt(row, c);
@@ -6360,6 +6403,8 @@ function drawRow() {
         } else {
             value.textContent = shown;
         }
+
+        if (sqlInfo !== null && sqlIsNull(sqlInfo, row + 1, c)) value.classList.add('null');   //  a SQL NULL:  the clothes show a faint NULL
 
         list.append(name, value);
     }
@@ -6398,7 +6443,7 @@ searchInput.addEventListener('keydown', function (e) {
 drawAim();                          //  start out "Ready"
 ```
 
-> **Building in order?** A few lines here use `excelLook` and `rowShift()`: they come in Part 8 (Spreadsheet View). Until then, read `excelLook` as `false` and `rowShift()` as `0`.
+> **Building in order?** A few lines here use `spreadsheetLook()`, `tableLook()`, `sqlType()` and `rowShift()`: they come in Part 8 (Spreadsheet View), and `sqlInfo` / `sqlIsNull` in Part 9 (SQL dumps). Until then, read the looks as `false`, `rowShift()` as `0`, and leave out the `sqlInfo` lines.
 
 | Code | Baby words |
 |---|---|
@@ -6977,7 +7022,7 @@ const viewBtn     = document.getElementById('viewBtn');        //  "Spreadsheet 
 With the other notes, near the top (Step 2.2):
 
 ```js
-let excelLook      = false;  //  showing the file like EXCEL?  ("Spreadsheet View":  letters on top,  Excel's row numbers)
+let excelLook      = false;  //  showing the file in its OWN look?  CSV + Excel:  the spreadsheet look.   SQL:  the table look.  (See SPREADSHEET VIEW <-> CSV VIEW.)
 ```
 
 **2.** Columns: the real ones, and empty ones. Change the `columnCount` note into these two:
@@ -7035,7 +7080,7 @@ function layoutColumns() {
     for (let col = 0; col < dataColumns; col++) dataWidth += dataWidths[col];
 
     //  Room left in the spreadsheet look's window  (minus the row numbers,  its 2 edges,  and room for a scrollbar).
-    const room  = excelLook ? EXCEL_WINDOW - NUM_WIDTH - 2 - 18 - dataWidth : 0;
+    const room  = spreadsheetLook() ? EXCEL_WINDOW - NUM_WIDTH - 2 - 18 - dataWidth : 0;
     const empty = room > 0 ? Math.ceil(room / EMPTY_COLUMN) : 0;
 
     columnCount  = dataColumns + empty;
@@ -7075,10 +7120,10 @@ function layoutColumns() {
 **4.** When a file is swapped in ("ALL DONE"), pick the look, and dress the page for it (this replaces `showBadge();`):
 
 ```js
-            //  Which look?  A NEW file:  Excel files look like Excel,  CSVs like a CSV.
-            //  Another sheet tab of the same file  (sheet !== null):  keep the look you picked.
-            if (sheet === null) excelLook = excel !== null;
-            applyLook();                        //  the window,  the button,  and the badge  ("XLSX SPREADSHEET")
+            //  Which look?  A NEW file:  Excel files look like Excel,  SQL dumps like a database table,  CSVs like a CSV.
+            //  Another sheet tab  (or table)  of the same file  (sheet !== null):  keep the look you picked.
+            if (sheet === null) excelLook = excel !== null || sql !== null;
+            applyLook();                        //  the window,  the button,  and the badge  ("XLSX SPREADSHEET",  "SQL DUMP")
 ```
 
 **5.** The letters row. At the end of `drawHeader` (Step 2.10), after `headerBox.appendChild(row);`:
@@ -7086,7 +7131,7 @@ function layoutColumns() {
 ```js
     //  The spreadsheet look:  a row of column LETTERS on top  (A, B, C ... Z, AA ...),  like Excel's.
     //  Copy the names row  (so every box is exactly the same size),  then swap in the letters.
-    if (excelLook) {
+    if (spreadsheetLook()) {
         const letters = row.cloneNode(true);
         letters.classList.add('letters-row');
         delete letters.dataset.index;
@@ -7138,18 +7183,34 @@ And in `jumpToLine` (Go to row): in the spreadsheet look, you type Excel's numbe
 let flipping = false;       //  mid-flip?  (Then a second click waits.)
 
 
+//  Which of the 2 special looks is on?   (excelLook  =  "the file's own look is on".)
+function spreadsheetLook() { return excelLook && sqlInfo === null; }      //  a CSV or an Excel file,  in its own look
+function tableLook()       { return excelLook && sqlInfo !== null; }      //  a SQL dump,  in its own look
+
+
 //  Dress the page for the look we're in:  the window,  the button,  the badge.
 function applyLook() {
-    outputBox.classList.toggle('excel', excelLook);
-    viewBtn.textContent = excelLook ? 'CSV View' : 'Spreadsheet View';
-    viewBtn.classList.toggle('to-csv', excelLook);     //  the clothes:  Excel green  ->  or  ->  black
+    outputBox.classList.toggle('excel', spreadsheetLook());
+    outputBox.classList.toggle('sqltable', tableLook());
+    aimRow.classList.toggle('sqltable', tableLook());                       //  (the Details panel shows NULLs the same way)
+    viewBtn.textContent = excelLook ? 'CSV View' : sqlInfo !== null ? 'Table View' : 'Spreadsheet View';
+    viewBtn.classList.toggle('to-csv', excelLook);                          //  the clothes:  Excel green / SQL blue  ->  or  ->  black
+    viewBtn.classList.toggle('to-table', !excelLook && sqlInfo !== null);
     showBadge();
 }
 
 
 //  Excel's row numbers start 1 higher  (its row 1 is the column names).   "How much to add?"
 function rowShift() {
-    return excelLook ? 1 : 0;
+    return spreadsheetLook() ? 1 : 0;
+}
+
+
+//  A SQL column's type,  for the snap menu's Details:    "  ·  VARCHAR(255)  ·  PK"
+function sqlType(col) {
+    const column = sqlInfo.columns[col];
+    if (column === undefined) return '';
+    return (column.type ? '  ·  ' + column.type : '') + (column.pk ? '  ·  PK' : '');
 }
 
 
@@ -7223,6 +7284,8 @@ viewBtn.addEventListener('click', function () {
 
 > **Why put the scroll spot back by hand?** The letters row makes the header taller. The browser tries to be helpful ("scroll anchoring") and nudges the scrollbar to make up for it, so you'd land one row off. `setViewY(y)` puts you back exactly.
 
+> **What are `spreadsheetLook()` and `tableLook()`?** `excelLook` really means "the file's OWN look is on". For a CSV or an Excel file, that's the spreadsheet look. For a SQL dump (Part 9), it's the TABLE look (types under the names, NULLs, in SQL blue). The 2 little helpers say which one. **Building in order?** `sqlInfo` comes with Part 9's `sqlI.js`: until then, put `let sqlInfo = null;` at the top of the brain (and take it out again in Part 9, or the page will complain it's there twice).
+
 > **Why does a sheet tab keep the look?** `loadFile(file, sheet)`: a brand-new file comes with `sheet = null`, a sheet tab with its number. Only a NEW file picks its look (`if (sheet === null) ...`).
 
 > **Why doesn't anything above the window move when you flip?** An Excel file has its badge in BOTH looks, and a CSV in neither. If a badge came and went, the search bar and the buttons would jump, and you'd have to chase the button to flip back.
@@ -7238,6 +7301,1065 @@ viewBtn.addEventListener('click', function () {
 5. Click **CSV View**: it flips back. You're on the same row, your search is still there.
 6. Open an Excel file: it opens in the spreadsheet look, with the green ƒ on formulas. Flip it: no ƒ (hover a formula cell: the formula is still there). Click another sheet tab: it stays in the CSV look.
 7. Try it in Expand mode, and on a huge, wide file: same flip, just as smooth.
+
+<br>
+
+---
+
+<br>
+
+# PART 9: Reading SQL Dumps (`sqlI.js`) 🛢️
+
+A **database** is where an app keeps its data: users, orders, products. It usually runs on a server (MySQL, PostgreSQL, SQL Server), and programs talk to it all day. You don't "open" it like a file: you connect to it.
+
+A **`.sql` file** is something that comes OUT of a database (or goes INTO one). Mostly two kinds:
+
+```text
+   A DUMP  (a backup,  a copy to move,  "here's the data")          SCRIPTS / QUERIES  (instructions to run)
+
+   CREATE TABLE users (id INT PRIMARY KEY, name TEXT);               SELECT name FROM users WHERE id = 1;
+   INSERT INTO users VALUES (1, 'Ana'), (2, 'Bo');                   UPDATE users SET name = 'Al' WHERE id = 1;
+
+   -> the database, written out as the commands                     -> no data:  just "do this"
+      that would build it again.  THE DATA IS IN HERE.
+```
+
+This part teaches the reader to open **dumps**: each table becomes a tab, its rows become the sheet. Nothing is ever RUN: there's no database to run it on, and running a stranger's commands would be dangerous anyway. The reader only READS the recipe:
+
+- `CREATE TABLE`: the columns (names, TYPES, the PRIMARY KEY)
+- `INSERT INTO` / `REPLACE INTO` / PostgreSQL's `COPY ... FROM stdin`: the rows
+- **everything else** (`SELECT`, `UPDATE`, `DELETE`, `SET`, functions...): skipped
+
+And it opens in the **table look**, like a database tool, in **SQL blue**:
+
+```text
+  ┌───┬────────┬──────────────┬────────────────┐
+  │ 0 │ id     │ name         │ email          │
+  │   │ PK INT │ VARCHAR(100) │ VARCHAR(255)   │   <- the TYPES, and a blue PK badge
+  ├───┼────────┼──────────────┼────────────────┤   <- a thin SQL-blue line
+  │ 1 │ 1      │ Ana García   │ ana@example.com│
+  │ 2 │ 2      │ Bo O'Neil    │ NULL           │   <- NULL ("unknown"), faint, NOT the same as empty
+  └───┴────────┴──────────────┴────────────────┘
+     [customers] [orders] [audit_log (empty)]        <- one tab per table             [CSV View] flips it
+```
+
+This part touches **all 4 files**: a new translator (`sqlI.js`, like `xlsxI.js` in Part 5), plus a little in the skeleton, the brain, and the clothes.
+
+<br>
+
+### Step 9.1: The skeleton
+
+**1.** Plug in the translator, right after the Excel one (before the brain):
+
+```html
+    <script src="sqlI.js"></script>
+```
+
+**2.** Let the file picker show `.sql` files too:
+
+```html
+            <input type="file" id="csvFileInput" accept=".csv,.xlsx,.sql" tabindex="-1" aria-hidden="true">
+```
+
+<br>
+
+### Step 9.2: The translator (`sqlI.js`)
+
+Make a new file, `sqlI.js`, next to the others. Start with the notes it keeps about the open dump:
+
+```js
+let sqlInfo = null;
+
+const SQL_STALE = new Error('stale');       //  "a newer file was picked:  forget this one"  (not a real problem)
+```
+
+**Every database writes dumps a little differently.** The translator knows all of these:
+
+| What | MySQL | PostgreSQL | SQLite |
+|---|---|---|---|
+| A name | `` `users` `` | `"users"`, `public.users` | `"users"` |
+| A quote inside a word | `'it\'s'` | `'it''s'`, `E'it\'s'` | `'it''s'` |
+| Comments | `-- ...`, `# ...`, `/* ... */` | `-- ...`, `/* ... */` | `-- ...` |
+| The rows | `INSERT INTO ... VALUES (..),(..)` | `COPY ... FROM stdin;` + lines, `\.` | `INSERT INTO ... VALUES(..);` |
+| Nothing | `NULL` | `\N` (in COPY) | `NULL` |
+| The primary key | in `CREATE TABLE` | `ALTER TABLE ... ADD ... PRIMARY KEY` at the end | in `CREATE TABLE` |
+
+**The reader itself.** It walks the dump one command at a time, in BITES (like everything else), so a big dump never freezes the page:
+
+```js
+async function readSql(text, file, isCurrent, choice) {
+
+    const t = text;
+    const n = t.length;
+    let p = 0;                              //  where we are in the dump
+
+
+    //  Big jobs are done in BITES  (like everything else),  so the page never freezes.
+    let stopAt = performance.now() + CHUNK_TIME;
+
+    async function breathe() {
+        if (performance.now() < stopAt) return;
+        setLoadingLabel('Reading the SQL...  ' + Math.floor(100 * p / Math.max(n, 1)) + '%');
+        await new Promise(function (go) { nextBite(go); });
+        if (!isCurrent()) throw SQL_STALE;
+        stopAt = performance.now() + CHUNK_TIME;
+    }
+
+
+    //  WHICH DATABASE wrote it?  (Look at the first 64 KB.)
+    //  It matters for one thing:  in MySQL,  a backslash inside a word is special  ('it\'s'),
+    //  everywhere else it's just a backslash  (they write  'it''s').
+    const head    = t.slice(0, 65536);
+    const mysql   = /MySQL dump|MariaDB dump|\bENGINE\s*=|`/i.test(head);
+    const dialect = mysql ? 'MySQL'
+        : /PostgreSQL database dump|^COPY\s|\bsearch_path\b|::/im.test(head) ? 'PostgreSQL'
+        : /\bPRAGMA\b|BEGIN TRANSACTION/i.test(head) ? 'SQLite'
+        : '';
+
+
+    //  ---- THE TABLES,  in the order they first show up ----
+    const tables = [];
+    const byKey  = new Map();
+
+    function tableNamed(q) {
+        let table = byKey.get(q.key);
+        if (table === undefined) {
+            table = { name: q.name, columns: null, hasData: false };
+            byKey.set(q.key, table);
+            tables.push(table);
+            if (choice !== null && tables.length - 1 === choice) chosen = table;
+        }
+        return table;
+    }
+
+    let chosen = null;                      //  the table we're turning into rows
+
+    //  The first table that has rows wins  (when no table was asked for).
+    function wanted(table) {
+        if (chosen === null && choice === null) chosen = table;
+        return table === chosen;
+    }
+
+
+    //  ---- THE ROWS of the chosen table:  CSV lines,  and the NULLs ----
+    const lines = [];
+    let nullRows  = new Uint32Array(1024);
+    let nullCols  = new Uint16Array(1024);
+    let nullCount = 0;
+
+    function markNull(row, col) {
+        if (nullCount === nullRows.length) {                //  full?  Twice as big,  copy the old ones in.
+            const r = new Uint32Array(nullRows.length * 2); r.set(nullRows); nullRows = r;
+            const c = new Uint16Array(nullCols.length * 2); c.set(nullCols); nullCols = c;
+        }
+        nullRows[nullCount] = row;
+        nullCols[nullCount] = col;
+        nullCount++;
+    }
+
+    //  One row:  "values"  in the order they came,  "where"  says which column each one goes in.
+    function addRow(table, values, where) {
+
+        if (table.columns === null) table.columns = [];
+        const columns = table.columns;
+
+        const row = new Array(columns.length).fill('');
+        const num = lines.length + 1;                       //  this row's number  (counting from 1)
+
+        for (let i = 0; i < values.length; i++) {
+
+            let col = where === null ? i : where[i];
+
+            //  More values than columns?  (No CREATE TABLE for it.)  Make up a name.
+            while (col >= columns.length) {
+                columns.push({ name: 'column ' + (columns.length + 1), type: '', pk: false });
+                row.push('');
+            }
+
+            if (values[i] === null) markNull(num, col);
+            else row[col] = values[i];
+        }
+
+        lines.push(row.map(sqlCell).join(','));
+    }
+
+
+    // ---------------------------------------------------------- the reading tools
+
+    //  Skip spaces,  line breaks,  and comments:    -- to the end of the line,   # too  (MySQL),   /* ... */
+    function skipSpace() {
+        while (p < n) {
+            const c = t.charCodeAt(p);
+            if (c === 32 || c === 9 || c === 10 || c === 13 || c === 12 || c === 0xFEFF) { p++; continue; }
+            if ((c === 45 && t.charCodeAt(p + 1) === 45) || (c === 35 && mysql)) {
+                const end = t.indexOf('\n', p);
+                p = end === -1 ? n : end + 1;
+                continue;
+            }
+            if (c === 47 && t.charCodeAt(p + 1) === 42) {
+                const end = t.indexOf('*/', p + 2);
+                p = end === -1 ? n : end + 2;
+                continue;
+            }
+            return;
+        }
+    }
+
+    //  A plain word  (a command,  or a name without quotes):   letters, digits,  _  $
+    function word() {
+        const start = p;
+        while (p < n) {
+            const c = t.charCodeAt(p);
+            if ((c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95 || c === 36 || c > 127) p++;
+            else break;
+        }
+        return t.slice(start, p);
+    }
+
+    //  The next word,  if it's THIS one  (any capitals).   It is?  Step past it.   It isn't?  Stay put.
+    function keyword(k) {
+        skipSpace();
+        const start = p;
+        if (word().toUpperCase() === k) return true;
+        p = start;
+        return false;
+    }
+
+    //  A name:   users    "users"    `users`    [users]      (a doubled quote inside  =  a real quote)
+    function identifier() {
+        skipSpace();
+        const c = t[p];
+        if (c === '"' || c === '`') {
+            let out = '';
+            p++;
+            while (p < n) {
+                const end = t.indexOf(c, p);
+                if (end === -1) { out += t.slice(p); p = n; break; }
+                out += t.slice(p, end);
+                p = end + 1;
+                if (t[p] === c) { out += c; p++; continue; }
+                break;
+            }
+            return out;
+        }
+        if (c === '[') {
+            const end = t.indexOf(']', p);
+            const out = t.slice(p + 1, end === -1 ? n : end);
+            p = end === -1 ? n : end + 1;
+            return out;
+        }
+        return word();
+    }
+
+    //  A table's name,  maybe with its "schema" in front:    public.users    mydb.`users`
+    //  (The usual schemas  public,  dbo,  main  are left off:  they're just "the normal place".)
+    function tableName() {
+        const parts = [identifier()];
+        while (true) {
+            skipSpace();
+            if (t[p] !== '.') break;
+            p++;
+            parts.push(identifier());
+        }
+        const name   = parts[parts.length - 1];
+        const schema = parts.length > 1 && !/^(public|dbo|main)$/i.test(parts[parts.length - 2]) ? parts[parts.length - 2] + '.' : '';
+        return { name: schema + name, key: (schema + name).toLowerCase() };
+    }
+
+    //  A word in quotes:   'it''s'    (and in MySQL,  or with  E'...'  in PostgreSQL:   'it\'s'   'line one\nline two')
+    const quoteOrSlash = /['\\]/g;
+
+    function readString(backslashes) {
+        p++;                                //  past the opening  '
+        let out = '';
+        while (true) {
+            let q;
+            if (backslashes) { quoteOrSlash.lastIndex = p; const m = quoteOrSlash.exec(t); q = m === null ? -1 : m.index; }
+            else q = t.indexOf("'", p);
+
+            if (q === -1) { out += t.slice(p); p = n; return out; }        //  never closed:  take the rest
+
+            out += t.slice(p, q);
+            if (t.charCodeAt(q) === 39) {                                   //  a quote:
+                if (t.charCodeAt(q + 1) === 39) { out += "'"; p = q + 2; continue; }    //  ''  =  a real quote
+                p = q + 1;
+                return out;                                                 //  the end of the word
+            }
+            p = q + 1;                                                      //  a backslash:  what's next?
+            out += backslashLetter();
+        }
+    }
+
+    //  After a backslash:   \n  =  a line break,   \t  =  a tab,   \'  =  a quote ...
+    function backslashLetter() {
+        const c = t[p++];
+        switch (c) {
+            case 'n': return '\n';
+            case 'r': return '\r';
+            case 't': return '\t';
+            case 'b': return '\b';
+            case 'f': return '\f';
+            case 'Z': return '\x1A';
+            case '0': return '';                                            //  a "nothing" letter:  leave it out
+            case 'x': { const hex = /^[0-9a-fA-F]{1,2}/.exec(t.slice(p, p + 2)); if (hex) { p += hex[0].length; return String.fromCharCode(parseInt(hex[0], 16)); } return 'x'; }
+            case 'u': { const hex = /^[0-9a-fA-F]{4}/.exec(t.slice(p, p + 4)); if (hex) { p += 4; return String.fromCharCode(parseInt(hex[0], 16)); } return 'u'; }
+            case '%': return '\\%';                                         //  (MySQL keeps these two as they are)
+            case '_': return '\\_';
+            case undefined: return '';
+            default:  return c;                                             //  \'  \"  \\  ->  just the letter
+        }
+    }
+
+    //  Skip a quoted word without keeping it.
+    function skipString(backslashes) { readString(backslashes); }
+
+    //  PostgreSQL's  $$ ... $$  or  $tag$ ... $tag$  (used for function bodies:  they can have  ;  inside).
+    const dollarTag = /\$([A-Za-z_][A-Za-z0-9_]*)?\$/y;
+
+    function readDollar() {
+        dollarTag.lastIndex = p;
+        const m = dollarTag.exec(t);
+        if (m === null) { p++; return null; }
+        const end = t.indexOf(m[0], p + m[0].length);
+        const out = t.slice(p + m[0].length, end === -1 ? n : end);
+        p = end === -1 ? n : end + m[0].length;
+        return out;
+    }
+
+    //  Skip to just past the end of this command  (the next  ;  that's not inside quotes or a comment).
+    const special = /[;'"`$\-\/#]/g;
+
+    function skipCommand() {
+        while (p < n) {
+            special.lastIndex = p;
+            const m = special.exec(t);
+            if (m === null) { p = n; return; }
+            p = m.index;
+            const c = t[p];
+            if (c === ';') { p++; return; }
+            if (c === "'") { skipString(mysql || /[eE]/.test(t[p - 1] || '') && !/\w/.test(t[p - 2] || '')); continue; }
+            if (c === '"' || c === '`') { identifier(); continue; }
+            if (c === '$') { readDollar(); continue; }
+            if (c === '-' && t[p + 1] === '-') { skipSpace(); continue; }
+            if (c === '/' && t[p + 1] === '*') { skipSpace(); continue; }
+            if (c === '#' && mysql) { skipSpace(); continue; }
+            p++;
+        }
+    }
+
+    //  Everything inside  ( ... ),  as text.   p starts ON the  (  and ends just past the matching  ).
+    const parenStuff = /[()'"`]/g;
+
+    function insideParens() {
+        const start = ++p;
+        let depth = 1;
+        while (p < n) {
+            parenStuff.lastIndex = p;
+            const m = parenStuff.exec(t);
+            if (m === null) { p = n; break; }
+            p = m.index;
+            const c = t[p];
+            if (c === '(') { depth++; p++; continue; }
+            if (c === ')') { if (--depth === 0) { p++; return t.slice(start, p - 1); } p++; continue; }
+            if (c === "'") { skipString(mysql); continue; }
+            identifier();
+        }
+        return t.slice(start, p);
+    }
+
+
+    // ---------------------------------------------------------- the commands
+
+    //  CREATE TABLE  name  ( column TYPE ..., ...,  PRIMARY KEY (...) )
+    function createCommand() {
+
+        while (keyword('OR') || keyword('REPLACE') || keyword('TEMPORARY') || keyword('TEMP') ||
+               keyword('UNLOGGED') || keyword('GLOBAL') || keyword('LOCAL')) { /* (just skip these) */ }
+
+        if (!keyword('TABLE')) { skipCommand(); return; }          //  CREATE INDEX,  CREATE VIEW ...:  not a table
+        if (keyword('IF')) { keyword('NOT'); keyword('EXISTS'); }
+
+        const table = tableNamed(tableName());
+        skipSpace();
+
+        if (t[p] === '(' && table.columns === null) table.columns = readColumns(insideParens());
+        skipCommand();
+    }
+
+    //  ALTER TABLE  name  ADD  CONSTRAINT x  PRIMARY KEY (id)
+    //  (PostgreSQL's dumps name the primary key HERE,  at the very end,  not in CREATE TABLE.)
+    function alterCommand() {
+
+        if (!keyword('TABLE')) { skipCommand(); return; }
+        if (keyword('IF')) keyword('EXISTS');
+        keyword('ONLY');
+
+        const name  = tableName();
+        const start = p;
+        skipCommand();
+
+        const table = byKey.get(name.key);
+        const pk    = /\bPRIMARY\s+KEY\s*\(([^)]*)\)/i.exec(t.slice(start, p));
+        if (table === undefined || table.columns === null || pk === null) return;
+
+        pk[1].split(',').forEach(function (key) {
+            const column = table.columns.find(function (c) { return c.name.toLowerCase() === unquote(key.trim()).toLowerCase(); });
+            if (column !== undefined) column.pk = true;
+        });
+    }
+
+    //  INSERT INTO  name  (columns)  VALUES  ( ... ),  ( ... );      (also  REPLACE INTO,   INSERT OR IGNORE INTO ...)
+    async function insertCommand() {
+
+        while (keyword('LOW_PRIORITY') || keyword('DELAYED') || keyword('HIGH_PRIORITY') || keyword('IGNORE') ||
+               keyword('OR') || keyword('REPLACE') || keyword('ROLLBACK') || keyword('ABORT') || keyword('FAIL')) { /* (skip) */ }
+        keyword('INTO');
+
+        const name = tableName();
+
+        //  Which columns,  in which order?
+        skipSpace();
+        let named = null;
+        if (t[p] === '(') {
+            const save = p;
+            p++;
+            if (keyword('SELECT') || keyword('WITH')) { p = save; skipCommand(); return; }     //  INSERT ... (SELECT ...):  no values to read
+            p = save;
+            named = splitTopLevel(insideParens()).map(unquote);
+        }
+
+        if (!keyword('VALUES') && !keyword('VALUE')) { skipCommand(); return; }               //  INSERT ... SELECT,  DEFAULT VALUES:  no rows here
+
+        const table = tableNamed(name);                             //  (only NOW:  an  INSERT ... SELECT  isn't about a table in this file)
+        table.hasData = true;
+        if (!wanted(table)) { skipCommand(); return; }             //  another table's rows:  skip them,  fast
+
+        const where = named === null ? null : columnSpots(table, named);
+
+        //  The rows:    ( ... ) , ( ... ) , ( ... )
+        let count = 0;
+        while (true) {
+            skipSpace();
+            if (t[p] !== '(') break;
+            p++;
+            addRow(table, rowValues(), where);
+            skipSpace();
+            if (t[p] !== ',') break;
+            p++;
+            if (++count % 256 === 0) await breathe();              //  (one INSERT can hold 100,000 rows)
+        }
+
+        skipCommand();                                              //  the rest:  ON DUPLICATE KEY ...,   ;
+    }
+
+    //  COPY  name  (columns)  FROM stdin;    then the rows,  one per line,  TAB between them,  until   \.
+    async function copyCommand() {
+
+        keyword('ONLY');
+        const table = tableNamed(tableName());
+
+        skipSpace();
+        const named = t[p] === '(' ? splitTopLevel(insideParens()).map(unquote) : null;
+
+        if (!keyword('FROM') || !keyword('STDIN')) { skipCommand(); return; }                  //  COPY ... FROM a file / TO ...
+        skipCommand();                                              //  to the end of the  COPY ... ;  line
+
+        //  The rows start on the next line,  and end at a line that's just   \.
+        const nl    = t.indexOf('\n', p);
+        const start = nl === -1 ? n : nl + 1;
+        let end = t.startsWith('\\.', start) ? start : t.indexOf('\n\\.', start - 1);
+        if (end === -1) end = n;
+        else if (end !== start) end++;                              //  (the  \n  before  \.  belongs to the last row)
+
+        p = t.indexOf('\n', end);
+        p = p === -1 ? n : p + 1;                                   //  carry on after the  \.  line
+
+        if (end <= start) return;                                   //  no rows
+        table.hasData = true;
+        if (!wanted(table)) return;                                 //  another table:  skip its rows
+
+        const where = named === null ? null : columnSpots(table, named);
+
+        let at = start, count = 0;
+        while (at < end) {
+            let lineEnd = t.indexOf('\n', at);
+            if (lineEnd === -1 || lineEnd > end) lineEnd = end;
+            let line = t.slice(at, lineEnd);
+            if (line.charCodeAt(line.length - 1) === 13) line = line.slice(0, -1);    //  a Windows  \r
+            at = lineEnd + 1;
+            if (line === '' && at >= end) break;
+
+            addRow(table, line.split('\t').map(copyValue), where);
+            if (++count % 2048 === 0) await breathe();
+        }
+    }
+
+
+    // ---------------------------------------------------------- the values
+
+    //  One row's values:    1, 'Ana', NULL, 'x'::text, now()      (p is just past the  (  ,  ends past the  ) )
+    function rowValues() {
+        const values = [];
+        while (p < n) {
+            values.push(oneValue());
+            skipSpace();
+            const c = t[p];
+            if (c === ',') { p++; continue; }
+            if (c === ')') { p++; break; }
+            skipExpression();                                       //  something we didn't expect:  skip to the next  ,  or  )
+            if (t[p] === ',') { p++; continue; }
+            p++;
+            break;
+        }
+        return values;
+    }
+
+    const prefixedString = /([A-Za-z_][A-Za-z0-9_]*)'/y;
+    const plainToken     = /[^,()\s]+/y;
+
+    function oneValue() {
+        skipSpace();
+        const c = t[p];
+        let value;
+
+        if (c === "'") {
+            value = readString(mysql);
+        } else if (c === '$') {
+            value = readDollar() || '';
+        } else {
+            prefixedString.lastIndex = p;
+            const pre = prefixedString.exec(t);
+
+            if (pre !== null) {                                     //  E'...'   X'...'   N'...'   _utf8mb4'...'
+                const kind = pre[1].toUpperCase();
+                p += pre[1].length;
+                value = readString(mysql || kind === 'E');
+                if (kind === 'X') value = '0x' + value.toUpperCase();          //  bytes,  written in hex
+                if (kind === 'B') value = 'b' + value;                          //  bits
+            } else if (/[-+0-9.]/.test(c)) {
+                plainToken.lastIndex = p;                           //  a number:   42   -3.5   1e9   0x1F
+                const m = plainToken.exec(t);
+                value = m === null ? '' : m[0];
+                p += value.length;
+            } else {
+                const start = p;
+                const w = word();
+                const upper = w.toUpperCase();
+                skipSpace();
+                if (upper === 'NULL' && (t[p] === ',' || t[p] === ')')) return null;
+                if ((upper === 'TRUE' || upper === 'FALSE') && (t[p] === ',' || t[p] === ')')) return w.toLowerCase();
+                if (upper === 'DEFAULT' && (t[p] === ',' || t[p] === ')')) return '';
+                if (w[0] === '_' && t[p] === "'") return readString(mysql);     //  _binary 'abc'   (MySQL:  "these letters are in this alphabet")
+                p = start;
+                value = skipExpression().trim();                    //  now(),  CAST(...),  anything else:  keep it as written
+            }
+        }
+
+        //  'x'::text   'x'::character varying   (PostgreSQL's "treat it as this type"):  skip the type
+        skipSpace();
+        while (t[p] === ':' && t[p + 1] === ':') {
+            p += 2;
+            while (p < n) {
+                skipSpace();
+                const ch = t[p];
+                if (ch === ',' || ch === ')' || ch === ';' || ch === undefined) break;
+                if (ch === '(') { insideParens(); continue; }
+                if (ch === '[') { const end = t.indexOf(']', p); p = end === -1 ? n : end + 1; continue; }
+                if (ch === '"') { identifier(); continue; }
+                if (word() === '') p++;
+            }
+        }
+
+        return value;
+    }
+
+    //  Skip (and return) an expression,  up to the next  ,  or  )  that's not inside its own parentheses.
+    function skipExpression() {
+        const start = p;
+        let depth = 0;
+        while (p < n) {
+            const c = t[p];
+            if (c === "'") { skipString(mysql); continue; }
+            if (c === '"' || c === '`') { identifier(); continue; }
+            if (c === '(') depth++;
+            else if (c === ')') { if (depth === 0) break; depth--; }
+            else if (c === ',' && depth === 0) break;
+            p++;
+        }
+        return t.slice(start, p);
+    }
+
+    //  One value of a COPY row:    \N  =  NULL,    \t  \n  \\  ...  =  a tab, a line break, a backslash ...
+    function copyValue(raw) {
+        if (raw === '\\N') return null;
+        if (raw.indexOf('\\') === -1) return raw;
+        return raw.replace(/\\(?:([0-7]{1,3})|x([0-9a-fA-F]{1,2})|(.))/g, function (all, oct, hex, ch) {
+            if (oct !== undefined) return String.fromCharCode(parseInt(oct, 8));
+            if (hex !== undefined) return String.fromCharCode(parseInt(hex, 16));
+            return { b: '\b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v' }[ch] || ch;
+        });
+    }
+
+
+    // ---------------------------------------------------------- GO:  one command at a time
+
+    while (p < n) {
+
+        skipSpace();
+        if (p >= n) break;
+
+        const c = t[p];
+        if (c === ';') { p++; continue; }
+
+        if (c === '\\') {                                           //  psql's own commands  (\connect ...):  one line,  no  ;
+            const end = t.indexOf('\n', p);
+            p = end === -1 ? n : end + 1;
+            continue;
+        }
+
+        const command = word().toUpperCase();
+
+        if (command === 'CREATE') createCommand();
+        else if (command === 'ALTER') alterCommand();
+        else if (command === 'INSERT' || command === 'REPLACE') await insertCommand();
+        else if (command === 'COPY') await copyCommand();
+        else if (command === '') { p++; skipCommand(); }            //  starts with something odd:  skip the whole command
+        else skipCommand();                                         //  SET,  LOCK TABLES,  ALTER,  BEGIN ...:  not rows
+
+        await breathe();
+    }
+
+
+    if (tables.length === 0) throw new Error('notables');
+    if (chosen === null) chosen = tables[0];                        //  no table has rows:  show the first one  (just its columns)
+
+
+    //  The CSV text:   the column names on top,  then every row.
+    const columns = chosen.columns || [];
+    const header  = columns.map(function (column) { return sqlCell(column.name); }).join(',');
+
+    return {
+        text: header + '\n' + lines.join('\n'),
+        info: {
+            file:        file,
+            dialect:     dialect,
+            sheetName:   chosen.name,
+            sheetNumber: tables.indexOf(chosen) + 1,
+            sheetCount:  tables.length,
+            sheets:      tables.map(function (table) { return { name: table.name, hidden: false, chart: false, empty: !table.hasData }; }),
+            columns:     columns,
+            rows:        lines.length,
+            nullCount:   nullCount,
+            nullRows:    nullRows.subarray(0, nullCount),
+            nullCols:    nullCols.subarray(0, nullCount)
+        }
+    };
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `t.charCodeAt(p)` | The letter at spot `p`, as a number (45 = `-`, 47 = `/`, 39 = `'`). Comparing numbers is fast. |
+| `/['\\]/g` with `.lastIndex = p` | "Jump to the next quote or backslash, starting at `p`." Way faster than looking at every letter. |
+| `skipCommand()` | Jump past the end of a command: the next `;` that's NOT inside quotes, a comment, or `$$ ... $$`. |
+| `$$ ... $$`, `$body$ ... $body$` | PostgreSQL's way to write a big piece of text (like a function) that has `;` inside. |
+| `wanted(table)` | "Is this the table we're showing?" Rows of the OTHER tables are skipped with `skipCommand`, without reading them. |
+| `addRow(...)` | One row: put each value in its column, write down the NULLs, turn it into one line of CSV. |
+| `markNull(row, col)` | Write down "this cell is NULL" in 2 lists that grow as needed (a row list, a column list). |
+| `Uint32Array` / `Uint16Array` | Lists of plain numbers: 4 / 2 bytes each. A million NULLs = 6 MB. |
+| `\N` (COPY) | PostgreSQL's NULL. |
+| `\.` (COPY) | "The rows end here." |
+| `'x'::text` | PostgreSQL's "treat it as this type". The value is `x`; the `::text` is skipped. |
+| `_binary 'abc'`, `X'4D'`, `E'...'` | A word with a label in front: the alphabet it's in, bytes in hex, or "backslashes count here". |
+
+> **Why does MySQL need its own rule?** In MySQL, a backslash inside quotes is SPECIAL (`'it\'s'`). Everywhere else it's just a backslash (they write `'it''s'`). Read a MySQL dump the other way, and `'it\'s'` would end at the `\'`. So the first 64 KB decide: MySQL's fingerprints (`MySQL dump`, `ENGINE=`, backtick names) turn the backslash rule on.
+
+> **Why skip the other tables' rows, and not keep them all?** A dump can be hundreds of MB. Keeping every table would need all of it in memory at once. Instead, a table's tab reads the dump again and keeps just that table (like Excel's sheets in Part 5). Skipping is cheap: no values are cut up, it only looks for the end of each command.
+
+> **Why NULL isn't just empty:** `''` means "we know it's nothing". `NULL` means "we don't know". A CSV can't tell them apart, so the NULLs are written down on the side, and the table look shows them.
+
+**Reading the columns of a `CREATE TABLE`:**
+
+```js
+const NOT_A_COLUMN = /^(CONSTRAINT|PRIMARY|UNIQUE|KEY|INDEX|FOREIGN|CHECK|FULLTEXT|SPATIAL|EXCLUDE|LIKE|PERIOD)\b/i;
+const COLUMN_RULES = /\s(NOT\s+NULL|NULL|DEFAULT|PRIMARY\s+KEY|REFERENCES|UNIQUE|CHECK|COLLATE|AUTO_INCREMENT|AUTOINCREMENT|COMMENT|CONSTRAINT|GENERATED|ON\s+UPDATE|CHARACTER\s+SET|CHARSET|IDENTITY|KEY|AS)\b/i;
+
+function readColumns(body) {
+
+    const columns = [];
+    const keys    = new Set();              //  the primary key's columns  (from a  PRIMARY KEY (...)  line)
+
+    for (const item of splitTopLevel(body)) {
+
+        const text = item.trim();
+        if (text === '') continue;
+
+        if (!/^["`\[]/.test(text) && NOT_A_COLUMN.test(text)) {
+            const pk = /PRIMARY\s+KEY\s*(?:[\w"`]+\s*)?\(([^)]*)\)/i.exec(text);
+            if (pk !== null) {
+                pk[1].split(',').forEach(function (name) { keys.add(unquote(name.trim().replace(/\s*\(\d+\)\s*$/, '')).toLowerCase()); });
+            }
+            continue;
+        }
+
+        //  The name  (maybe in quotes),  then the rest.
+        const named = /^("(?:[^"]|"")*"|`(?:[^`]|``)*`|\[[^\]]*\]|[^\s(]+)/.exec(text);
+        if (named === null) continue;                       //  (nothing we can read as a name:  skip it)
+        const name  = unquote(named[0]);
+        const rest  = ' ' + text.slice(named[0].length);
+
+        //  Find the first rule,  but only OUTSIDE quotes and parentheses:   enum('NULL','x')  is still part of the type.
+        const blank = blankInside(rest);
+        const rule  = COLUMN_RULES.exec(blank);
+        const cut   = rule === null ? rest.length : rule.index;
+
+        columns.push({
+            name: name,
+            type: upperOutsideQuotes(rest.slice(0, cut).trim().replace(/\s+/g, ' ')),
+            pk:   /\bPRIMARY\s+KEY\b/i.test(blank.slice(cut))
+        });
+    }
+
+    columns.forEach(function (column) { if (keys.has(column.name.toLowerCase())) column.pk = true; });
+    return columns;
+}
+
+
+//  Which column does each named value go in?    (A name we haven't seen?  It's a new column.)
+function columnSpots(table, names) {
+    if (table.columns === null) table.columns = [];
+    return names.map(function (name) {
+        let spot = table.columns.findIndex(function (column) { return column.name.toLowerCase() === name.toLowerCase(); });
+        if (spot === -1) {
+            table.columns.push({ name: name, type: '', pk: false });
+            spot = table.columns.length - 1;
+        }
+        return spot;
+    });
+}
+```
+
+> **How is the TYPE found?** It's everything after the name, up to the first "rule" (`NOT NULL`, `DEFAULT`, `PRIMARY KEY`...). But `ENUM('active','NULL')` has the word NULL inside! So first, `blankInside` turns everything inside quotes and parentheses into spaces (same length), and the rules are only searched in what's left.
+
+**The little helpers:**
+
+```js
+function splitTopLevel(text) {
+    const parts = [];
+    let depth = 0, start = 0, quote = '';
+    for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (quote !== '') {
+            if (c === quote) { if (text[i + 1] === quote) i++; else quote = ''; }
+            else if (c === '\\' && quote === "'") i++;
+            continue;
+        }
+        if (c === "'" || c === '"' || c === '`') quote = c;
+        else if (c === '(') depth++;
+        else if (c === ')') depth--;
+        else if (c === ',' && depth === 0) { parts.push(text.slice(start, i)); start = i + 1; }
+    }
+    parts.push(text.slice(start));
+    return parts;
+}
+
+//  The same text,  with everything inside quotes and parentheses turned into spaces  (the same length).
+//  So a search for words only finds them OUTSIDE.
+function blankInside(text) {
+    let out = '', depth = 0, quote = '';
+    for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (quote !== '') { out += ' '; if (c === quote) quote = ''; continue; }
+        if (c === "'" || c === '"' || c === '`') { quote = c; out += ' '; continue; }
+        if (c === '(') { depth++; out += ' '; continue; }
+        if (c === ')') { depth--; out += ' '; continue; }
+        out += depth > 0 ? ' ' : c;
+    }
+    return out;
+}
+
+//  INT(11) unsigned  ->  INT(11) UNSIGNED      (but  enum('a','b')  keeps its words as they are)
+function upperOutsideQuotes(text) {
+    return text.replace(/('(?:[^']|'')*')|([^']+)/g, function (all, quoted, plain) { return quoted !== undefined ? quoted : plain.toUpperCase(); });
+}
+
+//  "name"  `name`  [name]  ->  name
+function unquote(name) {
+    const s = name.trim();
+    if (/^".*"$/.test(s)) return s.slice(1, -1).replace(/""/g, '"');
+    if (/^`.*`$/.test(s)) return s.slice(1, -1).replace(/``/g, '`');
+    if (/^\[.*\]$/.test(s)) return s.slice(1, -1);
+    return s;
+}
+
+//  One cell,  written the CSV way:  quotes around it if it has a comma,  a quote,  or a line break inside.
+//  (And a "nothing" letter  \0  becomes  ␀,  so you can see it,  and it can't confuse the search.)
+function sqlCell(value) {
+    if (value === '') return '';
+    if (value.indexOf('\0') !== -1) value = value.replace(/\0/g, '␀');
+    if (/[",\r\n]/.test(value)) return '"' + value.replace(/"/g, '""') + '"';
+    return value;
+}
+
+
+//  Is this cell NULL?   (row counts from 1,  like the row numbers;  col from 0)
+//  The NULLs were written down in row order,  so:  "guess the number"  for the row,  then look at its few NULLs.
+function sqlIsNull(info, row, col) {
+    const rows = info.nullRows;
+    let low = 0, high = info.nullCount;
+    while (low < high) {
+        const middle = (low + high) >> 1;
+        if (rows[middle] < row) low = middle + 1; else high = middle;
+    }
+    for (let i = low; i < info.nullCount && rows[i] === row; i++) {
+        if (info.nullCols[i] === col) return true;
+    }
+    return false;
+}
+
+
+//  Turn a problem into words for you.
+function sqlProblem(problem, name) {
+    if (problem && problem.message === 'notables') {
+        return 'Couldn\'t open "' + name + '": there are no tables in it  (no CREATE TABLE,  INSERT INTO,  or COPY).';
+    }
+    if (problem instanceof RangeError) return 'Couldn\'t open "' + name + '": it\'s too big for the browser.';
+    return 'Couldn\'t open "' + name + '": something in this SQL file wasn\'t what we expected.';
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `splitTopLevel` | Cut at commas, but not inside quotes or parentheses: `a INT, b ENUM('x','y')` = 2 parts. |
+| `sqlCell` | One value, CSV style: quotes around it if it has a comma, a quote, or a line break. |
+| `sqlIsNull(info, row, col)` | "Guess the number" to find the row in the NULL list, then check its few NULLs. Fast, even with millions. |
+
+<br>
+
+### Step 9.3: The brain
+
+**1.** In the file listener's `loadFile`, next to `let excel = null;`:
+
+```js
+    let sql          = null;                //  a SQL dump?  Its notes  (from sqlI.js).   Otherwise  null.
+    const isSql      = /\.sql$/i.test(file.name);      //  a SQL dump is text too:  it's told apart by its name
+```
+
+**2.** In `reader.onload`, instead of just `useText(text);`:
+
+```js
+        if (isSql) readAsSql(text);         //  a SQL dump:  sqlI.js turns one table into CSV text first
+        else useText(text);                 //  the text is good.  Cut it up!
+```
+
+**3.** Right after `readAsExcel` (at the end of `loadFile`):
+
+```js
+    //  A SQL dump:  sqlI.js turns one of its tables into CSV text.  Then it's cut up like any CSV.
+    function readAsSql(text) {
+
+        setLoadingLabel('Reading the SQL...');
+
+        readSql(text, file, function () { return myLoad === loadId; }, sheet).then(function (result) {
+
+            if (myLoad !== loadId) return;
+            sql = result.info;
+            useText(result.text);
+
+        }, function (problem) {
+
+            if (myLoad !== loadId || problem === SQL_STALE) return;      //  a newer file?  Not a real problem.
+            couldNotRead(sqlProblem(problem, file.name));
+        });
+    }
+```
+
+**4.** In "ALL DONE", the dump's types count toward the column widths (so `VARCHAR(255)` fits), right before `setColumnWidths(longest);`:
+
+```js
+            //  A SQL dump:  the column TYPES count too,  so the table look can show them  (VARCHAR(255),  DECIMAL(10,2) ...).
+            //  (They're in smaller letters:  about 0.8 of a normal letter each.   PK  =  about 4 more.)
+            if (sql !== null) {
+                sql.columns.forEach(function (column, col) {
+                    const wide = Math.ceil(column.type.length * 0.8) + (column.pk ? 4 : 0);
+                    if (col < longest.length && wide > longest[col]) longest[col] = wide;
+                });
+            }
+```
+
+(The other "ALL DONE" lines for SQL, `sqlInfo = sql;`, the NULL note, and the look, are already in Part 5's and Part 8's code.)
+
+**5.** The badge (at the top of `showBadge`, after `showSheetTabs();`):
+
+```js
+    if (sqlInfo !== null) {
+        fileBadge.textContent = 'SQL DUMP' + (sqlInfo.dialect ? '  ·  ' + sqlInfo.dialect : '') + '  ·  ' + sqlInfo.sheetName +
+            (sqlInfo.sheetCount > 1 ? '  ·  ' + sqlInfo.sheetNumber + ' of ' + sqlInfo.sheetCount + ' tables' : '');
+        fileBadge.hidden = false;
+        return;
+    }
+```
+
+**6.** The types row, at the end of `drawHeader` (after the letters row):
+
+```js
+    //  The table look  (a SQL dump):  a row of column TYPES under the names  (INT,  VARCHAR(255) ...),
+    //  and a  PK  badge on the primary key.   (Copied from the names row too,  so the boxes line up.)
+    if (tableLook()) {
+        const types = row.cloneNode(true);
+        types.classList.add('types-row');
+        delete types.dataset.index;
+        types.firstChild.textContent = '';
+        for (let col = builtColStart; col < builtColEnd; col++) {
+            const cell   = types.children[2 + col - builtColStart];
+            const column = sqlInfo.columns[col];
+            cell.className = 'cell';
+            cell.removeAttribute('title');
+            cell.textContent = column === undefined ? '' : column.type;
+            if (column !== undefined && column.pk) cell.classList.add('pk');
+            if (cell.textContent.length > 14) cell.title = cell.textContent;     //  a long type?  hover to read it all
+        }
+        headerBox.appendChild(types);
+    }
+```
+
+**7.** NULLs. In `makeRow`, right before `paintMatches(cell, shown, query);`:
+
+```js
+        //  A SQL NULL  (not just empty:  "unknown")?  Mark it:  the table look shows a faint  NULL.
+        //  (Only an EMPTY cell can be NULL,  so the others don't even look it up.)
+        if (sqlInfo !== null && text === '' && sqlIsNull(sqlInfo, num, col)) cell.classList.add('null');
+```
+
+And in `drawRow` (the Details panel), right before `list.append(name, value);`:
+
+```js
+        if (sqlInfo !== null && sqlIsNull(sqlInfo, row + 1, c)) value.classList.add('null');   //  a SQL NULL:  the clothes show a faint NULL
+```
+
+| Code | Baby words |
+|---|---|
+| `/\.sql$/i.test(file.name)` | "Does the name end with `.sql`?" (any capitals). A dump is text, like a CSV, so its NAME tells them apart. |
+| `text === ''` (in `makeRow`) | Only an EMPTY cell can be NULL, so the others don't even look it up. |
+| `row.cloneNode(true)` (the types row) | Copy the names row, so every type box is exactly as wide as the name above it. |
+
+> **Why are tables tabs?** It's the same bar as Excel's sheets (Part 5): `showSheetTabs` reads from `xlsxInfo` OR `sqlInfo`, whichever is open. A table with no rows says `(empty)`, and you can still click it to see its columns.
+
+<br>
+
+### Step 9.4: The clothes: SQL blue
+
+**1.** The colors. In the Neo-Neutral block (after `--formula-glow`):
+
+```css
+    --sql:          #336791;                        /*  SQL blue  (the classic database blue):  the table look's lines and PK badge  */
+    --sql-dark:     #265174;                        /*  ...a shade darker:  the "Table View" button  */
+    --sql-glow:     rgba(58, 126, 202, 0.5);        /*  ...and its glow  (#3a7eca,  brighter)  */
+```
+
+In the Neo-Dark block (after its `--formula-glow`):
+
+```css
+    --sql:          #3a7eca;                        /*  SQL blue:  the BRIGHTER one  (#336791 is too dark to see on black)  */
+    --sql-dark:     #265174;
+    --sql-glow:     rgba(58, 126, 202, 0.5);
+```
+
+> **Where does the blue come from?** `#336791` is the classic database blue (PostgreSQL's). Its 2 partners keep exactly the same relationship as Excel's 3 greens: a darker one for the button (like `#185c37`), a brighter one for the glow (like `#21a366`). On Neo-Dark, the marks use the brighter blue, because the dark one disappears on black (the same reason the ƒ uses the bright forest red).
+
+**2.** The types row, the PK badge, and the faint NULL (right after the letters row rules):
+
+```css
+/*  The table look  (a SQL dump):  the row of column TYPES  (INT,  VARCHAR(255) ...),  under the names.
+    Small,  quiet words,  and a thin line of SQL blue underneath.  */
+.types-row .cell {
+    font-size: 11px;
+    letter-spacing: 0.03em;
+    color: var(--text-soft);
+}
+
+.types-row,
+.types-row:hover {
+    border-bottom-color: var(--sql);
+}
+
+/*  The primary key:  a little SQL-blue  PK  badge,  in front of its type.  */
+.types-row .cell.pk::before {
+    content: "PK";
+    display: inline-block;
+    margin-right: 6px;
+    padding: 0 5px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    letter-spacing: 0.04em;
+    color: #fff;
+    background: var(--sql);
+}
+
+/*  A NULL  ("unknown",  not just empty):  a faint,  slanted  NULL.   Only in the table look
+    (the CSV look shows it like a CSV would:  empty).   The Details panel shows it the same way.  */
+#output.sqltable .cell.null::before,
+#aimRow.sqltable .row-value.null::before {
+    content: "NULL";
+    font-size: 12px;
+    font-style: italic;
+    color: var(--text-soft);
+    opacity: 0.6;
+}
+```
+
+**3.** The "Table View" button (after the `#viewBtn.to-csv:hover` rule):
+
+```css
+/*  "Table View"  (a SQL dump,  in the CSV look):  SQL blue,  a shade darker,  solid,  with a soft blue glow.  */
+#viewBtn.to-table {
+    background: var(--sql-dark);
+    box-shadow:
+        inset 0 0 10px rgba(255, 255, 255, 0.12),
+        0 0 12px var(--sql-glow);
+}
+
+#viewBtn.to-table:hover {
+    box-shadow:
+        inset 0 0 10px rgba(255, 255, 255, 0.16),
+        0 0 18px 2px var(--sql-glow);
+}
+```
+
+And in the Neo-Dark extras at the end (so the forest red, Excel's color, doesn't take over):
+
+```css
+/*  "Table View"  (a SQL dump):  stays SQL blue  (not the forest red,  which is Excel's).  */
+[data-theme="neo-dark"] #viewBtn.to-table {
+    background: var(--sql-dark);
+    box-shadow: 0 0 12px var(--sql-glow);
+}
+
+[data-theme="neo-dark"] #viewBtn.to-table:hover {
+    box-shadow: 0 0 18px 2px var(--sql-glow);
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `.types-row .cell.pk::before { content: "PK" }` | A fake piece in front of the type: a tiny blue badge that says PK. |
+| `#output.sqltable .cell.null::before { content: "NULL" }` | The cell itself is empty; the clothes draw a faint, slanted NULL in it. Only in the table look: the CSV look shows it empty, like a CSV would. |
+
+<br>
+
+### ✅ Test it
+
+The test dumps are in `Castle Claude/small-files/sql/`:
+
+1. Open `mysql.sql`: a **SQL DUMP · MySQL · customers · 1 of 3 tables** badge, 3 tabs (`audit_log (empty)`), the table look: types under the names, a blue **PK** on `id`, a blue line under the types.
+2. Row 2's email is a faint **NULL**. Row 4's note is EMPTY (no NULL), and its status is the WORD `NULL` (plain text): 3 different things, shown 3 ways.
+3. Click **CSV View**: the card flips, the types go away, NULLs show empty. The button is now a SQL-blue **Table View**.
+4. Click the `orders` tab: its own columns and rows. Search for a word, open **Details ▾**: every column with its type.
+5. Open `postgres.sql`: 3 tables (a function with `;` inside didn't confuse it), the `id` has a PK (from the `ALTER TABLE` at the end), and the TAB / line break / backslash values look right.
+6. Open `queries.sql`: just the 1 real table. The queries were skipped.
+7. Switch to Neo-Dark: the blue gets brighter, the button stays SQL blue.
 
 <br>
 
@@ -7261,7 +8383,10 @@ viewBtn.addEventListener('click', function () {
 | **Make the spreadsheet look wider (or narrower)** | Change BOTH: `EXCEL_WINDOW` (brain) and `#output.excel` → `max-width` (clothes). Keep them the same number. |
 | **Make the empty columns wider** | `EMPTY_COLUMN` (100 = about 11 letters). |
 | **Make the flip slower (or faster)** | `#output.flip-away` → `0.2s` and `#output.flip-back` → `0.36s`. Keep the turn-away the shorter one. |
-| **Open Excel files in the CSV look, too** | In "ALL DONE", change `excelLook = excel !== null;` to `excelLook = false;`. |
+| **Open Excel files in the CSV look, too** | In "ALL DONE", change `excelLook = excel !== null \|\| sql !== null;` to `excelLook = sql !== null;` (or to `false`, for SQL dumps too). |
+| **Change the SQL blue** | `--sql` (the table look's lines and the PK badge), `--sql-dark` and `--sql-glow` (the Table View button), in each theme block. |
+| **Open SQL dumps in the CSV look, too** | In "ALL DONE", change `excelLook = excel !== null \|\| sql !== null;` to `excelLook = excel !== null;`. |
+| **Give long SQL types more (or less) room** | In "ALL DONE", the `0.8` (room per letter of the type) and the `4` (room for the PK badge). |
 | **Change the button colors** | `#viewBtn` → `background` (`#185c37`, the green) and `#viewBtn.to-csv` → `background` (`#020202`, the black). |
 | **Build more/fewer extra rows** | Change `EXTRA_ROWS`. More = safer for super-fast scrolling, but a little more work per scroll. |
 | **Make the glow stronger** | In `.cell:hover`, raise `14px 2px` to something like `20px 6px` |
@@ -7334,6 +8459,12 @@ viewBtn.addEventListener('click', function () {
 | The window isn't header + 15 rows | The numbers don't match in both places, or the row height isn't 30. |
 | Picking a file does nothing, and the Console says `startLoading is not defined` | Step 2.14 (the loader) is missing from the brain. |
 | Picking an Excel file does nothing, and the Console says `readXlsx is not defined` | `xlsxI.js` isn't plugged in, or it's AFTER `scriptI.js`. It has to come first (Step 5.1). |
+| Picking a `.sql` file does nothing, and the Console says `readSql is not defined` | `sqlI.js` isn't plugged in, or it's AFTER `scriptI.js`. It has to come first (Step 9.1). |
+| The page won't load at all, and the Console says `sqlInfo has already been declared` | The `let sqlInfo = null;` from Part 8's "Building in order?" note is still in the brain. Now `sqlI.js` has it: take it out of the brain. |
+| A SQL dump opens, but there's no PK badge | The key was set later, with `ALTER TABLE ... PRIMARY KEY` (PostgreSQL does this). `alterCommand` has to be in the main loop. Or the `.types-row .cell.pk::before` rule is missing. |
+| Empty cells and NULL cells look the same | `makeRow` is missing the `sqlIsNull` line, or the `#output.sqltable .cell.null::before` rule is. (In the CSV look they're SUPPOSED to look the same: CSV has no NULL.) |
+| MySQL words show `\n` or `\'` instead of a line break or a quote | `readString` isn't being told `backslashes` for MySQL, so the backslashes are kept as letters. |
+| A dump says "there are no tables in it", but it has some | Its tables are only made by `INSERT ... SELECT` (rows copied from another table). There are no rows written IN the file to show. |
 | Picking ANY file crashes with `Cannot set properties of null (setting 'hidden')` | The `<div id="fileBadge" hidden></div>` is missing from the skeleton (Step 5.1). |
 | An Excel file shows garbage letters (`PK...`) | The first-bytes check (Step 5.10 #5) is missing, so it got read as text. |
 | Excel dates show as numbers like `43586` | The date style wasn't found: check `styles` in `readXlsx` (it reads `<cellXfs>`), and that `formatKind` returns a kind for the format. |
@@ -7437,6 +8568,11 @@ viewBtn.addEventListener('click', function () {
 - **Excel: formulas aren't recalculated.** It shows the last answer Excel saved, with a green **ƒ** (hover for the formula). No saved answer? It shows the formula itself. The page warns when a file asks to be recalculated.
 - **Excel: no old `.xls` files, no password-protected files.** You get a message saying what to do (Save As `.xlsx` or CSV).
 - **Excel: no merged cells, colors, or fonts.** Just the values.
+
+- **SQL: one table at a time.** Click a table tab to see another one. A table with no rows still gets a tab, marked "(empty)".
+- **SQL: queries are skipped, never run.** `SELECT`, `UPDATE`, `DELETE`, views and the rest are read past. Only the rows written IN the file (`INSERT ... VALUES` and `COPY`) are shown, so an `UPDATE` later in the dump doesn't change them.
+- **SQL: text dumps only.** A real database file (like SQLite's `.db`) is a different, binary thing, and it can't open those. And it only treats a file as SQL if its name ends in `.sql`.
+- **SQL: search can't find NULL.** A NULL cell is empty inside. The faint "NULL" is just drawn on top.
 
 - **It expects a header.** The first line is always treated as the column names.
 - **A quote that never closes still changes its OWN row.** The brain catches a stray `"` and keeps every other row safe, but in that one row, everything after the `"` lands in one cell. (`Bob,5'10",tall` → `[Bob] [5'10,tall]`.) The real fix is in the file.

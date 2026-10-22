@@ -131,7 +131,7 @@
             which sits out of sight.
 
             type="file"          ->  makes it a "pick a file" picker
-            accept=".csv,.xlsx"  ->  only shows CSV and Excel files when you pick
+            accept=".csv,.xlsx,.sql"  ->  only shows CSV,  Excel,  and SQL files when you pick
 
             The AIMBOT window  (the snap menu):  search for something,
             and it locks onto a match.  ◀ ▶  snap the sheet right to it.
@@ -149,7 +149,7 @@
 
         <div id="fileBar">
             <button id="chooseBtn" type="button">Choose File</button>
-            <input type="file" id="csvFileInput" accept=".csv,.xlsx" tabindex="-1" aria-hidden="true">
+            <input type="file" id="csvFileInput" accept=".csv,.xlsx,.sql" tabindex="-1" aria-hidden="true">
 
             <div id="aimbot" role="group" aria-label="Snap to search matches">
                 <div class="aim-head">
@@ -298,11 +298,12 @@
             The brain needs all the pieces above to exist first,
             so it can find them.
 
-            The Excel translator  (xlsxI.js)  goes right before it,
+            The 2 translators  (xlsxI.js for Excel,  sqlI.js for SQL dumps)  go right before it,
             because the brain uses it.
     -->
 
     <script src="xlsxI.js"></script>
+    <script src="sqlI.js"></script>
     <script src="scriptI.js"></script>
 
 

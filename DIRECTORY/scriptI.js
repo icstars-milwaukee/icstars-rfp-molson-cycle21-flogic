@@ -249,7 +249,7 @@ let glideLast   = 0;      //  the time of the glide's last step  (0 = it's just 
 let loadId         = 0;      //  counts every file you pick.  If you pick a NEW file while an old one
                              //  is still loading, the old one sees the number changed, and quits.
 let fileNote       = '';     //  a note added to the "Rows 1–15" words about how the file was read  (or nothing)
-let excelLook      = false;  //  showing the file like EXCEL?  ("Spreadsheet View":  letters on top,  Excel's row numbers)
+let excelLook      = false;  //  showing the file in its OWN look?  CSV + Excel:  the spreadsheet look.   SQL:  the table look.  (See SPREADSHEET VIEW <-> CSV VIEW.)
 let buildingSearch = false;  //  is the brain getting the search ready right now?
 let loaderTimer    = null;   //  the "wait a moment before showing the loader" timer
 
@@ -361,6 +361,8 @@ function loadFile(file, sheet) {
     let encoding     = 'utf-8';             //  which rulebook to read it with  (decided just before reading, at the bottom)
     let checkedWhole = false;               //  did the safety net already check the WHOLE file?
     let excel        = null;                //  an Excel file?  Its notes  (from xlsxI.js).   A CSV?  null.
+    let sql          = null;                //  a SQL dump?  Its notes  (from sqlI.js).   Otherwise  null.
+    const isSql      = /\.sql$/i.test(file.name);      //  a SQL dump is text too:  it's told apart by its name
 
 
     //  While reading:  fill the first 20% of the pie.
@@ -431,7 +433,8 @@ function loadFile(file, sheet) {
             return;
         }
 
-        useText(text);                      //  the text is good.  Cut it up!
+        if (isSql) readAsSql(text);         //  a SQL dump:  sqlI.js turns one table into CSV text first
+        else useText(text);                 //  the text is good.  Cut it up!
     };
 
 
@@ -578,17 +581,20 @@ function loadFile(file, sheet) {
             rowCache    = new Map();            //  new file  =  forget the old file's rows
             cacheCells  = 0;
             xlsxInfo    = excel;                //  the Excel notes  (null for a CSV)
+            sqlInfo     = sql;                  //  the SQL notes    (null if it's not a SQL dump)
             fileNote    = excel !== null
                 ? (excel.hasDates ? '  ·  dates shown as YYYY-MM-DD  (originals kept)' : '') +
                   (excel.unsolved > 0 ? '  ·  ' + excel.unsolved + ' formula(s) had no saved answer  (shown as formulas)' : '') +
                   (excel.recalc ? '  ·  ⚠ this file asks Excel to recalculate:  formula answers may be out of date' : '')
+                : sql !== null
+                ? (sql.nullCount > 0 ? '  ·  ' + sql.nullCount.toLocaleString() + ' NULL' + (sql.nullCount === 1 ? '' : 's') + ' kept' : '')
                 : encoding === 'windows-1252'
                 ? '  ·  read as Windows-1252  (an older Excel format)'
                 : '';
-            //  Which look?  A NEW file:  Excel files look like Excel,  CSVs like a CSV.
-            //  Another sheet tab of the same file  (sheet !== null):  keep the look you picked.
-            if (sheet === null) excelLook = excel !== null;
-            applyLook();                        //  the window,  the button,  and the badge  ("XLSX SPREADSHEET")
+            //  Which look?  A NEW file:  Excel files look like Excel,  SQL dumps like a database table,  CSVs like a CSV.
+            //  Another sheet tab  (or table)  of the same file  (sheet !== null):  keep the look you picked.
+            if (sheet === null) excelLook = excel !== null || sql !== null;
+            applyLook();                        //  the window,  the button,  and the badge  ("XLSX SPREADSHEET",  "SQL DUMP")
             readingName.textContent = file.name;
             readingFrom.hidden = false;         //  "Reading from...  sales.csv"
             dataColumns = longest.length;       //  the widest row decides how many columns there are
@@ -601,6 +607,15 @@ function loadFile(file, sheet) {
             searchInput.value = '';
             searchInput.disabled = false;       //  turn the search bar ON
             jumpInput.value = '';
+
+            //  A SQL dump:  the column TYPES count too,  so the table look can show them  (VARCHAR(255),  DECIMAL(10,2) ...).
+            //  (They're in smaller letters:  about 0.8 of a normal letter each.   PK  =  about 4 more.)
+            if (sql !== null) {
+                sql.columns.forEach(function (column, col) {
+                    const wide = Math.ceil(column.type.length * 0.8) + (column.pk ? 4 : 0);
+                    if (col < longest.length && wide > longest[col]) longest[col] = wide;
+                });
+            }
 
             setColumnWidths(longest);           //  decide how wide each column is
             drawHeader(true);                   //  draw line 0  (and measure how tall a row is)
@@ -668,6 +683,25 @@ function loadFile(file, sheet) {
             couldNotRead(xlsxProblem(problem, file.name));
         });
     }
+
+
+    //  A SQL dump:  sqlI.js turns one of its tables into CSV text.  Then it's cut up like any CSV.
+    function readAsSql(text) {
+
+        setLoadingLabel('Reading the SQL...');
+
+        readSql(text, file, function () { return myLoad === loadId; }, sheet).then(function (result) {
+
+            if (myLoad !== loadId) return;
+            sql = result.info;
+            useText(result.text);
+
+        }, function (problem) {
+
+            if (myLoad !== loadId || problem === SQL_STALE) return;      //  a newer file?  Not a real problem.
+            couldNotRead(sqlProblem(problem, file.name));
+        });
+    }
 }
 
 
@@ -682,8 +716,12 @@ function loadFile(file, sheet) {
 //
 //  (It shows the first sheet that isn't hidden.  "2 of 3"  =  the 1st one was hidden.)
 //
+//    A SQL dump says so too:
+//
+//        SQL DUMP  ·  MySQL  ·  users  ·  2 of 5 tables
+//
 //    A CSV?  No badge.
-//    (An Excel file keeps its badge in BOTH looks,  so flipping never moves anything above the window.)
+//    (An Excel file or a SQL dump keeps its badge in BOTH looks,  so flipping never moves anything above the window.)
 //
 // ----------------------------------------------------------
 
@@ -693,6 +731,13 @@ const sheetTabs = document.getElementById('sheetTabs');
 function showBadge() {
 
     showSheetTabs();
+
+    if (sqlInfo !== null) {
+        fileBadge.textContent = 'SQL DUMP' + (sqlInfo.dialect ? '  ·  ' + sqlInfo.dialect : '') + '  ·  ' + sqlInfo.sheetName +
+            (sqlInfo.sheetCount > 1 ? '  ·  ' + sqlInfo.sheetNumber + ' of ' + sqlInfo.sheetCount + ' tables' : '');
+        fileBadge.hidden = false;
+        return;
+    }
 
     if (xlsxInfo === null) {
         fileBadge.hidden = true;
@@ -723,26 +768,30 @@ function showBadge() {
 //    Click one  ->  the SAME file loads again, showing that sheet.
 //    (It goes through loadFile like any file, so the loader, search, everything just works.)
 //
+//    A SQL dump's TABLES are tabs too  (the same bar):   [▓users] [▒orders] [▒logs  (empty)]
+//
 // ----------------------------------------------------------
 
 function showSheetTabs() {
 
     sheetTabs.textContent = '';                                 //  wipe the old tabs
 
-    if (xlsxInfo === null || xlsxInfo.sheets.length < 2) {      //  a CSV, or just 1 sheet?  No tabs.
+    const book = xlsxInfo !== null ? xlsxInfo : sqlInfo;        //  an Excel file's sheets,  or a SQL dump's tables
+
+    if (book === null || book.sheets.length < 2) {              //  a CSV, or just 1 sheet?  No tabs.
         sheetTabs.hidden = true;
         return;
     }
 
-    xlsxInfo.sheets.forEach(function (sheet, i) {
+    book.sheets.forEach(function (sheet, i) {
 
         const tab     = document.createElement('button');
-        const current = i + 1 === xlsxInfo.sheetNumber;
+        const current = i + 1 === book.sheetNumber;
 
         tab.className = 'sheet-tab';
         tab.setAttribute('role', 'tab');
         tab.setAttribute('aria-selected', current);
-        tab.textContent = sheet.name + (sheet.hidden ? '  (hidden)' : '') + (sheet.chart ? '  (chart)' : '');
+        tab.textContent = sheet.name + (sheet.hidden ? '  (hidden)' : '') + (sheet.chart ? '  (chart)' : '') + (sheet.empty ? '  (empty)' : '');
 
         if (sheet.hidden) tab.classList.add('hidden-sheet');
 
@@ -750,8 +799,8 @@ function showSheetTabs() {
             tab.disabled = true;
             tab.title = 'A chart sheet:  it has no rows to show.';
         } else if (!current) {
-            const file = xlsxInfo.file;                         //  (the file, as it is right now)
-            tab.title = 'Open the sheet "' + sheet.name + '"';
+            const file = book.file;                             //  (the file, as it is right now)
+            tab.title = 'Open the ' + (book === sqlInfo ? 'table' : 'sheet') + ' "' + sheet.name + '"';
             tab.addEventListener('click', function () {
                 loadFile(file, i);
             });
@@ -1037,7 +1086,7 @@ function layoutColumns() {
     for (let col = 0; col < dataColumns; col++) dataWidth += dataWidths[col];
 
     //  Room left in the spreadsheet look's window  (minus the row numbers,  its 2 edges,  and room for a scrollbar).
-    const room  = excelLook ? EXCEL_WINDOW - NUM_WIDTH - 2 - 18 - dataWidth : 0;
+    const room  = spreadsheetLook() ? EXCEL_WINDOW - NUM_WIDTH - 2 - 18 - dataWidth : 0;
     const empty = room > 0 ? Math.ceil(room / EMPTY_COLUMN) : 0;
 
     columnCount  = dataColumns + empty;
@@ -1308,7 +1357,7 @@ function drawHeader(measure) {
 
     //  The spreadsheet look:  a row of column LETTERS on top  (A, B, C ... Z, AA ...),  like Excel's.
     //  Copy the names row  (so every box is exactly the same size),  then swap in the letters.
-    if (excelLook) {
+    if (spreadsheetLook()) {
         const letters = row.cloneNode(true);
         letters.classList.add('letters-row');
         delete letters.dataset.index;
@@ -1320,6 +1369,25 @@ function drawHeader(measure) {
             cell.textContent = columnName(col);
         }
         headerBox.prepend(letters);
+    }
+
+    //  The table look  (a SQL dump):  a row of column TYPES under the names  (INT,  VARCHAR(255) ...),
+    //  and a  PK  badge on the primary key.   (Copied from the names row too,  so the boxes line up.)
+    if (tableLook()) {
+        const types = row.cloneNode(true);
+        types.classList.add('types-row');
+        delete types.dataset.index;
+        types.firstChild.textContent = '';
+        for (let col = builtColStart; col < builtColEnd; col++) {
+            const cell   = types.children[2 + col - builtColStart];
+            const column = sqlInfo.columns[col];
+            cell.className = 'cell';
+            cell.removeAttribute('title');
+            cell.textContent = column === undefined ? '' : column.type;
+            if (column !== undefined && column.pk) cell.classList.add('pk');
+            if (cell.textContent.length > 14) cell.title = cell.textContent;     //  a long type?  hover to read it all
+        }
+        headerBox.appendChild(types);
     }
 
     //  The header is the same height as every row.
@@ -1600,7 +1668,7 @@ function drawAim() {
     //  Where:  the row number  (like the sheet's),  and the column's name.
     //  The spreadsheet look?  Excel's address too, like  K43.   (Excel's row 1 is our header,  so Excel's row  =  ours + 1.)
     aimWhere.textContent = 'Row ' + (row + 1 + rowShift()) + '  ·  ' + (headerCells[col] || 'column ' + (col + 1)) +
-        (excelLook ? '  (' + columnName(col) + (row + 2) + ')' : '');
+        (spreadsheetLook() ? '  (' + columnName(col) + (row + 2) + ')' : '');
 
     //  The scope:  the 3 × 3 cells around the target,  straight from the file  (so you see its real neighbors).
     let target = null;
@@ -1696,7 +1764,7 @@ function drawRow() {
     const full = cellAt(row, col);
 
     aimFocusName.textContent = (headerCells[col] || 'column ' + (col + 1)) +
-        (excelLook ? '  ·  ' + columnName(col) + (row + 2) : '');
+        (spreadsheetLook() ? '  ·  ' + columnName(col) + (row + 2) : tableLook() ? sqlType(col) : '');
 
     aimFocusText.textContent = '';
     paintMatches(aimFocusText, full.length > FOCUS_LETTERS ? full.slice(0, FOCUS_LETTERS) + '…' : full, query);
@@ -1723,7 +1791,7 @@ function drawRow() {
 
         const name = document.createElement('div');
         name.className = 'row-name';
-        name.textContent = (headerCells[c] || 'column ' + (c + 1)) + (excelLook ? '  ·  ' + columnName(c) : '');
+        name.textContent = (headerCells[c] || 'column ' + (c + 1)) + (spreadsheetLook() ? '  ·  ' + columnName(c) : tableLook() ? sqlType(c) : '');
         name.title = name.textContent;
 
         const text  = cellAt(row, c);
@@ -1739,6 +1807,8 @@ function drawRow() {
         } else {
             value.textContent = shown;
         }
+
+        if (sqlInfo !== null && sqlIsNull(sqlInfo, row + 1, c)) value.classList.add('null');   //  a SQL NULL:  the clothes show a faint NULL
 
         list.append(name, value);
     }
@@ -1817,7 +1887,13 @@ expandBtn.addEventListener('click', function () {
 //                         Excel addresses in the snap menu  (like K43),
 //                         the green  ƒ  on formulas,  and a WIDER window.
 //
-//    A CSV opens in the CSV look.   An Excel file opens in the spreadsheet look.
+//    A SQL dump's own look is the TABLE look instead,  like a database tool:
+//
+//      Table look         a row of column TYPES under the names  (INT,  VARCHAR(255) ...),
+//                         a  PK  badge on the primary key,  NULLs shown as a faint  NULL,
+//                         the types in the snap menu's Details,  in SQL blue.
+//
+//    A CSV opens in the CSV look.   An Excel file opens in the spreadsheet look.   A SQL dump in the table look.
 //    The button FLIPS between them,  like turning a card over:
 //
 //         ▯   ->   ▏   ->   ▭      the window turns away until it's edge-on  (you can't see it),
@@ -1832,18 +1908,34 @@ expandBtn.addEventListener('click', function () {
 let flipping = false;       //  mid-flip?  (Then a second click waits.)
 
 
+//  Which of the 2 special looks is on?   (excelLook  =  "the file's own look is on".)
+function spreadsheetLook() { return excelLook && sqlInfo === null; }      //  a CSV or an Excel file,  in its own look
+function tableLook()       { return excelLook && sqlInfo !== null; }      //  a SQL dump,  in its own look
+
+
 //  Dress the page for the look we're in:  the window,  the button,  the badge.
 function applyLook() {
-    outputBox.classList.toggle('excel', excelLook);
-    viewBtn.textContent = excelLook ? 'CSV View' : 'Spreadsheet View';
-    viewBtn.classList.toggle('to-csv', excelLook);     //  the clothes:  Excel green  ->  or  ->  black
+    outputBox.classList.toggle('excel', spreadsheetLook());
+    outputBox.classList.toggle('sqltable', tableLook());
+    aimRow.classList.toggle('sqltable', tableLook());                       //  (the Details panel shows NULLs the same way)
+    viewBtn.textContent = excelLook ? 'CSV View' : sqlInfo !== null ? 'Table View' : 'Spreadsheet View';
+    viewBtn.classList.toggle('to-csv', excelLook);                          //  the clothes:  Excel green / SQL blue  ->  or  ->  black
+    viewBtn.classList.toggle('to-table', !excelLook && sqlInfo !== null);
     showBadge();
 }
 
 
 //  Excel's row numbers start 1 higher  (its row 1 is the column names).   "How much to add?"
 function rowShift() {
-    return excelLook ? 1 : 0;
+    return spreadsheetLook() ? 1 : 0;
+}
+
+
+//  A SQL column's type,  for the snap menu's Details:    "  ·  VARCHAR(255)  ·  PK"
+function sqlType(col) {
+    const column = sqlInfo.columns[col];
+    if (column === undefined) return '';
+    return (column.type ? '  ·  ' + column.type : '') + (column.pk ? '  ·  PK' : '');
 }
 
 
@@ -2903,6 +2995,10 @@ function makeRow(num, cells, query, index) {
                     : kept.formula;
             }
         }
+
+        //  A SQL NULL  (not just empty:  "unknown")?  Mark it:  the table look shows a faint  NULL.
+        //  (Only an EMPTY cell can be NULL,  so the others don't even look it up.)
+        if (sqlInfo !== null && text === '' && sqlIsNull(sqlInfo, num, col)) cell.classList.add('null');
 
         paintMatches(cell, shown, query);
 

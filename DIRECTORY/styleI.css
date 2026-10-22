@@ -72,6 +72,10 @@
 
     --formula:      #217346;                        /*  the  ƒ  on an Excel formula cell:  Excel's own green  */
     --formula-glow: rgba(33, 163, 102, 0.85);       /*  ...and its glow  (the brighter green from Excel's icon)  */
+
+    --sql:          #336791;                        /*  SQL blue  (the classic database blue):  the table look's lines and PK badge  */
+    --sql-dark:     #265174;                        /*  ...a shade darker:  the "Table View" button  */
+    --sql-glow:     rgba(58, 126, 202, 0.5);        /*  ...and its glow  (#3a7eca,  brighter)  */
 }
 
 
@@ -121,6 +125,10 @@
 
     --formula:      #a3212c;                        /*  forest red  (the BRIGHT Excel green's twin)  */
     --formula-glow: rgba(163, 33, 44, 0.6);         /*  ...and its glow  */
+
+    --sql:          #3a7eca;                        /*  SQL blue:  the BRIGHTER one  (#336791 is too dark to see on black)  */
+    --sql-dark:     #265174;
+    --sql-glow:     rgba(58, 126, 202, 0.5);
 
     --line:         rgba(255, 255, 255, 0.09);      /*  the lines:  barely there  */
     --line-soft:    rgba(255, 255, 255, 0.06);
@@ -1224,6 +1232,46 @@ h1 {
 }
 
 
+/*  The table look  (a SQL dump):  the row of column TYPES  (INT,  VARCHAR(255) ...),  under the names.
+    Small,  quiet words,  and a thin line of SQL blue underneath.  */
+.types-row .cell {
+    font-size: 11px;
+    letter-spacing: 0.03em;
+    color: var(--text-soft);
+}
+
+.types-row,
+.types-row:hover {
+    border-bottom-color: var(--sql);
+}
+
+/*  The primary key:  a little SQL-blue  PK  badge,  in front of its type.  */
+.types-row .cell.pk::before {
+    content: "PK";
+    display: inline-block;
+    margin-right: 6px;
+    padding: 0 5px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    letter-spacing: 0.04em;
+    color: #fff;
+    background: var(--sql);
+}
+
+/*  A NULL  ("unknown",  not just empty):  a faint,  slanted  NULL.   Only in the table look
+    (the CSV look shows it like a CSV would:  empty).   The Details panel shows it the same way.  */
+#output.sqltable .cell.null::before,
+#aimRow.sqltable .row-value.null::before {
+    content: "NULL";
+    font-size: 12px;
+    font-style: italic;
+    color: var(--text-soft);
+    opacity: 0.6;
+}
+
+
 
 /*  ----------------------------------------------------------
 
@@ -1386,6 +1434,20 @@ mark {
     box-shadow:
         inset 0 0 10px rgba(255, 255, 255, 0.12),
         0 0 18px 2px rgba(255, 255, 255, 0.5);
+}
+
+/*  "Table View"  (a SQL dump,  in the CSV look):  SQL blue,  a shade darker,  solid,  with a soft blue glow.  */
+#viewBtn.to-table {
+    background: var(--sql-dark);
+    box-shadow:
+        inset 0 0 10px rgba(255, 255, 255, 0.12),
+        0 0 12px var(--sql-glow);
+}
+
+#viewBtn.to-table:hover {
+    box-shadow:
+        inset 0 0 10px rgba(255, 255, 255, 0.16),
+        0 0 18px 2px var(--sql-glow);
 }
 
 
@@ -1946,6 +2008,16 @@ button:active {
 
 [data-theme="neo-dark"] #viewBtn.to-csv:hover {
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.24), 0 0 18px 2px rgba(255, 255, 255, 0.2);
+}
+
+/*  "Table View"  (a SQL dump):  stays SQL blue  (not the forest red,  which is Excel's).  */
+[data-theme="neo-dark"] #viewBtn.to-table {
+    background: var(--sql-dark);
+    box-shadow: 0 0 12px var(--sql-glow);
+}
+
+[data-theme="neo-dark"] #viewBtn.to-table:hover {
+    box-shadow: 0 0 18px 2px var(--sql-glow);
 }
 
 /*  The theme names:  light,  so they read on the dark squares.  */
