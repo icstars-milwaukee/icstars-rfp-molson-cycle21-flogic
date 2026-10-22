@@ -655,6 +655,348 @@ h1 {
 }
 
 
+/*  ---- THE QUERY BUTTON  +  THE QUERY MENU ----
+
+    "Query"  is the bar's 3rd square:  SQL blue  (it speaks SQL,  like the table look).
+    It UNFOLDS the query menu,  right under the bar,  out of its own corner  (like the theme menu out of its chip):
+
+         ┌─────────────┬───────────────────────────────┬───────┐
+         │ Choose File │  the aimbot window            │ Query │
+         └─────────────┴───────────────────────────────┴───────┘
+                     ┌───────────────────────────────────────────┐
+                     │▓ Query  ·  sales  ·  1,204 rows         × ▓│   <-  SQL blue
+                     ├───────────┬───────────────────────────────┤
+                     │ Show      │ ░ all columns  [+ column ▾]  ░│   <-  the builder:  a little sheet.
+                     │ Keep rows │ ░ [city ▾][is ▾][Chicago] ×  ░│       names on the left,  what you pick on the right
+                     │ ...       │                               │
+                     ├───────────┴───────────────────────────────┤
+                     │ SQL  written for you as you pick ...      │
+                     │ ░ SELECT * FROM sales WHERE ...         ░ │   <-  the SQL box  (letters that line up,  like code)
+                     │ [Run ▶] [Copy SQL] [Export CSV]   12 rows │
+                     └───────────────────────────────────────────┘
+*/
+#queryBtn {
+    margin: 0;
+    padding: 0 18px;
+    color: #fff;
+    background: var(--sql-dark);
+    border: none;
+    border-left: 1px solid var(--line, rgba(255, 255, 255, 0.6));  /*  the white line between the squares  */
+    border-radius: 0;
+    text-shadow: 0 0 8px var(--sql-glow);
+    box-shadow: inset 0 0 12px var(--sql-glow);
+}
+
+#queryBtn:disabled {
+    opacity: 0.45;
+    filter: none;
+    cursor: default;
+}
+
+#queryBtn[aria-expanded="true"] {
+    filter: brightness(1.15);
+}
+
+#queryMenu {
+    position: absolute;
+    top: calc(100% + 6px);          /*  just under the bar  */
+    right: 0;                       /*  lined up with the Query button's side  */
+    z-index: 9;                     /*  over the search bar and the sheet  (like the Details panel)  */
+    width: max(100%, 680px);
+    max-width: calc(100vw - 32px);
+    box-sizing: border-box;
+    overflow: hidden;
+    font-family: "Segoe UI", system-ui, Arial, sans-serif;
+    font-size: 13px;
+
+    /*  The same glass as the CSV window  */
+    background: linear-gradient(135deg, var(--glass-top), var(--glass-bottom));
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--glass-edge);
+    border-radius: 12px;
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.18),
+        inset 0 1px 0 var(--shine, rgba(255, 255, 255, 0.9));
+
+    transform-origin: top right;    /*  grow out from the button's corner  */
+    will-change: transform;
+    transition: transform 0.42s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/*  CLOSED  +  FOLDED:  the theme menu's way  (see "THE FLOATING THEME MENU"),  with an SQL-blue cover.  */
+#queryMenu.closed {
+    visibility: hidden;
+}
+
+#queryMenu::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    border-radius: inherit;
+    background: var(--sql-dark);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease 0.26s;
+}
+
+#queryMenu.folded {
+    transform: scale(var(--fold-x, 0.15), var(--fold-y, 0.1));
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1) 0.14s;
+}
+
+#queryMenu.folded::after {
+    opacity: 1;
+    transition: opacity 0.16s ease;
+}
+
+/*  Its top line:   Query  ·  sales  ·  1,204 rows        ×   (a dark square,  in SQL blue)  */
+.query-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 6px 0 12px;
+    line-height: 28px;
+    font-weight: 600;
+    color: #fff;
+    text-shadow: 0 0 8px var(--sql-glow);
+    background: var(--sql-dark);
+    box-shadow: inset 0 0 12px var(--sql-glow);
+}
+
+#queryTitle {
+    flex-grow: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#queryClose {
+    margin: 0;
+    padding: 0 8px;
+    line-height: 20px;
+    border-radius: 6px;
+}
+
+
+/*  THE BUILDER:  one row per part  (Show,  Keep rows,  Group by ...).
+    The name on the left is a header square,  what you pick is a light square:  like the sheet.  */
+.query-row {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr);
+    border-bottom: 1px solid var(--line-soft, rgba(255, 255, 255, 0.45));
+}
+
+.query-label {
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    font-weight: 600;
+    background: var(--header-bg);
+    border-right: 1px solid var(--line-grid, rgba(255, 255, 255, 0.5));
+}
+
+.query-pick {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    min-height: 26px;
+    padding: 5px 8px;
+    background: var(--square-light);
+    box-shadow: inset 0 0 12px var(--inner-glow, rgba(255, 255, 255, 0.8));
+}
+
+/*  You're writing your own SQL?  The builder fades,  and can't be clicked  ("Use the builder again" brings it back).  */
+#queryBuilder.paused {
+    opacity: 0.45;
+    pointer-events: none;
+}
+
+/*  One condition  (or total,  or sort):   [city ▾] [is ▾] [Chicago] ×  */
+.query-line {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/*  The little drop-down lists and boxes:  small light squares  */
+#queryMenu select,
+.query-value {
+    box-sizing: border-box;
+    height: 26px;
+    padding: 0 6px;
+    font: inherit;
+    color: var(--text);
+    background: var(--glass-top);
+    border: 1px solid var(--glass-edge);
+    border-radius: 7px;
+}
+
+#queryMenu select:focus-visible,
+.query-value:focus {
+    outline: none;
+    box-shadow:
+        inset 0 0 0 1px var(--glow-edge, rgba(255, 255, 255, 0.95)),
+        0 0 10px 1px var(--glow, rgba(255, 255, 255, 0.9));
+}
+
+.query-value  { width: 120px; }
+.query-limit  { width: 80px; }
+
+/*  "+ column ▾",  "+ condition ▾" ...:  the lists that ADD something.  Quieter,  with a dashed edge.  */
+#queryMenu select.query-add {
+    color: var(--text-soft);
+    background: transparent;
+    border-style: dashed;
+}
+
+/*  A chip:   [ city  × ]   (a dark square,  like a picked sheet tab)  */
+.query-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    height: 24px;
+    padding: 0 2px 0 9px;
+    color: #fff;
+    background: var(--square-dark);
+    border-radius: 7px;
+    box-shadow: inset 0 0 10px color-mix(in srgb, var(--theme-glow) 35%, transparent);
+}
+
+/*  The little  ×  buttons  */
+.query-x {
+    margin: 0;
+    padding: 0 6px;
+    line-height: 20px;
+    font-size: 13px;
+    color: inherit;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    box-shadow: none;
+}
+
+.query-x:hover {
+    background: var(--hover-fill, rgba(255, 255, 255, 0.35));
+    box-shadow: none;
+}
+
+.query-hint {
+    color: var(--text-soft);
+}
+
+
+/*  THE SQL:  its line on top,  then the box.  */
+.query-sql-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px 4px;
+    color: var(--text-soft);
+}
+
+/*  The little  SQL  tag:  SQL blue,  like the PK badge  */
+.query-sql-label {
+    padding: 0 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    line-height: 17px;
+    color: #fff;
+    background: var(--sql);
+    border-radius: 4px;
+}
+
+#queryReset {
+    margin: 0 0 0 auto;
+    padding: 0 10px;
+    line-height: 22px;
+    font-size: 12px;
+    border-radius: 8px;
+}
+
+/*  The box:  letters that all take the same room  (so the SQL lines up,  like code)  */
+#querySql {
+    display: block;
+    box-sizing: border-box;
+    width: calc(100% - 20px);
+    margin: 0 10px;
+    padding: 8px 10px;
+    min-height: 92px;
+    resize: vertical;
+    font-family: Consolas, "Cascadia Mono", Menlo, monospace;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--text);
+    background: var(--square-light);
+    border: 1px solid var(--glass-edge);
+    border-radius: 8px;
+    box-shadow: inset 0 0 12px var(--inner-glow, rgba(255, 255, 255, 0.8));
+    tab-size: 4;
+}
+
+#querySql:focus {
+    outline: none;
+    box-shadow:
+        inset 0 0 0 1px var(--glow-edge, rgba(255, 255, 255, 0.95)),
+        0 0 14px 2px var(--glow, rgba(255, 255, 255, 0.9));
+}
+
+/*  The bottom line:   [Run ▶] [Copy SQL] [Export CSV]            12 rows  ·  8 ms  */
+.query-foot {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 10px 10px;
+}
+
+.query-foot button {
+    margin: 0;
+    line-height: 30px;
+}
+
+/*  Run:  SQL blue  (the main thing to press)  */
+#queryRun,
+#backBtn {
+    color: #fff;
+    background: var(--sql-dark);
+    text-shadow: 0 0 8px var(--sql-glow);
+    box-shadow: 0 0 12px var(--sql-glow);
+}
+
+#queryRun:hover,
+#backBtn:hover {
+    box-shadow: 0 0 18px 2px var(--sql-glow);
+}
+
+#queryExport:disabled {
+    opacity: 0.45;
+    filter: none;
+    cursor: default;
+}
+
+#queryStatus {
+    margin-left: auto;
+    color: var(--text-soft);
+    white-space: pre-wrap;
+}
+
+/*  Something went wrong:  the words say what  (in a soft red,  easy to spot)  */
+#queryStatus.bad {
+    flex-basis: 100%;
+    margin-left: 0;
+    color: #a3212c;
+    font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #queryMenu,
+    #queryMenu::after { transition: none; }
+}
+
+
 /*  ---- "Reading from...  sales.csv"  (under the bar) ----
 
     4 beats, forever:     (none)    .    ..    ...    (none)    .    ..    ...
@@ -1976,6 +2318,7 @@ button:active {
     ----------------------------------------------------------  */
 
 [data-theme="neo-dark"] #aimRow,
+[data-theme="neo-dark"] #queryMenu,
 [data-theme="neo-dark"] #themeMenu {
     backdrop-filter: url(#glassWarp) blur(3px);
 }

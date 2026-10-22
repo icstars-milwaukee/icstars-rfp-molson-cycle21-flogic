@@ -574,15 +574,7 @@ function loadFile(file, sheet) {
             }
             starts[count] = spot;               //  where the last row ends  (+1, just past its line break)
 
-            headerCells = newHeader;
-            fileText    = text;                 //  keep the whole file...
-            rowStart    = starts;               //  ...and where each row starts in it
-            rowCount    = count;
-            rowCache    = new Map();            //  new file  =  forget the old file's rows
-            cacheCells  = 0;
-            xlsxInfo    = excel;                //  the Excel notes  (null for a CSV)
-            sqlInfo     = sql;                  //  the SQL notes    (null if it's not a SQL dump)
-            fileNote    = excel !== null
+            const note = excel !== null
                 ? (excel.hasDates ? '  ·  dates shown as YYYY-MM-DD  (originals kept)' : '') +
                   (excel.unsolved > 0 ? '  ·  ' + excel.unsolved + ' formula(s) had no saved answer  (shown as formulas)' : '') +
                   (excel.recalc ? '  ·  ⚠ this file asks Excel to recalculate:  formula answers may be out of date' : '')
@@ -591,35 +583,17 @@ function loadFile(file, sheet) {
                 : encoding === 'windows-1252'
                 ? '  ·  read as Windows-1252  (an older Excel format)'
                 : '';
+
+            const table = { header: newHeader, text: text, starts: starts, count: count, longest: longest,
+                            excel: excel, sql: sql, note: note, name: file.name };
+
             //  Which look?  A NEW file:  Excel files look like Excel,  SQL dumps like a database table,  CSVs like a CSV.
             //  Another sheet tab  (or table)  of the same file  (sheet !== null):  keep the look you picked.
-            if (sheet === null) excelLook = excel !== null || sql !== null;
-            applyLook();                        //  the window,  the button,  and the badge  ("XLSX SPREADSHEET",  "SQL DUMP")
-            readingName.textContent = file.name;
-            readingFrom.hidden = false;         //  "Reading from...  sales.csv"
-            dataColumns = longest.length;       //  the widest row decides how many columns there are
-            searchText  = null;                 //  new file  =  throw away the old search copy
-            allRows     = null;                 //  ...and the old "every row" list
-            doneQuery   = null;                 //  ...and the last search  (its rows were the OLD file's rows)
-            doneMatches = null;
+            const look = sheet === null ? excel !== null || sql !== null : excelLook;
 
-            //  Clean slate for the new file.
-            searchInput.value = '';
-            searchInput.disabled = false;       //  turn the search bar ON
-            jumpInput.value = '';
-
-            //  A SQL dump:  the column TYPES count too,  so the table look can show them  (VARCHAR(255),  DECIMAL(10,2) ...).
-            //  (They're in smaller letters:  about 0.8 of a normal letter each.   PK  =  about 4 more.)
-            if (sql !== null) {
-                sql.columns.forEach(function (column, col) {
-                    const wide = Math.ceil(column.type.length * 0.8) + (column.pk ? 4 : 0);
-                    if (col < longest.length && wide > longest[col]) longest[col] = wide;
-                });
-            }
-
-            setColumnWidths(longest);           //  decide how wide each column is
-            drawHeader(true);                   //  draw line 0  (and measure how tall a row is)
-            render();                           //  show the rows  (see STEP 5 below)
+            swapIn(table, look);
+            fileTable = { table: table, file: file, sheet: sheet, others: new Map() };     //  what a query asks about  (see QUERY)
+            queryFileChanged();
             finishLoading();                    //  the pie fills up, and the loader goes away
         }
 
@@ -705,6 +679,61 @@ function loadFile(file, sheet) {
 }
 
 
+//  SWAP IN a table:  make it the one on screen.
+//  (A file that just finished loading.   Or a query's answer.   Or back from the answer to the file.)
+//
+//  table  =  { header,   the column names
+//              text,     the rows,  as one long string  ...
+//              starts,   ...  and where each row starts in it
+//              count,    how many rows
+//              longest,  the longest thing in each column  (how wide they get)
+//              excel,    the Excel notes  (or null)
+//              sql,      the SQL notes    (or null)
+//              note,     a few words for the "Rows 1–15" line  (or '')
+//              name }    the file's name
+//  look   =  show it in its OWN look?  (the spreadsheet look,  or the table look)
+function swapIn(table, look) {
+
+    headerCells = table.header;
+    fileText    = table.text;               //  keep the whole file...
+    rowStart    = table.starts;             //  ...and where each row starts in it
+    rowCount    = table.count;
+    rowCache    = new Map();                //  new rows  =  forget the old ones
+    cacheCells  = 0;
+    xlsxInfo    = table.excel;              //  the Excel notes  (null for a CSV)
+    sqlInfo     = table.sql;                //  the SQL notes    (null if it's not a SQL dump)
+    fileNote    = table.note;
+    excelLook   = look;
+    applyLook();                            //  the window,  the button,  and the badge  ("XLSX SPREADSHEET",  "SQL DUMP")
+    readingName.textContent = table.name;
+    readingFrom.hidden = false;             //  "Reading from...  sales.csv"
+    dataColumns = table.longest.length;     //  the widest row decides how many columns there are
+    searchText  = null;                     //  new rows  =  throw away the old search copy
+    allRows     = null;                     //  ...and the old "every row" list
+    doneQuery   = null;                     //  ...and the last search  (its rows were the OLD rows)
+    doneMatches = null;
+
+    //  Clean slate.
+    searchInput.value = '';
+    searchInput.disabled = false;           //  turn the search bar ON
+    jumpInput.value = '';
+
+    //  A SQL dump  (or a query's answer):  the column TYPES count too,  so the table look can show them  (VARCHAR(255),  DECIMAL(10,2) ...).
+    //  (They're in smaller letters:  about 0.8 of a normal letter each.   PK  =  about 4 more.)
+    const longest = table.longest;
+    if (table.sql !== null) {
+        table.sql.columns.forEach(function (column, col) {
+            const wide = Math.ceil(column.type.length * 0.8) + (column.pk ? 4 : 0);
+            if (col < longest.length && wide > longest[col]) longest[col] = wide;
+        });
+    }
+
+    setColumnWidths(longest);               //  decide how wide each column is
+    drawHeader(true);                       //  draw line 0  (and measure how tall a row is)
+    render();                               //  show the rows  (see STEP 5 below)
+}
+
+
 
 // ----------------------------------------------------------
 //
@@ -731,6 +760,16 @@ const sheetTabs = document.getElementById('sheetTabs');
 function showBadge() {
 
     showSheetTabs();
+    backBtn.hidden = !showingAnswer();
+
+    //  A query's answer:   QUERY RESULT  ·  12 rows  ·  from sales  ·  8 ms
+    if (showingAnswer()) {
+        const r = sqlInfo.result;
+        fileBadge.textContent = 'QUERY RESULT  ·  ' + r.rows.toLocaleString() + ' row' + (r.rows === 1 ? '' : 's') +
+            (r.from ? '  ·  from ' + r.from : '') + '  ·  ' + formatTime(r.ms);
+        fileBadge.hidden = false;
+        return;
+    }
 
     if (sqlInfo !== null) {
         fileBadge.textContent = 'SQL DUMP' + (sqlInfo.dialect ? '  ·  ' + sqlInfo.dialect : '') + '  ·  ' + sqlInfo.sheetName +
@@ -1740,6 +1779,7 @@ const ROW_LIMIT     = 200;
 const FOCUS_LETTERS = 20000;
 
 function showRow(open) {
+    if (open) closeQueryMenu();                         //  (the query menu lives in the same spot)
     aimRow.hidden = !open;
     aimRowBtn.setAttribute('aria-expanded', open);
     if (open) drawRow();
@@ -2049,7 +2089,7 @@ function updatePosition(y) {
 
     if (matches.length === 0) {
         statusText.textContent = (word === ''
-            ? 'This file only has a header row'
+            ? (showingAnswer() ? 'The answer has no rows:  nothing matched' : 'This file only has a header row')
             : 'No rows match "' + word + '"') + fileNote;
         return;
     }
@@ -3289,3 +3329,798 @@ document.addEventListener('keydown', function (event) {
 //  Start with the default.  (Then measure how small "folded" is, now that the menu has its theme list.)
 setTheme(currentTheme);
 measureFold();
+
+
+
+// ----------------------------------------------------------
+//
+//    QUERY   (ask the open table a question:  the engine is queryI.js)
+//
+//    "Query",  at the end of the file bar,  UNFOLDS the query menu  (out of the button,  like the theme menu):
+//
+//        ┌──────────────────────────────────────────────────────────────┐
+//        │ Query  ·  sales  ·  1,204 rows                             × │
+//        ├────────────┬─────────────────────────────────────────────────┤
+//        │ Show       │ [all columns]   [+ column ▾]                    │
+//        │ Keep rows  │ [city ▾] [is ▾] [Chicago] ×    [+ condition]    │
+//        │ Group by   │ [+ column ▾]                                    │
+//        │ Totals     │ [count ▾] [of rows ▾] ×    [+ total]            │
+//        │ Sort by    │ [+ column ▾]                                    │
+//        │ At most    │ [     ] rows                                    │
+//        ├────────────┴─────────────────────────────────────────────────┤
+//        │ SQL   written for you as you pick  ·  or type your own       │
+//        │ SELECT city, COUNT(*) AS count FROM sales GROUP BY city      │
+//        ├──────────────────────────────────────────────────────────────┤
+//        │ [Run ▶]  [Copy SQL]  [Export CSV]            12 rows · 8 ms  │
+//        └──────────────────────────────────────────────────────────────┘
+//
+//    1.  The BUILDER:  pick things,  and it writes the SQL for you  (so you can learn it,  too).
+//    2.  Or type your own SQL in the box  (then the builder steps aside).
+//    3.  Run  ->  the ANSWER takes the window's place:  a little table of its own,
+//        in the table look  (its column types on top,  NULLs shown).   Search it,  flip it,  snap to it.
+//        "← Back to file"  brings the file back,  right away  (it was never gone:  just put aside).
+//
+//    The tables a query can use:
+//        a CSV          ->  its name,  without .csv              (sales.csv   ->   FROM sales)
+//        an Excel file  ->  every sheet,  by its name            (FROM "Q1 Sales")
+//        a SQL dump     ->  every table,  by its name            (FROM orders)
+//    So a JOIN can bring two sheets  (or two tables of a dump)  together.
+//
+// ----------------------------------------------------------
+
+const queryBtn     = document.getElementById('queryBtn');       //  "Query"  (the end of the file bar)
+const queryMenu    = document.getElementById('queryMenu');      //  the menu it unfolds into
+const queryTitle   = document.getElementById('queryTitle');     //  its  "Query  ·  sales  ·  1,204 rows"
+const queryClose   = document.getElementById('queryClose');     //  its  ×
+const queryBuilder = document.getElementById('queryBuilder');   //  the builder  (the brain fills it in)
+const querySql     = document.getElementById('querySql');       //  the SQL box
+const queryNote    = document.getElementById('querySqlNote');   //  "written for you as you pick ..."
+const queryReset   = document.getElementById('queryReset');     //  "Use the builder again"
+const queryRun     = document.getElementById('queryRun');       //  "Run ▶"
+const queryCopy    = document.getElementById('queryCopy');      //  "Copy SQL"
+const queryExport  = document.getElementById('queryExport');    //  "Export CSV"
+const queryStatus  = document.getElementById('queryStatus');    //  "12 rows · 8 ms"   (or what went wrong)
+const backBtn      = document.getElementById('backBtn');        //  "← Back to file"
+
+let fileTable   = null;     //  the open file's table  (what a query asks about):   { table, file, sheet, others, engine }
+let answer      = null;     //  the answer on screen:  { table, csv }   (null  =  the file is on screen)
+let fileLook    = false;    //  the file's look,  to go back to
+let queryId     = 0;        //  counts every Run.  (Run again while one is going?  The old one sees the number changed,  and quits.)
+let handWritten = false;    //  did you type in the SQL box yourself?  (Then the builder stops writing over it.)
+let queryFold   = null;     //  the "hide it once it's done folding" timer
+
+//  What you picked in the builder.
+let build = newBuild();
+
+function newBuild() {
+    return {
+        show:    [],        //  which columns  ([]  =  all of them)
+        filters: [],        //  [{ col, op, value }]
+        any:     false,     //  false  =  keep rows that pass ALL the conditions.   true  =  ANY of them.
+        group:   [],        //  group by these columns
+        totals:  [],        //  [{ fn, col }]
+        sort:    [],        //  [{ col, desc }]
+        limit:   '',        //  at most this many rows  (''  =  no limit)
+    };
+}
+
+//  Is a query's answer on screen  (not the file)?
+function showingAnswer() {
+    return sqlInfo !== null && sqlInfo.result !== undefined;
+}
+
+//  8 ms   ·   1.2 s
+function formatTime(ms) {
+    return ms < 1000 ? Math.max(1, Math.round(ms)) + ' ms' : (ms / 1000).toFixed(1) + ' s';
+}
+
+
+//  ---- THE TABLES  (what the engine reads) ----
+
+//  The open file's table's NAME,  for  FROM ...
+function mainTableName() {
+    const t = fileTable.table;
+    if (t.excel !== null) return t.excel.sheetName;
+    if (t.sql !== null) return t.sql.sheetName;
+    return fileTable.file.name.replace(/\.[^.]*$/, '') || 'file';
+}
+
+//  The file's OTHER sheets  (or tables):  they can be used too  (they're read when a query asks for them).
+function otherSheets() {
+    const t = fileTable.table;
+    const book = t.excel !== null ? t.excel : t.sql;
+    if (book === null) return [];
+    const list = [];
+    book.sheets.forEach(function (sheet, i) {
+        if (!sheet.chart && i + 1 !== book.sheetNumber) list.push({ name: sheet.name, index: i });
+    });
+    return list;
+}
+
+//  One row's text,  out of a table's long string  (like rowText,  for any table).
+function tableRowText(table, i) {
+    const start = table.starts[i];
+    let end = table.starts[i + 1] - 1;
+    if (end < table.text.length && end > start && table.text.charCodeAt(end - 1) === 13) end--;
+    return table.text.slice(start, end);
+}
+
+//  A table,  the way the engine wants it  (see "THE TABLES" in queryI.js).
+function engineTable(table, name) {
+    const columns = table.header.slice();
+    while (columns.length < table.longest.length) columns.push('');
+    const sql = table.sql;
+    const typed = sql !== null && sql.columns.length > 0 && sql.columns.every(function (c) { return c.type !== ''; });
+    return {
+        name: name,
+        columns: columns,
+        declared: typed ? sql.columns.map(function (c) { return c.type; }) : null,
+        rowCount: table.count,
+        row: function (i) { return splitIntoCells(tableRowText(table, i)); },
+        isNull: sql !== null ? function (i, j) { return sqlIsNull(sql, i + 1, j); } : null,
+        emptyIsNull: sql === null,         //  a CSV or Excel file:  an empty cell means NULL  (it has no other way to say it)
+    };
+}
+
+//  Cut CSV text  (an Excel sheet or a SQL table,  turned into CSV by the translator)  into rows of cells.
+function cutCsvText(text) {
+    const rows = [];
+    let row = [], cell = '', quoted = false;
+    for (let i = 0; i < text.length; i++) {
+        const c = text.charCodeAt(i);
+        if (quoted) {
+            if (c === 34) {
+                if (text.charCodeAt(i + 1) === 34) { cell += '"'; i++; }
+                else quoted = false;
+            } else cell += text[i];
+        } else if (c === 34) quoted = true;
+        else if (c === 44) { row.push(cell); cell = ''; }
+        else if (c === 10) { row.push(cell); rows.push(row); row = []; cell = ''; }
+        else if (c !== 13) cell += text[i];
+    }
+    if (cell !== '' || row.length > 0) { row.push(cell); rows.push(row); }
+    return rows;
+}
+
+//  Read ANOTHER sheet  (or table)  of the open file,  for a query that asks for it.
+async function loadOtherTable(sheet, isCurrent) {
+
+    const t = fileTable.table, file = fileTable.file;
+
+    setLoadingLabel('Reading "' + sheet.name + '"...');
+    const result = t.excel !== null
+        ? await readXlsx(file, isCurrent, sheet.index)
+        : await readSql(await file.text(), file, isCurrent, sheet.index);
+
+    const rows = cutCsvText(result.text);
+    const header = rows.length > 0 ? rows[0] : [];
+    const data = rows.slice(1);
+    let width = header.length;
+    data.forEach(function (r) { if (r.length > width) width = r.length; });
+    const columns = header.slice();
+    while (columns.length < width) columns.push('');
+
+    const sql = t.sql !== null ? result.info : null;
+    const typed = sql !== null && sql.columns.length > 0 && sql.columns.every(function (c) { return c.type !== ''; });
+
+    return {
+        name: sheet.name,
+        columns: columns,
+        declared: typed ? sql.columns.map(function (c) { return c.type; }) : null,
+        rowCount: data.length,
+        row: function (i) { return data[i]; },
+        isNull: sql !== null ? function (i, j) { return sqlIsNull(sql, i + 1, j); } : null,
+        emptyIsNull: sql === null,
+    };
+}
+
+//  The "catalog":  every table a query can use  (see runQuery in queryI.js).
+function queryCatalog(isCurrent) {
+
+    const main = fileTable.engine;
+    const known = new Map([[main.name.toLowerCase(), main]]);
+    fileTable.others.forEach(function (table, key) { known.set(key, table); });
+    const others = otherSheets();
+    const mine = fileTable;
+
+    return {
+        find: function (name) { return known.get(String(name).toLowerCase()) || null; },
+        names: function () { return [main.name].concat(others.map(function (s) { return s.name; })); },
+        prepare: async function (names) {
+            for (const name of names) {
+                const key = String(name).toLowerCase();
+                if (known.has(key)) continue;
+                const sheet = others.find(function (s) { return s.name.toLowerCase() === key; });
+                if (sheet === undefined) continue;              //  (not a table at all:  the engine says so)
+                const table = await loadOtherTable(sheet, isCurrent);
+                if (!isCurrent() || mine !== fileTable) throw QUERY_STALE;
+                mine.others.set(key, table);                    //  remembered,  so the next query doesn't read it again
+                known.set(key, table);
+            }
+        },
+    };
+}
+
+
+//  ---- A NEW FILE  (or sheet)  IS OPEN ----
+
+function queryFileChanged() {
+
+    const name = mainTableName();
+    fileTable.engine = engineTable(fileTable.table, name);
+
+    queryBtn.disabled = false;
+    answer = null;
+    queryExport.disabled = true;
+    build = newBuild();
+    handWritten = false;
+
+    queryTitle.textContent = 'Query  ·  ' + name + '  ·  ' + fileTable.table.count.toLocaleString() + ' row' + (fileTable.table.count === 1 ? '' : 's');
+    setQueryStatus('', false);
+    drawBuilder();
+    writeSql();
+}
+
+
+//  ---- THE BUILDER ----
+
+//  Which conditions you can pick,  in plain words.
+const FILTER_OPS = [
+    ['=',        'is'],
+    ['<>',       'is not'],
+    ['>',        'is over'],
+    ['>=',       'is at least'],
+    ['<',        'is under'],
+    ['<=',       'is at most'],
+    ['contains', 'contains'],
+    ['starts',   'starts with'],
+    ['ends',     'ends with'],
+    ['empty',    'is empty'],
+    ['filled',   'is not empty'],
+];
+
+//  Which totals you can pick.   [what it's called here,  its SQL,  its nickname's start]
+const TOTAL_FNS = [
+    ['rows',     'COUNT(*)',       'count'],
+    ['count',    'COUNT',          'count'],
+    ['distinct', 'COUNT DISTINCT', 'different'],
+    ['sum',      'SUM',            'sum'],
+    ['avg',      'AVG',            'average'],
+    ['min',      'MIN',            'smallest'],
+    ['max',      'MAX',            'biggest'],
+    ['median',   'MEDIAN',         'median'],
+];
+const TOTAL_WORDS = { rows: 'count rows', count: 'count', distinct: 'count different', sum: 'sum of', avg: 'average of', min: 'smallest', max: 'biggest', median: 'middle value of' };
+
+function queryColumns() { return columnNames(fileTable.engine); }
+function queryKinds()   { return columnKinds(fileTable.engine); }
+
+//  A little drop-down list.   options  =  [[value, words]]
+function pickList(options, chosen, label, onPick) {
+    const list = document.createElement('select');
+    list.setAttribute('aria-label', label);
+    options.forEach(function (o) {
+        const option = document.createElement('option');
+        option.value = o[0];
+        option.textContent = o[1];
+        if (o[0] === chosen) option.selected = true;
+        list.appendChild(option);
+    });
+    list.addEventListener('change', function () { onPick(list.value); });
+    return list;
+}
+
+//  "+ column ▾":  a list that starts on its own words,  and adds what you pick.
+function addList(words, options, label, onPick) {
+    const list = pickList([['', words]].concat(options), '', label, function (v) { if (v !== '') onPick(v); });
+    list.classList.add('query-add');
+    return list;
+}
+
+function smallButton(words, label, onClick) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'query-x';
+    b.textContent = words;
+    if (label) b.setAttribute('aria-label', label);
+    b.addEventListener('click', onClick);
+    return b;
+}
+
+//  A chip:   [ city  × ]
+function chip(words, onRemove) {
+    const c = document.createElement('span');
+    c.className = 'query-chip';
+    c.textContent = words;
+    c.appendChild(smallButton('×', 'Remove ' + words, onRemove));
+    return c;
+}
+
+//  The nicknames the totals get  (count,  sum_price ...),  in order.
+function totalNames() {
+    const used = new Set(build.group.map(function (g) { return g.toLowerCase(); }));
+    return build.totals.map(function (t) {
+        const fn = TOTAL_FNS.find(function (f) { return f[0] === t.fn; });
+        let name = t.fn === 'rows' ? 'count' : fn[2] + '_' + String(t.col).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+        let n = name, k = 2;
+        while (used.has(n)) n = name + '_' + k++;
+        used.add(n);
+        return n;
+    });
+}
+
+//  Draw the builder  (all of it,  every time something is picked:  it's small).
+function drawBuilder() {
+
+    queryBuilder.textContent = '';
+    if (fileTable === null) return;
+
+    const columns = queryColumns();
+    const colOptions = columns.map(function (c) { return [c, c]; });
+    const grouped = build.group.length > 0 || build.totals.length > 0;
+
+    function section(words, fill) {
+        const row = document.createElement('div');
+        row.className = 'query-row';
+        const name = document.createElement('span');
+        name.className = 'query-label';
+        name.textContent = words;
+        const box = document.createElement('div');
+        box.className = 'query-pick';
+        fill(box);
+        row.append(name, box);
+        queryBuilder.appendChild(row);
+    }
+
+    function changed() { drawBuilder(); writeSql(); }
+
+    //  SHOW
+    section('Show', function (box) {
+        if (grouped) {
+            const note = document.createElement('span');
+            note.className = 'query-hint';
+            note.textContent = 'the groups and their totals  (below)';
+            box.appendChild(note);
+            return;
+        }
+        if (build.show.length === 0) {
+            const all = document.createElement('span');
+            all.className = 'query-hint';
+            all.textContent = 'all columns';
+            box.appendChild(all);
+        }
+        build.show.forEach(function (c, k) {
+            box.appendChild(chip(c, function () { build.show.splice(k, 1); changed(); }));
+        });
+        const left = colOptions.filter(function (o) { return build.show.indexOf(o[0]) === -1; });
+        if (left.length > 0) box.appendChild(addList('+ column', left, 'Add a column to show', function (v) { build.show.push(v); changed(); }));
+    });
+
+    //  KEEP ROWS
+    section('Keep rows', function (box) {
+        build.filters.forEach(function (f, k) {
+            const line = document.createElement('span');
+            line.className = 'query-line';
+            line.appendChild(pickList(colOptions, f.col, 'Column', function (v) { f.col = v; changed(); }));
+            line.appendChild(pickList(FILTER_OPS, f.op, 'Condition', function (v) { f.op = v; changed(); }));
+            if (f.op !== 'empty' && f.op !== 'filled') {
+                const value = document.createElement('input');
+                value.type = 'text';
+                value.className = 'query-value';
+                value.value = f.value;
+                value.placeholder = 'value';
+                value.setAttribute('aria-label', 'Value');
+                value.addEventListener('input', function () { f.value = value.value; writeSql(); });
+                line.appendChild(value);
+            }
+            line.appendChild(smallButton('×', 'Remove this condition', function () { build.filters.splice(k, 1); changed(); }));
+            box.appendChild(line);
+        });
+        if (build.filters.length > 1) {
+            box.appendChild(pickList([['all', 'all of these'], ['any', 'any of these']], build.any ? 'any' : 'all', 'Keep rows that pass',
+                                     function (v) { build.any = v === 'any'; changed(); }));
+        }
+        box.appendChild(addList('+ condition', colOptions, 'Add a condition', function (v) { build.filters.push({ col: v, op: '=', value: '' }); changed(); }));
+    });
+
+    //  GROUP BY
+    section('Group by', function (box) {
+        build.group.forEach(function (c, k) {
+            box.appendChild(chip(c, function () { build.group.splice(k, 1); changed(); }));
+        });
+        const left = colOptions.filter(function (o) { return build.group.indexOf(o[0]) === -1; });
+        if (left.length > 0) box.appendChild(addList('+ column', left, 'Group by a column', function (v) { build.group.push(v); changed(); }));
+    });
+
+    //  TOTALS
+    section('Totals', function (box) {
+        build.totals.forEach(function (t, k) {
+            const line = document.createElement('span');
+            line.className = 'query-line';
+            line.appendChild(pickList(TOTAL_FNS.map(function (f) { return [f[0], TOTAL_WORDS[f[0]]]; }), t.fn, 'Total', function (v) {
+                t.fn = v;
+                if (v !== 'rows' && t.col === null) t.col = columns[0];
+                changed();
+            }));
+            if (t.fn !== 'rows') line.appendChild(pickList(colOptions, t.col, 'Of which column', function (v) { t.col = v; changed(); }));
+            line.appendChild(smallButton('×', 'Remove this total', function () { build.totals.splice(k, 1); changed(); }));
+            box.appendChild(line);
+        });
+        box.appendChild(addList('+ total', TOTAL_FNS.map(function (f) { return [f[0], TOTAL_WORDS[f[0]]]; }), 'Add a total', function (v) {
+            build.totals.push({ fn: v, col: v === 'rows' ? null : columns[0] });
+            changed();
+        }));
+    });
+
+    //  SORT BY   (grouped:  by a group,  or by a total)
+    section('Sort by', function (box) {
+        const sortOptions = grouped
+            ? build.group.map(function (g) { return [g, g]; }).concat(totalNames().map(function (n) { return [n, n]; }))
+            : colOptions;
+        build.sort = build.sort.filter(function (s) { return sortOptions.some(function (o) { return o[0] === s.col; }); });
+        build.sort.forEach(function (s, k) {
+            const line = document.createElement('span');
+            line.className = 'query-line';
+            line.appendChild(pickList(sortOptions, s.col, 'Sort by', function (v) { s.col = v; changed(); }));
+            line.appendChild(pickList([['up', '↑ low to high'], ['down', '↓ high to low']], s.desc ? 'down' : 'up', 'Which way',
+                                      function (v) { s.desc = v === 'down'; changed(); }));
+            line.appendChild(smallButton('×', 'Remove this sort', function () { build.sort.splice(k, 1); changed(); }));
+            box.appendChild(line);
+        });
+        if (sortOptions.length > 0) box.appendChild(addList('+ column', sortOptions, 'Sort by a column', function (v) { build.sort.push({ col: v, desc: false }); changed(); }));
+    });
+
+    //  AT MOST
+    section('At most', function (box) {
+        const limit = document.createElement('input');
+        limit.type = 'number';
+        limit.min = '1';
+        limit.className = 'query-value query-limit';
+        limit.placeholder = 'all';
+        limit.value = build.limit;
+        limit.setAttribute('aria-label', 'At most this many rows');
+        limit.addEventListener('input', function () { build.limit = limit.value; writeSql(); });
+        const words = document.createElement('span');
+        words.className = 'query-hint';
+        words.textContent = 'rows';
+        box.append(limit, words);
+    });
+
+    queryBuilder.classList.toggle('paused', handWritten);
+}
+
+
+//  ---- THE SQL IT WRITES ----
+
+//  A name,  in quotes only if it needs them:   city    "Sales Data"    "order"
+const NEEDS_QUOTES = new Set(['TRUE', 'FALSE', 'CURRENT_DATE', 'CURRENT_TIME', 'CURRENT_TIMESTAMP', 'CASE', 'CAST', 'EXISTS']);
+function sqlName(name) {
+    const n = String(name);
+    return /^[A-Za-z_][A-Za-z0-9_]*$/.test(n) && !SQL_RESERVED.has(n.toUpperCase()) && !NEEDS_QUOTES.has(n.toUpperCase())
+        ? n
+        : '"' + n.split('"').join('""') + '"';
+}
+
+//  Words,  in single quotes:   'Chicago'    'it''s'
+function sqlWordsOf(text) {
+    return "'" + String(text).split("'").join("''") + "'";
+}
+
+//  A value you typed:  a number stays a number  (for a column of numbers),  anything else is words.
+function sqlValueOf(text, kind) {
+    const t = String(text).trim();
+    if ((kind === 'int' || kind === 'real' || kind === 'num') && NUMBER_WORDS.test(t)) return t;
+    return sqlWordsOf(text);
+}
+
+//  For  contains / starts with / ends with:   LIKE '%Chi%'   (a  %  or  _  you typed is marked with  !  so it counts as itself)
+function likeOf(text, before, after) {
+    const v = String(text);
+    const marked = /[!%_]/.test(v);
+    const safe = marked ? v.replace(/[!%_]/g, function (c) { return '!' + c; }) : v;
+    return 'LIKE ' + sqlWordsOf(before + safe + after) + (marked ? " ESCAPE '!'" : '');
+}
+
+function builderSql() {
+
+    //  (A column's TYPE is only worked out when a condition needs it:  that looks at up to 20,000 rows,
+    //   too much to do for every new file just in case.)
+    const columns = queryColumns();
+    function kindOf(col) { return queryKinds()[columns.indexOf(col)]; }
+
+    const grouped = build.group.length > 0 || build.totals.length > 0;
+    const names = totalNames();
+    const lines = [];
+
+    //  SELECT
+    let show;
+    if (grouped) {
+        show = build.group.map(sqlName).concat(build.totals.map(function (t, k) {
+            const what = t.fn === 'rows' ? 'COUNT(*)'
+                : t.fn === 'distinct' ? 'COUNT(DISTINCT ' + sqlName(t.col) + ')'
+                : TOTAL_FNS.find(function (f) { return f[0] === t.fn; })[1] + '(' + sqlName(t.col) + ')';
+            return what + ' AS ' + sqlName(names[k]);
+        }));
+    } else {
+        show = build.show.length > 0 ? build.show.map(sqlName) : ['*'];
+    }
+    lines.push('SELECT ' + show.join(', '));
+
+    //  FROM
+    lines.push('FROM ' + sqlName(fileTable.engine.name));
+
+    //  WHERE
+    const tests = build.filters.map(function (f) {
+        const c = sqlName(f.col);
+        switch (f.op) {
+            case 'empty':    return c + ' IS NULL';
+            case 'filled':   return c + ' IS NOT NULL';
+            case 'contains': return c + ' ' + likeOf(f.value, '%', '%');
+            case 'starts':   return c + ' ' + likeOf(f.value, '', '%');
+            case 'ends':     return c + ' ' + likeOf(f.value, '%', '');
+            default:         return c + ' ' + f.op + ' ' + sqlValueOf(f.value, kindOf(f.col));
+        }
+    });
+    if (tests.length > 0) lines.push('WHERE ' + tests.join(build.any ? '\n   OR ' : '\n  AND '));
+
+    //  GROUP BY
+    if (build.group.length > 0) lines.push('GROUP BY ' + build.group.map(sqlName).join(', '));
+
+    //  ORDER BY
+    if (build.sort.length > 0) lines.push('ORDER BY ' + build.sort.map(function (s) { return sqlName(s.col) + (s.desc ? ' DESC' : ''); }).join(', '));
+
+    //  LIMIT
+    const limit = parseInt(build.limit, 10);
+    if (limit > 0) lines.push('LIMIT ' + limit);
+
+    return lines.join('\n');
+}
+
+//  Put the builder's SQL in the box  (unless you're writing your own).
+function writeSql() {
+    if (fileTable === null || handWritten) return;
+    querySql.value = builderSql();
+}
+
+//  You typed in the box?  Then it's YOUR SQL now:  the builder steps aside.
+querySql.addEventListener('input', function () {
+    if (handWritten) return;
+    handWritten = true;
+    queryBuilder.classList.add('paused');
+    queryNote.textContent = 'you\'re writing it yourself  ·  the builder is paused';
+    queryReset.hidden = false;
+});
+
+queryReset.addEventListener('click', function () {
+    handWritten = false;
+    queryBuilder.classList.remove('paused');
+    queryNote.textContent = 'written for you as you pick  ·  or type your own';
+    queryReset.hidden = true;
+    writeSql();
+});
+
+//  Ctrl + Enter  (or Cmd + Enter on a Mac)  in the box  =  Run.
+querySql.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        runTheQuery();
+    }
+});
+
+function setQueryStatus(words, bad) {
+    queryStatus.textContent = words;
+    queryStatus.classList.toggle('bad', bad);
+}
+
+
+//  ---- RUN IT ----
+
+function runTheQuery() {
+
+    if (fileTable === null) return;
+
+    const text   = querySql.value;
+    const myRun  = ++queryId;
+    const myLoad = loadId;
+    function isCurrent() { return myRun === queryId && myLoad === loadId; }
+
+    setQueryStatus('Running...', false);
+    startLoading('Running the query...');
+    const started = performance.now();
+
+    runQuery(text, queryCatalog(isCurrent), isCurrent, function (done) {
+        setProgress(0.9 * done);
+        setLoadingLabel('Running the query...  ' + Math.floor(100 * done) + '%');
+    }).then(function (result) {
+
+        if (!isCurrent()) return;
+        return showAnswer(result, text, performance.now() - started, isCurrent);
+
+    }).then(function () {
+
+        if (!isCurrent()) return;
+        finishLoading();
+
+    }, function (problem) {
+
+        if (!isCurrent() || problem === QUERY_STALE || problem === XLSX_STALE || problem === SQL_STALE) return;
+        finishLoading();
+        setQueryStatus(queryProblem(problem), true);
+    });
+}
+
+queryRun.addEventListener('click', runTheQuery);
+
+
+//  Turn the answer into a table  (the same kind the brain keeps for a file),  and put it on screen.
+//  It's written straight into one long string,  and where each row starts is written down as it goes:
+//  so it never has to be cut up again.   (In bites:  a million-row answer never freezes the page.)
+async function showAnswer(result, text, ms, isCurrent) {
+
+    setLoadingLabel('Laying out the answer...');
+
+    const cols    = result.columns;
+    const rows    = result.rows;
+    const types   = cols.map(function (c) { return c.type; });
+    const header  = cols.map(function (c) { return c.name; });
+    const longest = header.map(function (n) { return n.length; });
+    const starts  = new Uint32Array(rows.length + 1);
+    const nullRows = [], nullCols = [];
+    const parts = [];
+    let at = 0;
+    let stopAt = performance.now() + CHUNK_TIME;
+
+    for (let r = 0; r < rows.length; r++) {
+
+        if ((r & 1023) === 1023 && performance.now() >= stopAt) {
+            setProgress(0.9 + 0.1 * r / rows.length);
+            await new Promise(function (go) { nextBite(go); });
+            if (!isCurrent()) throw QUERY_STALE;
+            stopAt = performance.now() + CHUNK_TIME;
+        }
+
+        starts[r] = at;
+        const row = rows[r];
+        let line = '';
+        for (let c = 0; c < cols.length; c++) {
+            const v = row[c];
+            if (v === null) { nullRows.push(r + 1); nullCols.push(c); }
+            const cell = queryCellText(v, types[c]);
+            if (cell.length > longest[c]) longest[c] = cell.length;
+            if (c > 0) line += ',';
+            line += /[",\r\n]/.test(cell) ? '"' + cell.split('"').join('""') + '"' : cell;
+        }
+        line += '\n';
+        parts.push(line);
+        at += line.length;
+    }
+    starts[rows.length] = at;
+
+    //  The SQL notes,  so the TABLE LOOK can show the answer's column types and its NULLs  (like a SQL dump's table).
+    const info = {
+        file: null, dialect: '', sheetName: 'Result', sheetNumber: 1, sheetCount: 1, sheets: [],
+        columns: cols.map(function (c) { return { name: c.name, type: queryTypeName(c.type), pk: false }; }),
+        rows: rows.length,
+        nullCount: nullRows.length,
+        nullRows: Uint32Array.from(nullRows),
+        nullCols: Uint16Array.from(nullCols),
+        result: { sql: text, ms: ms, rows: rows.length, from: mainTableName() },
+    };
+
+    const table = {
+        header: header, text: parts.join(''), starts: starts, count: rows.length, longest: longest,
+        excel: null, sql: info, name: fileTable.file.name,
+        note: result.count > 1 ? '  ·  ran the last of ' + result.count + ' queries' : '',
+    };
+
+    if (!showingAnswer()) fileLook = excelLook;         //  (remember the file's look,  for "← Back to file")
+    swapIn(table, true);
+    answer = { table: table };
+    queryExport.disabled = false;
+    setQueryStatus(rows.length.toLocaleString() + ' row' + (rows.length === 1 ? '' : 's') + '  ·  ' + formatTime(ms), false);
+    closeQueryMenu();                                   //  out of the way,  so you can see the answer
+}
+
+
+//  ← BACK TO FILE:  the file was only put aside.   Put it back.
+function backToFile() {
+    if (fileTable === null || !showingAnswer()) return;
+    queryId++;                                          //  (a query still running?  It stops.)
+    swapIn(fileTable.table, fileLook);
+    setQueryStatus('', false);
+}
+
+backBtn.addEventListener('click', backToFile);
+
+
+//  COPY SQL   (the browser's clipboard.   An older browser?  The old way:  select it,  and "copy".)
+queryCopy.addEventListener('click', function () {
+    const done = function () { setQueryStatus('SQL copied', false); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(querySql.value).then(done, copyTheOldWay);
+    } else copyTheOldWay();
+
+    function copyTheOldWay() {
+        querySql.select();
+        try { document.execCommand('copy'); done(); }
+        catch (e) { setQueryStatus('Couldn\'t copy:  select the SQL and press Ctrl + C', true); }
+    }
+});
+
+
+//  EXPORT CSV:  the answer,  saved as a CSV file  ("sales-query.csv").
+queryExport.addEventListener('click', function () {
+    if (answer === null) return;
+    const head = answer.table.header.map(function (n) { return /[",\r\n]/.test(n) ? '"' + n.split('"').join('""') + '"' : n; }).join(',');
+    const blob = new Blob([head + '\n' + answer.table.text], { type: 'text/csv' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = fileTable.file.name.replace(/\.[^.]*$/, '') + '-query.csv';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
+});
+
+
+//  ---- UNFOLD  /  FOLD UP   (out of the Query button,  like the theme menu out of its chip) ----
+
+function queryMenuOpen() {
+    return !queryMenu.classList.contains('closed') && !queryMenu.classList.contains('folded');
+}
+
+//  How small is "folded"?  Exactly the button's size.
+function measureQueryFold() {
+    queryMenu.style.setProperty('--fold-x', queryBtn.offsetWidth  / Math.max(queryMenu.offsetWidth, 1));
+    queryMenu.style.setProperty('--fold-y', queryBtn.offsetHeight / Math.max(queryMenu.offsetHeight, 1));
+}
+
+function openQueryMenu() {
+    if (fileTable === null) return;
+    showRow(false);                                     //  (the Details panel lives in the same spot)
+    clearTimeout(queryFold);
+    if (queryMenu.classList.contains('closed')) {
+        measureQueryFold();
+        queryMenu.classList.remove('closed');
+        void queryMenu.offsetWidth;                     //  (make the browser notice that first)
+    }
+    queryMenu.classList.remove('folded');
+    queryBtn.setAttribute('aria-expanded', 'true');
+}
+
+function closeQueryMenu() {
+    if (!queryMenuOpen()) return;
+    measureQueryFold();
+    queryMenu.classList.add('folded');
+    queryBtn.setAttribute('aria-expanded', 'false');
+    clearTimeout(queryFold);
+    queryFold = setTimeout(function () { queryMenu.classList.add('closed'); }, 480);
+}
+
+queryBtn.addEventListener('click', function () {
+    if (queryMenuOpen()) closeQueryMenu(); else openQueryMenu();
+});
+
+queryClose.addEventListener('click', function () {
+    closeQueryMenu();
+    queryBtn.focus();
+});
+
+//  Click somewhere that's NOT the menu or its button  ->  fold up.
+//  (Not while the loader is up:  a query is running,  and its answer will close it anyway.)
+document.addEventListener('click', function (event) {
+    //  (The click's PATH,  as it was when it started:  the  ×  you click is gone by now  (the builder was redrawn),
+    //   but it WAS inside the menu.)
+    const path = event.composedPath();
+    if (queryMenuOpen() && path.indexOf(queryMenu) === -1 && path.indexOf(queryBtn) === -1 && loader.hidden) {
+        closeQueryMenu();
+    }
+});
+
+//  Escape  ->  fold up.
+document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && queryMenuOpen()) {
+        closeQueryMenu();
+        queryBtn.focus();
+    }
+});
