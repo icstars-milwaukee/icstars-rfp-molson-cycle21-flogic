@@ -160,7 +160,7 @@
                 <div id="aimFocusName"></div>
                 <div id="aimFocusText"></div>
             </div>
-            <p class="row-sub">The whole row</p>
+            <p class="row-sub">Viewing row vertically<span class="dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
             <div id="aimRowList"></div>
         </div>
 
@@ -196,15 +196,20 @@
 
 
     <!--
-        5.  "Go to row"  +  "Expand"
+        5.  "Drag mode"  +  "Go to row"  +  "Expand"
 
             "hidden"  =  you can't see it yet.
             It shows up after you pick a file.
+
+            DRAG MODE:  hold on the sheet and drag,  any direction.  Let go  ->  it stops.
+            (Like the middle-click scroll on Windows,  for every mouse,  trackpad,  and phone.)
+            aria-pressed  =  tells screen readers it's an on/off switch,  and which one it is now.
 
             type="number"  ->  the box only takes numbers
     -->
 
     <div id="controls" hidden>
+        <button id="dragBtn" type="button" aria-pressed="false" title="Drag mode: hold on the sheet and drag, any direction">Drag mode</button>
         <input type="number" id="jumpInput" min="1" placeholder="Row #">
         <button id="jumpBtn">Go to row</button>
         <button id="expandBtn">Expand (show all)</button>
@@ -229,6 +234,9 @@
         <div id="header"></div>
         <div id="rows"></div>
     </div>
+
+    <!--  Drag mode's ANCHOR:  a little glass dot where you pressed.  Drag away from it.  -->
+    <div id="dragAnchor" hidden></div>
 
 
 

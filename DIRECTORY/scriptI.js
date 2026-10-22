@@ -93,7 +93,8 @@ const EXTRA_ROWS = 15;           //  how many extra rows to build above and belo
                                  //  (A whole window's worth on each side.)
 
 const GLIDE = 0.25;              //  how fast the wheel glide catches up.
-                                 //  Each frame, the window moves 25% of the way to where it's going.
+                                 //  Every 60th of a second, the window moves 25% of the way to where it's going.
+                                 //  (Timed by the CLOCK,  not by frames:  it feels the same on a 60, 120, or 144 Hz screen.)
                                  //  Bigger = snappier.  Smaller = floatier.  (Keep it between 0.1 and 0.5.)
 
 const BIG_FILE = 20000;          //  files with more rows than this wait until you stop typing to search
@@ -138,7 +139,7 @@ const aimNext     = document.getElementById('aimNext');        //  its  ▶
 const aimRowBtn   = document.getElementById('aimRowBtn');      //  its  "Details ▾"  button
 const aimRow      = document.getElementById('aimRow');         //  the "details" panel  (under the bar)
 const aimRowTitle = document.getElementById('aimRowTitle');    //  its  "Row 151 · 40 columns"
-const aimFocusName = document.getElementById('aimFocusName');  //  its focus card's  "NOTES · 214 letters"
+const aimFocusName = document.getElementById('aimFocusName');  //  its focus card's  "NOTES"  (the column's name)
 const aimFocusText = document.getElementById('aimFocusText');  //  its focus card's full text
 const aimRowList  = document.getElementById('aimRowList');     //  its list of  [name] [value]
 const aimRowClose = document.getElementById('aimRowClose');    //  its  ×
@@ -149,7 +150,9 @@ const statusText  = document.getElementById('status');         //  the "Rows 1�
 const outputBox   = document.getElementById('output');         //  the glass window
 const headerBox   = document.getElementById('header');         //  the header row  (line 0)
 const rowsBox     = document.getElementById('rows');           //  the rows inside the window
-const controls    = document.getElementById('controls');       //  the Go-to-row + Expand area
+const controls    = document.getElementById('controls');       //  the Drag mode + Go-to-row + Expand area
+const dragBtn     = document.getElementById('dragBtn');        //  the "Drag mode" button  (on / off)
+const dragAnchor  = document.getElementById('dragAnchor');     //  drag mode's anchor dot
 const jumpInput   = document.getElementById('jumpInput');      //  the "Row #" box
 const jumpBtn     = document.getElementById('jumpBtn');        //  the "Go to row" button
 const expandBtn   = document.getElementById('expandBtn');      //  the "Expand" button
@@ -224,6 +227,7 @@ let wheelTarget = null;   //  where the mouse wheel is gliding the window to  (n
 let wheelLeft   = 0;      //  leftover wheel spin that wasn't enough for a whole row yet
 let glideSpot   = 0;      //  exactly where the glide is right now  (can be in-between pixels)
 let gliding     = false;  //  is the glide moving right now?
+let glideLast   = 0;      //  the time of the glide's last step  (0 = it's just starting)
 
 let loadId         = 0;      //  counts every file you pick.  If you pick a NEW file while an old one
                              //  is still loading, the old one sees the number changed, and quits.
@@ -1578,12 +1582,11 @@ function drawRow() {
 
     aimRowTitle.textContent = 'Row ' + (row + 1) + '  ·  ' + count + ' column' + (count === 1 ? '' : 's');
 
-    //  1.  The FOCUS card:   "NOTES  ·  214 letters"   and the full text,  your word in yellow.
+    //  1.  The FOCUS card:   the column's name  ("NOTES")   and the full text,  your word in yellow.
     const full = cellAt(row, col);
 
     aimFocusName.textContent = (headerCells[col] || 'column ' + (col + 1)) +
-        (xlsxInfo !== null ? '  ·  ' + columnName(col) + (row + 2) : '') +
-        '  ·  ' + full.length.toLocaleString() + ' letter' + (full.length === 1 ? '' : 's');
+        (xlsxInfo !== null ? '  ·  ' + columnName(col) + (row + 2) : '');
 
     aimFocusText.textContent = '';
     paintMatches(aimFocusText, full.length > FOCUS_LETTERS ? full.slice(0, FOCUS_LETTERS) + '…' : full, query);
@@ -1882,27 +1885,34 @@ outputBox.addEventListener('wheel', function (e) {
 //
 //    ONE STEP OF THE GLIDE
 //
-//    The screen redraws about 60 times a second.
-//    Every redraw, the window moves 25% of the way to the finish line.
+//    The screen redraws 60 times a second  (or 120, or 144, on a fast screen).
+//    Every 60th of a second, the window moves 25% of the way to the finish line.
 //
 //       far away   ->  big steps    (fast)
 //       almost there  ->  tiny steps  (gentle landing)
 //
+//    A fast screen redraws more often,  so each of ITS steps is smaller:
+//    at 120 Hz,  2 steps of about 13%  =  the same as 1 step of 25%.
+//    Same glide,  just smoother.
+//
 //    "requestAnimationFrame" = "run this again right before the next redraw."
+//    It hands us the time  (t,  in milliseconds).
 //
 // ----------------------------------------------------------
 
-function glideStep() {
+function glideStep(t) {
 
     //  The finish line got cleared?  Stop.
     if (wheelTarget === null) {
         gliding = false;
+        glideLast = 0;
         return;
     }
 
     //  Someone else moved the window  (like dragging the scrollbar)?  Let them.  Stop gliding.
     if (Math.abs(outputBox.scrollTop - scrollbarSpotFor(glideSpot)) > 2) {
         gliding = false;
+        glideLast = 0;
         wheelTarget = null;
         wheelLeft = 0;
         return;
@@ -1916,11 +1926,18 @@ function glideStep() {
         glideSpot = wheelTarget;
         setViewY(wheelTarget);
         gliding = false;
+        glideLast = 0;
         return;
     }
 
-    //  Move 25% of the way there.
-    glideSpot += gap * GLIDE;
+    //  How long since the last step?  (The first step:  pretend a 60th of a second.
+    //  A long pause,  like a busy moment?  Count at most a 10th of a second,  so it doesn't jump.)
+    const passed = glideLast === 0 ? 1000 / 60 : Math.min(t - glideLast, 100);
+    glideLast = t;
+
+    //  Move 25% of the way there  for every 60th of a second that passed.
+    //  ("Keep 75%,  once per 60th of a second"  ->  0.75 to the power of how many 60ths passed.)
+    glideSpot += gap * (1 - Math.pow(1 - GLIDE, passed / (1000 / 60)));
     setViewY(glideSpot);
 
     requestAnimationFrame(glideStep);             //  same thing again, next redraw
@@ -1928,6 +1945,8 @@ function glideStep() {
 
 
 function snapToRow() {
+
+    if (dragging) return;                   //  drag mode is moving?  Snap when you let go, not now.
 
     wheelTarget = null;                     //  the glide is over
     wheelLeft = 0;
@@ -1953,6 +1972,165 @@ function snapToRow() {
         gliding = true;
         requestAnimationFrame(glideStep);
     }
+}
+
+
+
+// ----------------------------------------------------------
+//
+//    DRAG MODE
+//
+//    Like the mouse's middle-click scroll on Windows,  but for EVERYONE:
+//    Macs  (no middle click),  trackpads,  and phones.
+//
+//    Turn it on  ->  HOLD anywhere on the sheet.  That spot is the ANCHOR  (a little glass dot).
+//    Drag away from it  ->  the sheet moves that way,  in ANY direction:
+//    up,  down,  sideways,  or diagonal.   Let go  ->  it stops.
+//
+//         ●  the anchor
+//          \
+//           \     the further from the anchor,  the faster.
+//            ↘    Close to it  =  slow and careful.   On it  =  stopped.
+//
+//    Escape stops it too.  When it stops,  it lands on a whole row  (like the wheel).
+//
+//    It never goes past the top,  the bottom,  or the sides,
+//    and its top speeds stay inside what the page can draw smoothly.
+//
+// ----------------------------------------------------------
+
+const DRAG_DEAD_ZONE = 10;      //  pixels around the anchor where nothing moves  (so your hand can rest)
+const DRAG_FULL_AT   = 250;     //  this far from the anchor  (in pixels)  =  top speed
+const DRAG_TOP_DOWN  = 6000;    //  top speed up and down:  pixels a second  (= 200 rows a second)
+const DRAG_TOP_SIDE  = 3000;    //  top speed sideways  (slower:  sideways means building new columns)
+
+let dragOn     = false;     //  is the "Drag mode" button on?
+let dragging   = false;     //  holding and dragging right now?
+let anchorX    = 0;         //  where you pressed  (on the screen)
+let anchorY    = 0;
+let pointerX   = 0;         //  where the pointer is now
+let pointerY   = 0;
+let dragX      = 0;         //  where we're looking:  sideways,  in exact SHEET pixels
+let dragY      = 0;         //  ...and up and down.   (Exact,  even between pixels:  slow speeds add up.)
+let dragWidth  = 0;         //  measured once when you press  (so the drag never has to stop and measure)
+let dragBottom = 0;         //  the lowest it can go
+let dragPage   = false;     //  Expand mode?  Then the PAGE scrolls up and down,  not the window.
+let dragLast   = 0;         //  the time of the last step  (0 = just starting)
+
+
+//  The "Drag mode" button:  on / off.
+dragBtn.addEventListener('click', function () {
+    dragOn = !dragOn;
+    dragBtn.setAttribute('aria-pressed', dragOn);
+    outputBox.classList.toggle('drag', dragOn);     //  the clothes:  a "drag" mouse pointer,  and no phone panning
+    if (!dragOn) stopDragging();
+});
+
+
+//  How fast,  for this far from the anchor?   (in pixels a second)
+//  Gentle near the anchor,  quick far away:  the speed grows with the distance SQUARED.
+//     10 px away  ->  0        130 px  ->  a quarter of top speed        250 px +  ->  top speed
+function dragSpeed(distance, top) {
+    const past = Math.abs(distance) - DRAG_DEAD_ZONE;
+    if (past <= 0) return 0;
+    const amount = Math.min(past / (DRAG_FULL_AT - DRAG_DEAD_ZONE), 1);
+    return Math.sign(distance) * top * amount * amount;
+}
+
+
+//  HOLD on the sheet  ->  drop the anchor,  start moving.
+outputBox.addEventListener('pointerdown', function (e) {
+
+    if (!dragOn || dragging) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;       //  only the main button
+
+    //  On the window's own scrollbars?  Let them work like always.
+    const box = outputBox.getBoundingClientRect();
+    if (e.clientX - box.left - outputBox.clientLeft > outputBox.clientWidth ||
+        e.clientY - box.top - outputBox.clientTop > outputBox.clientHeight) return;
+
+    e.preventDefault();                             //  no text selecting,  no browser scrolling
+
+    //  Keep telling us where the pointer is,  even off the sheet.
+    //  (A pointer that's already gone can't be held onto.  The browser complains:  fine,  carry on.)
+    try { outputBox.setPointerCapture(e.pointerId); } catch (err) { }
+
+    dragging = true;
+    anchorX  = pointerX = e.clientX;
+    anchorY  = pointerY = e.clientY;
+
+    wheelTarget = null;                             //  a wheel glide going?  The drag takes over.
+    clearTimeout(snapTimer);
+
+    //  Where are we now?  (Measure everything ONCE,  here.)
+    dragPage   = outputBox.classList.contains('expanded');
+    dragWidth  = Math.max(outputBox.clientWidth - NUM_WIDTH, 0);
+    dragX      = sheetSpot(outputBox.scrollLeft, dragWidth);
+    dragY      = dragPage ? window.scrollY : readViewY();
+    dragBottom = dragPage ? document.documentElement.scrollHeight - window.innerHeight : lowestViewY();
+
+    dragAnchor.style.left = anchorX + 'px';
+    dragAnchor.style.top  = anchorY + 'px';
+    dragAnchor.hidden = false;
+
+    dragLast = 0;
+    requestAnimationFrame(dragStep);
+});
+
+
+//  The pointer moves  ->  remember where it is.  (The next step moves toward it.)
+window.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    pointerX = e.clientX;
+    pointerY = e.clientY;
+});
+
+//  Let go  (or the browser cancels it,  or you switch to another window)  ->  stop.
+window.addEventListener('pointerup', stopDragging);
+window.addEventListener('pointercancel', stopDragging);
+window.addEventListener('blur', stopDragging);
+
+document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && dragging) stopDragging();
+});
+
+
+//  ONE STEP OF THE DRAG  (every redraw).   Timed by the clock,  like the glide,
+//  so it moves the same speed on a 60, 120, or 144 Hz screen.
+function dragStep(t) {
+
+    if (!dragging) return;
+
+    const passed  = dragLast === 0 ? 1000 / 60 : Math.min(t - dragLast, 100);
+    dragLast = t;
+    const seconds = passed / 1000;
+
+    const speedX = dragSpeed(pointerX - anchorX, DRAG_TOP_SIDE);
+    const speedY = dragSpeed(pointerY - anchorY, DRAG_TOP_DOWN);
+
+    //  Sideways  (in sheet pixels,  then turned into the scrollbar's number:  it might be "scaled")
+    if (speedX !== 0) {
+        dragX = Math.min(Math.max(dragX + speedX * seconds, 0), Math.max(sheetWidth - dragWidth, 0));
+        outputBox.scrollLeft = scrollSpotFor(dragX, dragWidth);
+    }
+
+    //  Up and down
+    if (speedY !== 0) {
+        dragY = Math.min(Math.max(dragY + speedY * seconds, 0), Math.max(dragBottom, 0));
+        if (dragPage) window.scrollTo(window.scrollX, dragY);
+        else setViewY(dragY);
+    }
+
+    //  (Moving the scrollbars sets off the "scroll" listener,  which builds the new rows and columns.)
+    requestAnimationFrame(dragStep);
+}
+
+
+function stopDragging() {
+    if (!dragging) return;
+    dragging = false;
+    dragAnchor.hidden = true;
+    snapToRow();                                    //  land on a whole row
 }
 
 

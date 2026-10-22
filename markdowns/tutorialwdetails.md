@@ -11,6 +11,7 @@ You're going to build a web page that opens a CSV file and shows it like a **min
 - A small glass **theme chip** in the corner unfolds into a theme menu (the default theme is **Neo-Neutral**)
 - It opens **Excel files (`.xlsx`)** too, with dates done carefully (Part 5)
 - A **snap menu** ("the aimbot") locks onto search matches and snaps the sheet right to them, even thousands of columns away (Part 6)
+- **Drag mode**: hold on the sheet and drag it in any direction, with a mouse, a trackpad, or a finger (Part 7)
 
 You'll build it **one piece at a time**. After each part there's a **✅ Test it** step, so you always know it's working before you move on.
 
@@ -254,7 +255,7 @@ const MAX_SCROLL_WIDTH = 4000000;   // wider sheet than this? the sideways scrol
 const MAX_SCROLL_HEIGHT = 4000000;  // more rows than fit in this? the up-and-down scrollbar gets "scaled" (Step 2.20)
 const NUM_WIDTH   = 60;     // how wide the row-number column is (in pixels)
 const BIG_FILE    = 20000;  // bigger than this? search waits until you stop typing
-const GLIDE       = 0.25;   // how fast the wheel glide catches up (bigger = snappier, smaller = floatier)
+const GLIDE       = 0.25;   // how fast the wheel glide catches up, every 60th of a second (bigger = snappier, smaller = floatier)
 const CHUNK_TIME  = 12;     // big jobs are done in BITES of about 12 milliseconds, so the page never freezes
 const LOADER_DELAY = 150;   // the loader only shows up if a job takes longer than this (milliseconds)
 const SHOW_LETTERS = 1000;  // a cell with MORE letters than this only shows (and hovers) its first 1,000 (Step 2.5)
@@ -336,6 +337,7 @@ let wheelTarget = null;   // the glide's FINISH LINE (null = no glide)
 let wheelLeft   = 0;      // leftover wheel spin, not enough for a whole row yet
 let glideSpot   = 0;      // exactly where the glide is right now (can be in-between pixels)
 let gliding     = false;  // is the glide moving right now?
+let glideLast   = 0;      // the time of the glide's last step (0 = it's just starting)
 
 let loadId         = 0;      // counts every file you pick (a NEW file = a new number, so the old one quits)
 let fileNote       = '';     // a note added to the "Rows 1–15" words about how the file was read (or nothing)
@@ -2161,7 +2163,9 @@ The wheel doesn't start a new glide every time you spin it. That would stop-and-
    the glide         →   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~>   (never stops in the middle)
 ```
 
-Every time the screen redraws (about 60 times a second), the window moves **25% of the way** to the finish line (that's `GLIDE = 0.25`). Far away = big steps. Almost there = tiny steps. So it speeds off and lands gently.
+Every 60th of a second, the window moves **25% of the way** to the finish line (that's `GLIDE = 0.25`). Far away = big steps. Almost there = tiny steps. So it speeds off and lands gently.
+
+> **Why "every 60th of a second", and not "every redraw"?** Most screens redraw 60 times a second, but gaming monitors and newer laptops redraw 120 or 144 times. If the glide moved 25% every REDRAW, it would run twice as fast on those screens. So it checks the clock: at 120 Hz, each redraw moves about 13%, and 2 of those = one 25% step. Same glide on every screen, just smoother on the fast ones.
 
 ```js
 outputBox.addEventListener('wheel', function (e) {
@@ -2207,17 +2211,20 @@ outputBox.addEventListener('wheel', function (e) {
 
 
 // ONE STEP of the glide. Runs once per screen redraw.
-function glideStep() {
+// requestAnimationFrame hands it the time (t, in milliseconds).
+function glideStep(t) {
 
     // The finish line got cleared? Stop.
     if (wheelTarget === null) {
         gliding = false;
+        glideLast = 0;
         return;
     }
 
     // Someone else moved the window (like dragging the scrollbar)? Let them. Stop gliding.
     if (Math.abs(outputBox.scrollTop - scrollbarSpotFor(glideSpot)) > 2) {
         gliding = false;
+        glideLast = 0;
         wheelTarget = null;
         wheelLeft = 0;
         return;
@@ -2230,11 +2237,18 @@ function glideStep() {
         glideSpot = wheelTarget;
         setViewY(wheelTarget);
         gliding = false;
+        glideLast = 0;
         return;
     }
 
-    // Move 25% of the way there.
-    glideSpot += gap * GLIDE;
+    // How long since the last step? (The first step: pretend a 60th of a second.
+    // A long pause, like a busy moment? Count at most a 10th of a second, so it doesn't jump.)
+    const passed = glideLast === 0 ? 1000 / 60 : Math.min(t - glideLast, 100);
+    glideLast = t;
+
+    // Move 25% of the way there for every 60th of a second that passed.
+    // ("Keep 75%, once per 60th of a second" -> 0.75 to the power of how many 60ths passed.)
+    glideSpot += gap * (1 - Math.pow(1 - GLIDE, passed / (1000 / 60)));
     setViewY(glideSpot);
 
     requestAnimationFrame(glideStep);             // same thing again, next redraw
@@ -3728,7 +3742,7 @@ Refresh. You should have:
 - [ ] Open it, close it, open it again: it unfolds every time
 - [ ] Open a CSV with the menu open: the menu is made of the same glass as the CSV window
 
-**The CSV reader is done!** 🎉 Two more parts: Part 5 teaches it to open Excel files, and Part 6 adds the snap menu.
+**The CSV reader is done!** 🎉 Three more parts: Part 5 teaches it to open Excel files, Part 6 adds the snap menu, and Part 7 adds drag mode.
 
 <br>
 
@@ -5207,7 +5221,7 @@ The browser's own file picker can't be split in two (its button and its file nam
                 <div id="aimFocusName"></div>
                 <div id="aimFocusText"></div>
             </div>
-            <p class="row-sub">The whole row</p>
+            <p class="row-sub">Viewing row vertically<span class="dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
             <div id="aimRowList"></div>
         </div>
 
@@ -5479,11 +5493,11 @@ In `styleI.css`, the old Choose File rules (`#csvFileInput`, `#csvFileInput::fil
          ┌────────────────────────────────────────────┐
          │ Row 151  ·  40 columns                   × │   <-  dark
          ├────────────────────────────────────────────┤
-         │ NOTES  ·  214 letters                      │   <-  the focus card  (light)
+         │ NOTES                                      │   <-  the focus card  (light)
          │ Customer called twice about the late       │
          │ delivery. Promised a credit ...            │
          ├────────────────────────────────────────────┤
-         │ The whole row                              │
+         │ Viewing row vertically...                  │
          ├────────────┬───────────────────────────────┤
          │ H0         │ v150.0                        │
          │ notes      │▓Customer called twice about ▓ │
@@ -5557,7 +5571,7 @@ In `styleI.css`, the old Choose File rules (`#csvFileInput`, `#csvFileInput::fil
     border-bottom: 1px solid rgba(255, 255, 255, 0.6);
 }
 
-/*  "NOTES  ·  214 letters"  */
+/*  "NOTES"  (the column's name)  */
 #aimFocusName {
     padding: 8px 14px 2px;
     font-size: 11px;
@@ -5582,7 +5596,7 @@ In `styleI.css`, the old Choose File rules (`#csvFileInput`, `#csvFileInput::fil
     scrollbar-width: thin;
 }
 
-/*  "The whole row"  */
+/*  "Viewing row vertically..."  (its dots count up,  like "Reading from...")  */
 .row-sub {
     flex-shrink: 0;
     margin: 0;
@@ -5697,7 +5711,7 @@ In `styleI.css`, the old Choose File rules (`#csvFileInput`, `#csvFileInput::fil
 | `max-height: 440px` | The panel can't grow taller than 440px. Inside, the focus card stops at 200px and the row list at what's left: each one scrolls on its own. |
 | `flex-shrink: 0` (the focus card) | "Never squeeze me." When room runs out, the row list gives up room, not the card. |
 | `font-size: 15px; line-height: 24px` (the focus card) | Bigger letters, roomy lines: made for reading a paragraph. |
-| `text-transform: uppercase` | Show the words in CAPITALS (`NOTES · 214 LETTERS`), without changing the real words. |
+| `text-transform: uppercase` | Show the words in CAPITALS (`NOTES`, `VIEWING ROW VERTICALLY`), without changing the real words. |
 | `grid-template-columns: minmax(80px, max-content) minmax(0, 1fr)` | 2 columns: the names (as wide as they need, at least 80px), then the values get the rest. |
 | `white-space: pre-wrap` | Keep the value's line breaks, and wrap long text, so you can read ALL of it. |
 | `steps(1, end)` | Don't fade: JUMP from one value to the next. |
@@ -5707,6 +5721,8 @@ In `styleI.css`, the old Choose File rules (`#csvFileInput`, `#csvFileInput::fil
 > **The dots' timing:** 4 beats on one 2-second loop (half a second each). All 3 dots start see-through. Dot 1 shows a quarter of the way in (`25%`), dot 2 at half (`50%`), dot 3 at three quarters (`75%`), and they all vanish again when the loop starts over. So: `   ` → `.` → `..` → `...` → `   ` ...
 
 > **Why no crosshair?** It's a tool, not a game. Plain words (**No search**, **Ready**, **3 / 128**) say what it's doing, with no decoration.
+
+> **The details panel counts too.** Its "Viewing row vertically" label ends in the SAME 3 `<span>`s with `class="dots"`. The `.dots` rules already know what to do, so it counts `   ` `.` `..` `...` with no new code at all.
 
 Then the **lock-on pulse**, next to the other cell rules (after `.cell.num`):
 
@@ -5755,7 +5771,7 @@ const aimNext     = document.getElementById('aimNext');        //  its  ▶
 const aimRowBtn   = document.getElementById('aimRowBtn');      //  its  "Details ▾"  button
 const aimRow      = document.getElementById('aimRow');         //  the "details" panel  (under the bar)
 const aimRowTitle = document.getElementById('aimRowTitle');    //  its  "Row 151 · 40 columns"
-const aimFocusName = document.getElementById('aimFocusName');  //  its focus card's  "NOTES · 214 letters"
+const aimFocusName = document.getElementById('aimFocusName');  //  its focus card's  "NOTES"  (the column's name)
 const aimFocusText = document.getElementById('aimFocusText');  //  its focus card's full text
 const aimRowList  = document.getElementById('aimRowList');     //  its list of  [name] [value]
 const aimRowClose = document.getElementById('aimRowClose');    //  its  ×
@@ -6062,12 +6078,11 @@ function drawRow() {
 
     aimRowTitle.textContent = 'Row ' + (row + 1) + '  ·  ' + count + ' column' + (count === 1 ? '' : 's');
 
-    //  1.  The FOCUS card:   "NOTES  ·  214 letters"   and the full text,  your word in yellow.
+    //  1.  The FOCUS card:   the column's name  ("NOTES")   and the full text,  your word in yellow.
     const full = cellAt(row, col);
 
     aimFocusName.textContent = (headerCells[col] || 'column ' + (col + 1)) +
-        (xlsxInfo !== null ? '  ·  ' + columnName(col) + (row + 2) : '') +
-        '  ·  ' + full.length.toLocaleString() + ' letter' + (full.length === 1 ? '' : 's');
+        (xlsxInfo !== null ? '  ·  ' + columnName(col) + (row + 2) : '');
 
     aimFocusText.textContent = '';
     paintMatches(aimFocusText, full.length > FOCUS_LETTERS ? full.slice(0, FOCUS_LETTERS) + '…' : full, query);
@@ -6160,7 +6175,6 @@ drawAim();                          //  start out "Ready"
 | `ROW_LIMIT = 200` | A row with thousands of columns only lists the 200 around the target, so the panel stays quick. A note says which ones. |
 | `document.createDocumentFragment()` | A box off to the side: build the whole list in it, then drop it onto the page all at once. |
 | `text.slice(0, 2000) + '…'` | A GIANT cell: the list shows its first 2000 letters. (The focus card shows up to `FOCUS_LETTERS` = 20,000.) |
-| `full.length.toLocaleString()` | The number with commas, like `1,040`. |
 | `aimFocusText.scrollTop = word.offsetTop - ...` | Scroll the card so your yellow word is near the top (one line of room above it). |
 | `classList.toggle('cut', cut)` | Add the `cut` label if `cut` is true, take it off if it's false. |
 | `aimRowList.scrollTop = ...` | Scroll the panel so the target sits a third of the way down. |
@@ -6191,10 +6205,328 @@ drawAim();                          //  start out "Ready"
 4. Press **▶** (or Enter): the sheet jumps right to it, and the cell pulses. Again: the next one.
 5. **◀** (or Shift+Enter) goes back. At the end, it wraps around.
 6. Search for a word in a LONG cell: the target shows `... ▾`, and **Details ▾** turns dark and pulses twice.
-7. Press **Details ▾**: the full text drops down, big, with your word in yellow, and the whole row under it (the match on a dark square, wrapped so you see all of it). Press ▶: it follows. Press **×** or **Escape**: it closes.
+7. Press **Details ▾**: the full text drops down, big, with your word in yellow, and the whole row under it, labeled **VIEWING ROW VERTICALLY** with the same counting dots (the match on a dark square, wrapped so you see all of it). Press ▶: it follows. Press **×** or **Escape**: it closes.
 8. Search for nonsense: **No matches**. Clear the search: back to **No search** and **Ready**.
 
 > Try it on a WIDE file (lots of columns) with your word way off to the right. That's what it's for.
+
+<br>
+
+---
+
+<br>
+
+# PART 7: Drag Mode ✋
+
+On Windows, clicking the mouse WHEEL turns on a special scroll: move the mouse away from where you clicked, and the page moves that way, in any direction. Further away = faster.
+
+But Macs have no middle click, trackpads don't either, plenty of people never use it, and phones have no mouse at all. So we build it **into the page**, behind a plain button anyone can see: **Drag mode**.
+
+```text
+   [Drag mode]   [Row # | Go to row]    [Expand (show all)]
+        ↑ first in the row, so people see it right away.  On = a dark square.
+
+   Then HOLD on the sheet, and drag:
+
+        ●  ← the ANCHOR (a little glass dot, right where you pressed)
+         \
+          \     drag away from it  →  the sheet moves that way
+           ↘    further  =  faster      close  =  slow and careful      on it  =  stopped
+```
+
+- **Hold and drag** (mouse, trackpad, or finger): the sheet moves. **Let go**: it stops, and lands on a whole row, like the wheel.
+- **Escape** stops it too.
+- It never goes past the top, the bottom, or the sides, and its top speed stays inside what the page can draw smoothly.
+
+This part touches **3 files**: the skeleton, the clothes, and the brain.
+
+<br>
+
+### Step 7.1: The skeleton
+
+**1.** In `testI.html`, put the button FIRST inside `<div id="controls" hidden>`:
+
+```html
+        <button id="dragBtn" type="button" aria-pressed="false" title="Drag mode: hold on the sheet and drag, any direction">Drag mode</button>
+```
+
+**2.** And right after the `<div id="output">...</div>` window, the anchor dot:
+
+```html
+    <!--  Drag mode's ANCHOR:  a little glass dot where you pressed.  Drag away from it.  -->
+    <div id="dragAnchor" hidden></div>
+```
+
+| Code | Baby words |
+|---|---|
+| `aria-pressed="false"` | Tells screen readers "this is an ON/OFF switch, and it's off." The brain flips it. |
+| `title="..."` | The little note that pops up when the mouse rests on the button: how to use it. |
+
+<br>
+
+### Step 7.2: The clothes
+
+Add this right after the `#expandBtn` rule:
+
+```css
+/*  "Drag mode".  First in the row,  so people see it right away.
+    It's a mode  (it changes what pressing on the sheet does),  so it sits apart too.  */
+#dragBtn {
+    margin: 0 28px 0 0;
+}
+
+/*  ON:  a dark square,  like every other "on" switch here  */
+#dragBtn[aria-pressed="true"] {
+    color: #fff;
+    background: var(--square-dark);
+    text-shadow: 0 0 8px var(--theme-glow);
+    box-shadow:
+        inset 0 0 10px color-mix(in srgb, var(--theme-glow) 35%, transparent),
+        0 4px 14px rgba(0, 0, 0, 0.1);
+}
+
+/*  Drag mode is on:  the mouse turns into a "drag any direction" pointer over the sheet,
+    and a finger on a phone drags it too  (instead of the phone scrolling the page by itself).  */
+#output.drag {
+    cursor: all-scroll;
+    touch-action: none;
+    user-select: none;
+}
+
+/*  The ANCHOR:  where you pressed.  A little glass dot  (a light square,  made round),
+    with a dark center.  Drag away from it.  It sits ON the screen  (fixed),  not on the sheet.  */
+#dragAnchor {
+    position: fixed;
+    z-index: 12;
+    width: 28px;
+    height: 28px;
+    margin: -15px 0 0 -15px;        /*  centered on the spot  (half of 28,  plus the 1px edge)  */
+    border-radius: 50%;
+    background: var(--square-light);
+    border: 1px solid var(--glass-edge);
+    box-shadow:
+        inset 0 0 8px rgba(255, 255, 255, 0.8),
+        0 0 12px 2px rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(6px);
+    pointer-events: none;           /*  clicks go right through it  */
+}
+
+#dragAnchor::after {
+    content: "";
+    position: absolute;
+    inset: 10px;
+    border-radius: 50%;
+    background: var(--square-dark);
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `[aria-pressed="true"]` | "When the switch is ON." The same label the screen readers use: one label, two jobs. |
+| `cursor: all-scroll` | Over the sheet, the mouse turns into the "drag any direction" pointer. |
+| `touch-action: none` | On a phone: "Browser, don't scroll the page when a finger drags here. The brain's got it." |
+| `user-select: none` | Dragging doesn't paint the words blue (selecting them). |
+| `position: fixed` (the anchor) | Glued to the SCREEN, not the sheet: the sheet moves under it, and it stays put. |
+| `margin: -15px 0 0 -15px` | Pull it back by half its size (28 + the 2 edges = 30, half = 15), so its CENTER sits on the spot, not its corner. |
+| `pointer-events: none` | Clicks go right through it. |
+| `inset: 10px` (the dark center) | "Stretch to fill, but 10 pixels in from every edge" = an 8-pixel dot in the middle. |
+
+<br>
+
+### Step 7.3: The brain
+
+**1.** Find the new pieces (Step 2.1). Right after the `controls` line:
+
+```js
+const dragBtn     = document.getElementById('dragBtn');        //  the "Drag mode" button  (on / off)
+const dragAnchor  = document.getElementById('dragAnchor');     //  drag mode's anchor dot
+```
+
+**2.** In `snapToRow` (Step 2.20), make this the very first line inside it:
+
+```js
+    if (dragging) return;                   //  drag mode is moving?  Snap when you let go, not now.
+```
+
+**3.** And drag mode itself, right after `snapToRow`:
+
+```js
+const DRAG_DEAD_ZONE = 10;      //  pixels around the anchor where nothing moves  (so your hand can rest)
+const DRAG_FULL_AT   = 250;     //  this far from the anchor  (in pixels)  =  top speed
+const DRAG_TOP_DOWN  = 6000;    //  top speed up and down:  pixels a second  (= 200 rows a second)
+const DRAG_TOP_SIDE  = 3000;    //  top speed sideways  (slower:  sideways means building new columns)
+
+let dragOn     = false;     //  is the "Drag mode" button on?
+let dragging   = false;     //  holding and dragging right now?
+let anchorX    = 0;         //  where you pressed  (on the screen)
+let anchorY    = 0;
+let pointerX   = 0;         //  where the pointer is now
+let pointerY   = 0;
+let dragX      = 0;         //  where we're looking:  sideways,  in exact SHEET pixels
+let dragY      = 0;         //  ...and up and down.   (Exact,  even between pixels:  slow speeds add up.)
+let dragWidth  = 0;         //  measured once when you press  (so the drag never has to stop and measure)
+let dragBottom = 0;         //  the lowest it can go
+let dragPage   = false;     //  Expand mode?  Then the PAGE scrolls up and down,  not the window.
+let dragLast   = 0;         //  the time of the last step  (0 = just starting)
+
+
+//  The "Drag mode" button:  on / off.
+dragBtn.addEventListener('click', function () {
+    dragOn = !dragOn;
+    dragBtn.setAttribute('aria-pressed', dragOn);
+    outputBox.classList.toggle('drag', dragOn);     //  the clothes:  a "drag" mouse pointer,  and no phone panning
+    if (!dragOn) stopDragging();
+});
+
+
+//  How fast,  for this far from the anchor?   (in pixels a second)
+//  Gentle near the anchor,  quick far away:  the speed grows with the distance SQUARED.
+//     10 px away  ->  0        130 px  ->  a quarter of top speed        250 px +  ->  top speed
+function dragSpeed(distance, top) {
+    const past = Math.abs(distance) - DRAG_DEAD_ZONE;
+    if (past <= 0) return 0;
+    const amount = Math.min(past / (DRAG_FULL_AT - DRAG_DEAD_ZONE), 1);
+    return Math.sign(distance) * top * amount * amount;
+}
+
+
+//  HOLD on the sheet  ->  drop the anchor,  start moving.
+outputBox.addEventListener('pointerdown', function (e) {
+
+    if (!dragOn || dragging) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;       //  only the main button
+
+    //  On the window's own scrollbars?  Let them work like always.
+    const box = outputBox.getBoundingClientRect();
+    if (e.clientX - box.left - outputBox.clientLeft > outputBox.clientWidth ||
+        e.clientY - box.top - outputBox.clientTop > outputBox.clientHeight) return;
+
+    e.preventDefault();                             //  no text selecting,  no browser scrolling
+
+    //  Keep telling us where the pointer is,  even off the sheet.
+    //  (A pointer that's already gone can't be held onto.  The browser complains:  fine,  carry on.)
+    try { outputBox.setPointerCapture(e.pointerId); } catch (err) { }
+
+    dragging = true;
+    anchorX  = pointerX = e.clientX;
+    anchorY  = pointerY = e.clientY;
+
+    wheelTarget = null;                             //  a wheel glide going?  The drag takes over.
+    clearTimeout(snapTimer);
+
+    //  Where are we now?  (Measure everything ONCE,  here.)
+    dragPage   = outputBox.classList.contains('expanded');
+    dragWidth  = Math.max(outputBox.clientWidth - NUM_WIDTH, 0);
+    dragX      = sheetSpot(outputBox.scrollLeft, dragWidth);
+    dragY      = dragPage ? window.scrollY : readViewY();
+    dragBottom = dragPage ? document.documentElement.scrollHeight - window.innerHeight : lowestViewY();
+
+    dragAnchor.style.left = anchorX + 'px';
+    dragAnchor.style.top  = anchorY + 'px';
+    dragAnchor.hidden = false;
+
+    dragLast = 0;
+    requestAnimationFrame(dragStep);
+});
+
+
+//  The pointer moves  ->  remember where it is.  (The next step moves toward it.)
+window.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    pointerX = e.clientX;
+    pointerY = e.clientY;
+});
+
+//  Let go  (or the browser cancels it,  or you switch to another window)  ->  stop.
+window.addEventListener('pointerup', stopDragging);
+window.addEventListener('pointercancel', stopDragging);
+window.addEventListener('blur', stopDragging);
+
+document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && dragging) stopDragging();
+});
+
+
+//  ONE STEP OF THE DRAG  (every redraw).   Timed by the clock,  like the glide,
+//  so it moves the same speed on a 60, 120, or 144 Hz screen.
+function dragStep(t) {
+
+    if (!dragging) return;
+
+    const passed  = dragLast === 0 ? 1000 / 60 : Math.min(t - dragLast, 100);
+    dragLast = t;
+    const seconds = passed / 1000;
+
+    const speedX = dragSpeed(pointerX - anchorX, DRAG_TOP_SIDE);
+    const speedY = dragSpeed(pointerY - anchorY, DRAG_TOP_DOWN);
+
+    //  Sideways  (in sheet pixels,  then turned into the scrollbar's number:  it might be "scaled")
+    if (speedX !== 0) {
+        dragX = Math.min(Math.max(dragX + speedX * seconds, 0), Math.max(sheetWidth - dragWidth, 0));
+        outputBox.scrollLeft = scrollSpotFor(dragX, dragWidth);
+    }
+
+    //  Up and down
+    if (speedY !== 0) {
+        dragY = Math.min(Math.max(dragY + speedY * seconds, 0), Math.max(dragBottom, 0));
+        if (dragPage) window.scrollTo(window.scrollX, dragY);
+        else setViewY(dragY);
+    }
+
+    //  (Moving the scrollbars sets off the "scroll" listener,  which builds the new rows and columns.)
+    requestAnimationFrame(dragStep);
+}
+
+
+function stopDragging() {
+    if (!dragging) return;
+    dragging = false;
+    dragAnchor.hidden = true;
+    snapToRow();                                    //  land on a whole row
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `DRAG_DEAD_ZONE = 10` | Within 10 pixels of the anchor: nothing moves. Your hand can rest without the sheet drifting. |
+| `DRAG_TOP_DOWN = 6000` | Top speed up and down: 6,000 pixels a second = 200 rows a second. The treadmill (Step 2.6) builds that easily. |
+| `DRAG_TOP_SIDE = 3000` | Top speed sideways: slower, because sideways means building brand-new columns. |
+| `amount * amount` | The speed grows with the distance SQUARED: half way = a quarter of the speed. Gentle near the anchor, quick far away. |
+| `Math.sign(distance)` | `1` for down/right, `-1` for up/left. Which WAY to go. |
+| `e.preventDefault()` | "Browser, don't select words, and don't scroll by yourself." |
+| `setPointerCapture` | "Keep telling ME where this pointer goes, even when it leaves the sheet." So you can drag past the edge of the sheet. |
+| `try { ... } catch (err) { }` | "Try this. If it fails, don't crash, just carry on." |
+| `window.addEventListener('pointerup', stopDragging)` | Let go ANYWHERE on the page (even off the sheet): stop. |
+| `sheetSpot` / `scrollSpotFor` | Sideways, it moves in SHEET pixels, then turns that into the scrollbar's number. That keeps the speed right on super-wide "scaled" sheets (Step 2.9). |
+| `setViewY` | Up and down, the same: exact pixels, even on a scaled 200,000-row file (Step 2.20). |
+| `window.scrollTo` | Expand mode: the whole PAGE scrolls, not the window. |
+| `Math.min(Math.max(...))` | Keep it between the top (0) and the bottom (`dragBottom`), and between the left and the right edge. Never past them. |
+
+> **Why HOLD, and not "click once, then steer"?** We tried both. Holding feels better, and it's foolproof: your hand is ON the drag the whole time, so you always know how to stop it (let go). A "click to start" mode keeps moving after you let go, which is easy to lose track of.
+
+> **Why does it keep its OWN exact spot (`dragX`, `dragY`)?** The scrollbar only stores whole pixels. Dragging slowly (say, 40 pixels a second) is under 1 pixel per redraw: the scrollbar would round it away every time, and the sheet would never move. The brain's own numbers keep the fractions, so they add up.
+
+> **Why measure everything ONCE, when you press?** Measuring the page (`clientWidth`, `lowestViewY()`) right after moving it forces the browser to stop and redo its layout. Doing that every redraw would make the drag stutter. The sizes don't change mid-drag, so measuring once is enough.
+
+> **Why is it timed by the clock, like the glide?** So it moves the same speed on every screen: 6,000 pixels a SECOND, whether that's 100 per redraw (60 Hz) or 50 per redraw (120 Hz).
+
+> **Why doesn't `snapToRow` snap while dragging?** Every scroll restarts the "snap when you stop" timer (Step 2.20). Hold the pointer still near the anchor, and that timer would fire mid-drag and fight you. So `snapToRow` waits, and `stopDragging` calls it once, when you let go.
+
+> **Why skip presses on the scrollbars?** The window's own scrollbars are part of `#output`. Without the check, grabbing the scrollbar would drop an anchor instead.
+
+<br>
+
+### ✅ Test it
+
+1. Open a file: **Drag mode** is first in the controls row.
+2. Click it: it turns into a dark square. Over the sheet, the mouse turns into a 4-way arrow.
+3. Hold on the sheet: a glass dot appears. Drag down a little: the sheet creeps down. Drag further: it speeds up. Drag up, sideways, diagonally: it follows. Let go: it stops, and lands on a whole row.
+4. Just click (don't hold): nothing keeps moving.
+5. Drag to the very bottom: it stops there. To the top: it stops at row 1.
+6. Press **Escape** mid-drag: it stops. Click **Drag mode** again: off, and holding on the sheet does nothing special.
+7. On a phone (or with the browser's phone mode, F12 → the phone icon): turn it on, then hold and drag on the sheet.
+
+> Try it on a HUGE file (hundreds of thousands of rows) and a WIDE one: same speed, same smoothness.
 
 <br>
 
@@ -6211,6 +6543,10 @@ drawAim();                          //  start out "Ready"
 | **Show 20 rows instead of 15** | Change **BOTH**: `WINDOW_SIZE = 15` → `20` (brain) AND `calc(16 * 30px)` → `calc(21 * 30px)` (clothes). Remember the +1 for the header! |
 | **Make the wheel move more/fewer rows** | The wheel moves 1 row per 30 pixels of spin. Most mice spin 100 per click (≈ 3 rows). To change it, multiply `pixels` in the wheel listener, like `e.deltaY * 2` |
 | **Make the wheel glide snappier or floatier** | Change `GLIDE`. `0.4` = snappier, `0.15` = floatier. Keep it between `0.1` and `0.5`. |
+| **Make drag mode faster (or slower)** | `DRAG_TOP_DOWN` (up and down) and `DRAG_TOP_SIDE` (sideways), in pixels a second. Going much past `9000` down or `4000` sideways can outrun the treadmill on wide files. |
+| **Make drag mode reach top speed sooner** | Lower `DRAG_FULL_AT` (how far from the anchor = top speed). |
+| **Give your hand more (or less) resting room** | `DRAG_DEAD_ZONE`: the pixels around the anchor where nothing moves. |
+| **Move Drag mode to the end of the row** | Move the `<button id="dragBtn">` to the end of `#controls`, and flip its `margin` to `0 0 0 28px` (the gap on its left). |
 | **Build more/fewer extra rows** | Change `EXTRA_ROWS`. More = safer for super-fast scrolling, but a little more work per scroll. |
 | **Make the glow stronger** | In `.cell:hover`, raise `14px 2px` to something like `20px 6px` |
 | **Let columns get wider** | In `setColumnWidths`, change the `40` |
@@ -6259,6 +6595,14 @@ drawAim();                          //  start out "Ready"
 | Blank gaps while scrolling | `buildVisibleRows` isn't being called in the `scroll` listener, or the spacers weren't added in `render`. |
 | Scrolling yanks you back somewhere | A leftover `scroll-snap-type` rule in the CSS. The brain does the snapping now. Delete it. |
 | The wheel feels stiff / stutters on every row | The wheel listener is calling `scrollTo(...)` on every spin instead of just moving `wheelTarget` and letting `glideStep` follow it. |
+| The wheel glide is too fast on a 120 Hz / 144 Hz screen | `glideStep` is still `glideSpot += gap * GLIDE;`. It has to use the time that `passed` (Step 2.20). |
+| The glide jumps or never moves | `glideStep(t)` is missing the `t`, or `glideLast = 0;` is missing from one of the 3 "stop" spots (so the next glide thinks a huge pause happened). |
+| Drag mode does nothing | The button isn't on (`dragOn`), or the `pointerdown` listener is on the wrong piece: it has to be `outputBox`. |
+| Drag mode: the anchor shows in a corner, not where you pressed | `#dragAnchor` is missing `position: fixed;`, or the brain sets `left`/`top` without `+ 'px'`. |
+| Drag mode creeps, even with the pointer on the anchor | `dragSpeed` is missing the `if (past <= 0) return 0;` dead zone. |
+| Drag mode fights you, snapping back to rows mid-drag | `snapToRow` is missing `if (dragging) return;` at the top. |
+| Drag mode barely moves on a slow drag | The brain is reading the spot back from the scrollbar every step, instead of keeping its own `dragX` / `dragY` (the scrollbar drops the fractions). |
+| On a phone, dragging scrolls the PAGE instead of the sheet | `#output.drag` is missing `touch-action: none;`. |
 | Stripes jump around while scrolling | The CSS still uses `.line:nth-child(even)` instead of `.line.zebra`. |
 | The window isn't header + 15 rows | The numbers don't match in both places, or the row height isn't 30. |
 | Picking a file does nothing, and the Console says `startLoading is not defined` | Step 2.14 (the loader) is missing from the brain. |
@@ -6375,6 +6719,6 @@ drawAim();                          //  start out "Ready"
 - **Search can find a match you can't see.** On a wide file, a row might match because of something way off to the side. It shows up in the results, but the yellow is off-screen until you press ▶ in the snap menu (Part 6).
 - **The Details panel lists 200 columns at most** (the ones around the match). A giant cell shows its first 2,000 letters in the list, and its first 20,000 in the focus card.
 - **The focus card shows one cell at a time.** A row with your word in 3 cells: press ▶ to move the card to the next one (`hit 2 of 3`).
-- **Super-wide sheets scroll fast sideways.** Past `MAX_SCROLL_WIDTH`, each pixel of scrollbar covers many pixels of sheet. On the million-column test file, one click of Shift + wheel jumps about 14 columns instead of 1 or 2. (Fine for zooming across a giant sheet, but not for reading cell by cell. A fix: catch Shift + wheel in the brain and move a set number of columns, like the vertical wheel moves a set number of rows.)
+- **Super-wide sheets scroll fast sideways.** Past `MAX_SCROLL_WIDTH`, each pixel of scrollbar covers many pixels of sheet. On the million-column test file, one click of Shift + wheel jumps about 14 columns instead of 1 or 2. (Fine for zooming across a giant sheet, but not for reading cell by cell. A fix: catch Shift + wheel in the brain and move a set number of columns, like the vertical wheel moves a set number of rows.) (Or turn on drag mode: it moves in exact sheet pixels, at any speed you want, even on the million-column file.)
 - **Dragging the scrollbar on a HUGE file is coarse.** Past about 133,000 rows the scrollbar is squeezed, so one pixel of dragging jumps several rows. (The wheel and Go to row are still exact. It snaps to a whole row when you let go.)
 - **Really, REALLY huge files** (around 1 GB) may be too big for the browser to read at all. Everything up to a few hundred MB is fine.
