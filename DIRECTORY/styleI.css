@@ -76,6 +76,74 @@
 
 
 
+/*  ==========================================================
+
+        THE THEME:  NEO-DARK
+
+        Dark and FLAT:  a soft black page  (not grey:  just not the deepest black),
+        flat panels,  no white glows.
+        The fancy thing:  the floating glass panels  (the Details panel,  the theme menu)
+        BEND what's behind them  (see "NEO-DARK:  THE BENDING GLASS",  at the very bottom).
+
+        The accent:  "forest red",  a deep maroon.  Excel's greens,  moved to red  (hue 355°),
+        keeping EXACTLY how strong and how dark each one is:
+
+            Excel green         #217346  (hue 147°)   ->   #732128      (in reserve:  too dark to see on black)
+            darker Excel green  #185c37  (hue 147°)   ->   #5c181e      the "Spreadsheet View" button
+            brighter green      #21a366  (hue 152°)   ->   #a3212c      the  ƒ,  the letters line,  the glows
+
+        The second half of the list  (--line ... --cloud-glow)  are the little
+        glows and lines that Neo-Neutral writes right into the clothes:
+        here they're turned flat.
+
+    ==========================================================  */
+
+[data-theme="neo-dark"] {
+    --page:         #18191c;                        /*  the page:  a soft black  */
+    --text:         #e3e5e9;                        /*  light words  */
+    --text-soft:    #9aa0a9;                        /*  the not-as-important words  */
+
+    --glass-top:    rgba(255, 255, 255, 0.09);      /*  the glass:  clearer than Neo-Neutral's  */
+    --glass-bottom: rgba(255, 255, 255, 0.025);
+    --glass-edge:   rgba(255, 255, 255, 0.16);
+
+    --line-num-bg:  #212327;                        /*  flat,  solid colors  */
+    --header-bg:    #26282d;
+    --corner-bg:    #2d3036;
+
+    --theme-color:  #d9dbe0;                        /*  the chip:  a light,  flat rectangle  */
+    --theme-glow:   rgba(255, 255, 255, 0.14);
+
+    --square-light: #24262a;                        /*  where you type and read:  a little raised  */
+    --square-dark:  #42464f;                        /*  "this one"  (the target,  open buttons):  raised more,  white words  */
+
+    --control-accent: #2a2d32;                      /*  the buttons  */
+
+    --formula:      #a3212c;                        /*  forest red  (the BRIGHT Excel green's twin)  */
+    --formula-glow: rgba(163, 33, 44, 0.6);         /*  ...and its glow  */
+
+    --line:         rgba(255, 255, 255, 0.09);      /*  the lines:  barely there  */
+    --line-soft:    rgba(255, 255, 255, 0.06);
+    --line-grid:    rgba(255, 255, 255, 0.06);
+    --inner-glow:       transparent;                /*  no glowing-from-inside  */
+    --inner-glow-soft:  transparent;
+    --inner-glow-hover: transparent;
+    --glow-edge:    rgba(255, 255, 255, 0.32);      /*  hover / focus:  a thin edge,  no glow  */
+    --glow:         transparent;
+    --glow-hover:   transparent;
+    --shine:        rgba(255, 255, 255, 0.07);
+    --ink:          #e3e5e9;                        /*  the words on buttons and headers  */
+    --ink-soft:     #7d838c;                        /*  the row numbers  */
+    --formula-rim:  #18191c;
+    --zebra:        rgba(255, 255, 255, 0.025);
+    --row-hover:    rgba(255, 255, 255, 0.05);
+    --hover-fill:   rgba(255, 255, 255, 0.1);
+    --cloud:        rgba(0, 0, 0, 0.35);            /*  the loader's cloud:  dark  */
+    --cloud-glow:   rgba(0, 0, 0, 0.9);
+}
+
+
+
 /*  ----------------------------------------------------------
 
         THE WHOLE PAGE
@@ -143,7 +211,7 @@ h1 {
     background: var(--square-light);
     border: 1px solid var(--glass-edge);
     box-shadow:
-        inset 0 0 12px rgba(255, 255, 255, 0.8),        /*  glowing white from inside  */
+        inset 0 0 12px var(--inner-glow, rgba(255, 255, 255, 0.8)),        /*  glowing white from inside  */
         0 4px 14px rgba(0, 0, 0, 0.1);                  /*  a soft shadow  =  floating, a little  */
     transition: box-shadow 0.15s, filter 0.15s;
 }
@@ -153,8 +221,8 @@ h1 {
 #jumpInput:focus {
     outline: none;
     box-shadow:
-        inset 0 0 0 1px rgba(255, 255, 255, 0.95),
-        0 0 14px 2px rgba(255, 255, 255, 0.9);
+        inset 0 0 0 1px var(--glow-edge, rgba(255, 255, 255, 0.95)),
+        0 0 14px 2px var(--glow, rgba(255, 255, 255, 0.9));
 }
 
 #searchInput::placeholder,
@@ -212,9 +280,9 @@ h1 {
     margin: 0;
     padding: 0 18px;
     border: none;
-    border-right: 1px solid rgba(255, 255, 255, 0.6);  /*  the white line between the 2 squares  */
+    border-right: 1px solid var(--line, rgba(255, 255, 255, 0.6));  /*  the white line between the 2 squares  */
     border-radius: 0;
-    box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.55);
+    box-shadow: inset 0 0 12px var(--inner-glow-soft, rgba(255, 255, 255, 0.55));
 }
 
 /*  The light square:  the aimbot window  */
@@ -227,7 +295,7 @@ h1 {
     font-size: 13px;
     color: var(--text);
     background: var(--square-light);
-    box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.8);   /*  glowing white from inside  */
+    box-shadow: inset 0 0 12px var(--inner-glow, rgba(255, 255, 255, 0.8));   /*  glowing white from inside  */
 }
 
 /*  The top line:   ⌖  3 / 128  ·  hit 1 of 2              Row 42 · City  */
@@ -331,8 +399,8 @@ h1 {
     white-space: pre;
     overflow: hidden;
     text-overflow: ellipsis;
-    border-right: 1px solid rgba(255, 255, 255, 0.5);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+    border-right: 1px solid var(--line-grid, rgba(255, 255, 255, 0.5));
+    border-bottom: 1px solid var(--line-soft, rgba(255, 255, 255, 0.45));
 }
 
 .scope-cell:nth-child(3n) { border-right: none; }           /*  the last column:  no line on the right  */
@@ -438,7 +506,7 @@ h1 {
     border-radius: 12px;
     box-shadow:
         0 12px 40px rgba(0, 0, 0, 0.18),
-        inset 0 1px 0 rgba(255, 255, 255, 0.9);
+        inset 0 1px 0 var(--shine, rgba(255, 255, 255, 0.9));
     animation: row-drop 0.22s ease-out;
 }
 
@@ -457,7 +525,7 @@ h1 {
     color: #fff;
     text-shadow: 0 0 8px var(--theme-glow);
     background: var(--square-dark);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+    border-bottom: 1px solid var(--line-soft, rgba(255, 255, 255, 0.45));
 }
 
 #aimRowTitle {
@@ -481,8 +549,8 @@ h1 {
     flex-direction: column;
     max-height: 200px;
     background: var(--square-light);
-    box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.8);   /*  glowing white from inside  */
-    border-bottom: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow: inset 0 0 12px var(--inner-glow, rgba(255, 255, 255, 0.8));   /*  glowing white from inside  */
+    border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.6));
 }
 
 /*  "NOTES"  (the column's name)  */
@@ -522,7 +590,7 @@ h1 {
     line-height: 22px;
     color: var(--text-soft);
     background: var(--header-bg);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+    border-bottom: 1px solid var(--line-soft, rgba(255, 255, 255, 0.45));
 }
 
 /*  2.  The list:   [column name]  [its full value],  one line each  (or more, when it wraps).  It scrolls.  */
@@ -538,7 +606,7 @@ h1 {
 .row-value {
     padding: 4px 10px;
     line-height: 20px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+    border-bottom: 1px solid var(--line-soft, rgba(255, 255, 255, 0.45));
 }
 
 .row-name {
@@ -547,9 +615,9 @@ h1 {
     text-overflow: ellipsis;
     white-space: nowrap;
     font-weight: 600;
-    color: #333;
+    color: var(--ink, #333);
     background: var(--line-num-bg);                     /*  like the sheet's row-number column  */
-    border-right: 1px solid rgba(255, 255, 255, 0.6);
+    border-right: 1px solid var(--line, rgba(255, 255, 255, 0.6));
 }
 
 .row-value {
@@ -768,7 +836,7 @@ h1 {
 
     box-shadow:
         0 12px 40px rgba(0, 0, 0, 0.18),                /*  soft shadow below  =  it looks like it's floating  */
-        inset 0 1px 0 rgba(255, 255, 255, 0.9);         /*  shiny line on the top edge  =  light hitting the glass  */
+        inset 0 1px 0 var(--shine, rgba(255, 255, 255, 0.9));         /*  shiny line on the top edge  =  light hitting the glass  */
 
 
     /*  ---- SNAPPY SCROLLING ----  */
@@ -970,7 +1038,7 @@ h1 {
     display: grid;
     grid-template-columns: var(--columns, 60px 1fr);   /*  the widths from the brain  */
     line-height: 29px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.45); /*  thin white line under each row  */
+    border-bottom: 1px solid var(--line-soft, rgba(255, 255, 255, 0.45)); /*  thin white line under each row  */
     transition: background 0.15s;                       /*  color changes fade in smoothly  */
 }
 
@@ -979,13 +1047,13 @@ h1 {
     Makes it easy for your eyes to follow a row.
     (The brain puts the "zebra" label on every other row.)  */
 .line.zebra {
-    background: rgba(255, 255, 255, 0.15);
+    background: var(--zebra, rgba(255, 255, 255, 0.15));
 }
 
 
 /*  Put your mouse on a row  ->  it lights up.  */
 .line:hover {
-    background: rgba(255, 255, 255, 0.45);
+    background: var(--row-hover, rgba(255, 255, 255, 0.45));
 }
 
 
@@ -999,9 +1067,9 @@ h1 {
 .line-num {
     padding: 0 10px;
     text-align: right;
-    color: #555;                                        /*  grey numbers  */
+    color: var(--ink-soft, #555);                                        /*  grey numbers  */
     background: var(--line-num-bg);                     /*  almost solid, so words slide UNDER it  */
-    border-right: 1px solid rgba(255, 255, 255, 0.6);
+    border-right: 1px solid var(--line, rgba(255, 255, 255, 0.6));
     user-select: none;                                  /*  when you copy text, the numbers don't come with it  */
 
     /*  "sticky" = the number stays stuck on the left
@@ -1021,7 +1089,7 @@ h1 {
 
 .cell {
     padding: 0 8px;
-    border-right: 1px solid rgba(255, 255, 255, 0.5);   /*  thin line between boxes  =  Excel grid lines  */
+    border-right: 1px solid var(--line-grid, rgba(255, 255, 255, 0.5));   /*  thin line between boxes  =  Excel grid lines  */
     white-space: pre;           /*  the words stay on ONE line  */
     overflow: hidden;           /*  too long for the box?  hide the extra...  */
     text-overflow: ellipsis;    /*  ...and show "…" instead  */
@@ -1074,14 +1142,14 @@ h1 {
     line-height: 14px;
     color: var(--formula);
     text-shadow:
-        0 0 2px #fff,                                   /*  a white rim, so it's sharp on the glass  */
+        0 0 2px var(--formula-rim, #fff),                                   /*  a white rim, so it's sharp on the glass  */
         0 0 6px var(--formula-glow);                    /*  the green glow  */
     pointer-events: none;                               /*  (so it doesn't get in the way of hovering the cell)  */
 }
 
 .cell.formula:hover::before {
     text-shadow:                                        /*  mouse on it?  glow brighter  */
-        0 0 2px #fff,
+        0 0 2px var(--formula-rim, #fff),
         0 0 8px var(--formula-glow),
         0 0 14px var(--formula-glow);
 }
@@ -1094,10 +1162,10 @@ h1 {
 
 /*  Put your mouse on a box  ->  it GLOWS, like light inside the glass.  */
 .cell:hover {
-    background: rgba(255, 255, 255, 0.55);              /*  the box gets brighter  */
+    background: var(--hover-fill, rgba(255, 255, 255, 0.55));  /*  the box gets brighter  */
     box-shadow:
-        inset 0 0 0 1px rgba(255, 255, 255, 0.95),      /*  a shiny white edge  */
-        0 0 14px 2px rgba(255, 255, 255, 0.9);          /*  soft glow spilling out around it  */
+        inset 0 0 0 1px var(--glow-edge, rgba(255, 255, 255, 0.95)),      /*  a shiny white edge  */
+        0 0 14px 2px var(--glow, rgba(255, 255, 255, 0.9));          /*  soft glow spilling out around it  */
     position: relative;
     z-index: 1;                 /*  "stack me on top," so the glow isn't hidden under the boxes next to it  */
 }
@@ -1124,7 +1192,7 @@ h1 {
      its columns would come out wider than the rows below
      and wouldn't line up.)  */
 .header-row .cell {
-    color: #333;
+    color: var(--ink, #333);
     font-weight: 600;
 }
 
@@ -1220,7 +1288,7 @@ mark {
     padding: 0 12px;
     line-height: 34px;
     border-radius: 12px 0 0 12px;
-    border-right: 1px solid rgba(255, 255, 255, 0.6);  /*  the white line between the 2 squares  */
+    border-right: 1px solid var(--line, rgba(255, 255, 255, 0.6));  /*  the white line between the 2 squares  */
 }
 
 /*  The RIGHT half:  round corners on the right only, and no edge on the left  (the line above is the edge)  */
@@ -1338,12 +1406,12 @@ button {
     font-family: "Segoe UI", system-ui, Arial, sans-serif;
     font-size: 14px;
     font-weight: 600;
-    color: #333;
+    color: var(--ink, #333);
     background: var(--control-accent);
     border: 1px solid var(--glass-edge);
     border-radius: 12px;
     box-shadow:
-        inset 0 0 12px rgba(255, 255, 255, 0.55),       /*  a soft glow inside  */
+        inset 0 0 12px var(--inner-glow-soft, rgba(255, 255, 255, 0.55)),       /*  a soft glow inside  */
         0 4px 14px rgba(0, 0, 0, 0.1);                  /*  a soft shadow  =  floating, a little  */
     cursor: pointer;            /*  the mouse turns into a pointing hand  */
     transition: box-shadow 0.15s, filter 0.15s;
@@ -1353,16 +1421,16 @@ button {
 button:hover {
     filter: brightness(1.06);
     box-shadow:
-        inset 0 0 12px rgba(255, 255, 255, 0.7),
-        0 0 14px 2px rgba(255, 255, 255, 0.7);
+        inset 0 0 12px var(--inner-glow-hover, rgba(255, 255, 255, 0.7)),
+        0 0 14px 2px var(--glow-hover, rgba(255, 255, 255, 0.7));
 }
 
 /*  Tabbed to it  ->  the same glow, a bit stronger  */
 button:focus-visible {
     outline: none;
     box-shadow:
-        inset 0 0 0 1px rgba(255, 255, 255, 0.95),
-        0 0 14px 2px rgba(255, 255, 255, 0.9);
+        inset 0 0 0 1px var(--glow-edge, rgba(255, 255, 255, 0.95)),
+        0 0 14px 2px var(--glow, rgba(255, 255, 255, 0.9));
 }
 
 /*  Pressed  ->  it sinks a tiny bit  */
@@ -1386,7 +1454,7 @@ button:active {
     right: 20px;
     bottom: 20px;
     box-shadow:                 /*  a bigger shadow than the others:  it floats over the sheet  */
-        inset 0 0 12px rgba(255, 255, 255, 0.55),
+        inset 0 0 12px var(--inner-glow-soft, rgba(255, 255, 255, 0.55)),
         0 8px 24px rgba(0, 0, 0, 0.2);
 }
 
@@ -1494,7 +1562,7 @@ button:active {
 
     box-shadow:
         0 12px 40px rgba(0, 0, 0, 0.18),                /*  soft shadow below  =  floating  */
-        inset 0 1px 0 rgba(255, 255, 255, 0.9);         /*  shiny line on the top edge  */
+        inset 0 1px 0 var(--shine, rgba(255, 255, 255, 0.9));         /*  shiny line on the top edge  */
 
     transform-origin: top left; /*  grow out from the chip's corner  */
     will-change: transform;     /*  "I'm going to grow and shrink":  so it stays smooth  */
@@ -1562,7 +1630,7 @@ button:active {
     background: linear-gradient(90deg, transparent 36px, var(--square-dark) 36px);  /*  dark only AFTER the corner box,
                                                                                          so the corner sits on plain glass  (like every light square)  */
     box-shadow: inset 0 0 12px color-mix(in srgb, var(--theme-glow) 25%, transparent);  /*  a soft rim of the theme's glow  */
-    border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+    border-bottom: 1px solid var(--line-soft, rgba(255, 255, 255, 0.45));
     color: #fff;
     text-shadow: 0 0 8px var(--theme-glow);
     font-weight: 600;
@@ -1572,8 +1640,8 @@ button:active {
 .menu-title::before {
     content: "";
     background: var(--square-light);
-    box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.8);        /*  glowing white from inside  */
-    border-right: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow: inset 0 0 12px var(--inner-glow, rgba(255, 255, 255, 0.8));        /*  glowing white from inside  */
+    border-right: 1px solid var(--line, rgba(255, 255, 255, 0.6));
 }
 
 
@@ -1591,7 +1659,7 @@ button:active {
     font: inherit;              /*  (FIRST:  "font" also resets line-height, so it has to come before it)  */
     line-height: 29px;
     border: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+    border-bottom: 1px solid var(--line-soft, rgba(255, 255, 255, 0.45));
     border-radius: 0;
     background: none;
     text-align: left;
@@ -1610,14 +1678,14 @@ button:active {
     bottom: 0;
     left: 0;
     width: 36px;
-    border-right: 1px solid rgba(255, 255, 255, 0.6);
+    border-right: 1px solid var(--line, rgba(255, 255, 255, 0.6));
 }
 
 /*  1st, 3rd, 5th theme...  (the header was dark-on-the-right, so flip it):
     swatch  =  DARK square,   name  =  LIGHT square  */
 #themeMenu .theme-option:nth-child(odd) {
     background: var(--square-light);
-    box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.8);
+    box-shadow: inset 0 0 12px var(--inner-glow, rgba(255, 255, 255, 0.8));
 }
 
 #themeMenu .theme-option:nth-child(odd)::before {
@@ -1634,7 +1702,7 @@ button:active {
 
 #themeMenu .theme-option:nth-child(even)::before {
     background: var(--square-light);
-    box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.8);
+    box-shadow: inset 0 0 12px var(--inner-glow, rgba(255, 255, 255, 0.8));
 }
 
 /*  On a DARK square, the name turns white and glows in its own theme color
@@ -1654,8 +1722,8 @@ button:active {
     outline: none;
     filter: brightness(1.12);
     box-shadow:
-        inset 0 0 0 1px rgba(255, 255, 255, 0.95),
-        0 0 14px 2px rgba(255, 255, 255, 0.9);
+        inset 0 0 0 1px var(--glow-edge, rgba(255, 255, 255, 0.95)),
+        0 0 14px 2px var(--glow, rgba(255, 255, 255, 0.9));
     z-index: 1;
 }
 
@@ -1752,7 +1820,7 @@ button:active {
 
 /*  ...  then clouds up.  */
 #loader.show {
-    background: rgba(255, 255, 255, 0.18);
+    background: var(--cloud, rgba(255, 255, 255, 0.18));
     backdrop-filter: blur(8px);
 }
 
@@ -1812,7 +1880,7 @@ button:active {
     font-size: 14px;
     font-weight: 600;
     color: var(--text-soft);
-    text-shadow: 0 0 8px rgba(255, 255, 255, 0.9);  /*  a white glow, so they're easy to read on the cloud  */
+    text-shadow: 0 0 8px var(--cloud-glow, rgba(255, 255, 255, 0.9));  /*  a white glow, so they're easy to read on the cloud  */
 }
 
 
@@ -1821,6 +1889,69 @@ button:active {
     #loader,
     #loaderPie { transition: none; }
     #loader.done #loaderPie { animation: none; }
+}
+
+
+
+/*  ----------------------------------------------------------
+
+        NEO-DARK:  THE BENDING GLASS   (only in Neo-Dark)
+
+        The floating glass panels  (the Details panel,  the theme menu)  are THICK glass:
+        they bend what's behind them.  Open the Details panel:  the rows behind it ripple.
+
+        How:  an SVG "filter" in testI.html  (#glassWarp)  makes soft, wavy noise,
+        and uses it to push every pixel behind the glass a little sideways or up and down.
+        Then a little blur,  like frosted glass.
+
+        Why not the WINDOW too?  We tried.  Behind the window there's only the flat page,
+        and bending a flat color looks exactly like not bending it.  But the bending had to be
+        redone on EVERY frame you scrolled  (the rows inside the window changed):
+        measured,  the browser's drawing work went up 4x,  and scrolling got choppy.
+        So the window gets the look of thick glass  (the edge,  the light,  the deep shadow)  for free,
+        and only the panels that really float over something bend.
+
+    ----------------------------------------------------------  */
+
+[data-theme="neo-dark"] #aimRow,
+[data-theme="neo-dark"] #themeMenu {
+    backdrop-filter: url(#glassWarp) blur(3px);
+}
+
+/*  The window:  glassier.  A light catch along the top edge,  and a shadow underneath
+    (darker than Neo-Neutral's,  so it shows on the dark page).
+    Kept LEAN on purpose:  a bigger, softer shadow  (60px)  and a soft glow inside  (40px)  looked nice,
+    but big blurs are slow to redraw:  measured,  they made scrolling and the flip drop frames.  */
+[data-theme="neo-dark"] #output {
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.14),
+        0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+/*  "Spreadsheet View":  forest red  (#5c181e,  the darker Excel green's twin),  solid,  a soft red glow.
+    "CSV View":  black,  with a thin edge  (so it doesn't vanish into the dark page).  */
+[data-theme="neo-dark"] #viewBtn {
+    background: #5c181e;
+    box-shadow: 0 0 12px rgba(163, 33, 44, 0.45);
+}
+
+[data-theme="neo-dark"] #viewBtn:hover {
+    box-shadow: 0 0 18px 2px rgba(163, 33, 44, 0.6);
+}
+
+[data-theme="neo-dark"] #viewBtn.to-csv {
+    background: #020202;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14), 0 0 12px rgba(255, 255, 255, 0.12);
+}
+
+[data-theme="neo-dark"] #viewBtn.to-csv:hover {
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.24), 0 0 18px 2px rgba(255, 255, 255, 0.2);
+}
+
+/*  The theme names:  light,  so they read on the dark squares.  */
+[data-theme="neo-dark"] .theme-name {
+    color: var(--text);
+    text-shadow: none;
 }
 
 

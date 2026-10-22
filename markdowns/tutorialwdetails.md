@@ -8,7 +8,7 @@ You're going to build a web page that opens a CSV file and shows it like a **min
 - Search paints your word yellow
 - Go to any row, or expand to see everything
 - **It stays fast, even with hundreds of thousands of rows**
-- A small glass **theme chip** in the corner unfolds into a theme menu (the default theme is **Neo-Neutral**)
+- A small glass **theme chip** in the corner unfolds into a theme menu: **Neo-Neutral** (the default, and the fastest), and **Neo-Dark** (flat and soft black, a forest red accent, and floating panels of bending glass)
 - It opens **Excel files (`.xlsx`)** too, with dates done carefully (Part 5)
 - A **snap menu** ("the aimbot") locks onto search matches and snaps the sheet right to them, even thousands of columns away (Part 6)
 - **Drag mode**: hold on the sheet and drag it in any direction, with a mouse, a trackpad, or a finger (Part 7)
@@ -3372,7 +3372,7 @@ Add this right after the chip rules:
 
     box-shadow:
         0 12px 40px rgba(0, 0, 0, 0.18),                /*  soft shadow below  =  floating  */
-        inset 0 1px 0 rgba(255, 255, 255, 0.9);         /*  shiny line on the top edge  */
+        inset 0 1px 0 var(--shine, rgba(255, 255, 255, 0.9));         /*  shiny line on the top edge  */
 
     transform-origin: top left; /*  grow out from the chip's corner  */
     will-change: transform;     /*  "I'm going to grow and shrink":  so it stays smooth  */
@@ -3440,7 +3440,7 @@ Add this right after the chip rules:
     background: linear-gradient(90deg, transparent 36px, var(--square-dark) 36px);  /*  dark only AFTER the corner box,
                                                                                          so the corner sits on plain glass  (like every light square)  */
     box-shadow: inset 0 0 12px color-mix(in srgb, var(--theme-glow) 25%, transparent);  /*  a soft rim of the theme's glow  */
-    border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+    border-bottom: 1px solid var(--line-soft, rgba(255, 255, 255, 0.45));
     color: #fff;
     text-shadow: 0 0 8px var(--theme-glow);
     font-weight: 600;
@@ -3450,8 +3450,8 @@ Add this right after the chip rules:
 .menu-title::before {
     content: "";
     background: var(--square-light);
-    box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.8);        /*  glowing white from inside  */
-    border-right: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow: inset 0 0 12px var(--inner-glow, rgba(255, 255, 255, 0.8));        /*  glowing white from inside  */
+    border-right: 1px solid var(--line, rgba(255, 255, 255, 0.6));
 }
 
 
@@ -3469,7 +3469,7 @@ Add this right after the chip rules:
     font: inherit;              /*  (FIRST:  "font" also resets line-height, so it has to come before it)  */
     line-height: 29px;
     border: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+    border-bottom: 1px solid var(--line-soft, rgba(255, 255, 255, 0.45));
     border-radius: 0;
     background: none;
     text-align: left;
@@ -3488,14 +3488,14 @@ Add this right after the chip rules:
     bottom: 0;
     left: 0;
     width: 36px;
-    border-right: 1px solid rgba(255, 255, 255, 0.6);
+    border-right: 1px solid var(--line, rgba(255, 255, 255, 0.6));
 }
 
 /*  1st, 3rd, 5th theme...  (the header was dark-on-the-right, so flip it):
     swatch  =  DARK square,   name  =  LIGHT square  */
 #themeMenu .theme-option:nth-child(odd) {
     background: var(--square-light);
-    box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.8);
+    box-shadow: inset 0 0 12px var(--inner-glow, rgba(255, 255, 255, 0.8));
 }
 
 #themeMenu .theme-option:nth-child(odd)::before {
@@ -3512,7 +3512,7 @@ Add this right after the chip rules:
 
 #themeMenu .theme-option:nth-child(even)::before {
     background: var(--square-light);
-    box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.8);
+    box-shadow: inset 0 0 12px var(--inner-glow, rgba(255, 255, 255, 0.8));
 }
 
 /*  On a DARK square, the name turns white and glows in its own theme color
@@ -3532,8 +3532,8 @@ Add this right after the chip rules:
     outline: none;
     filter: brightness(1.12);
     box-shadow:
-        inset 0 0 0 1px rgba(255, 255, 255, 0.95),
-        0 0 14px 2px rgba(255, 255, 255, 0.9);
+        inset 0 0 0 1px var(--glow-edge, rgba(255, 255, 255, 0.95)),
+        0 0 14px 2px var(--glow, rgba(255, 255, 255, 0.9));
     z-index: 1;
 }
 
@@ -3635,6 +3635,7 @@ Add this at the **very bottom** of `scriptI.js`:
 ```js
 const THEMES = [
     { id: 'neo-neutral', name: 'Neo-Neutral', color: '#2a2e35', glow: 'rgba(165, 175, 190, 0.95)' },
+    { id: 'neo-dark',    name: 'Neo-Dark',    color: '#d9dbe0', glow: 'rgba(255, 255, 255, 0.14)' },     //  (flat and dark:  its chip is light)
 ];
 
 const themeChip = document.getElementById('themeChip');     //  the chip  (the small dark rectangle)
@@ -3795,6 +3796,164 @@ measureFold();
 
 <br>
 
+### Step 4.5: A second theme: Neo-Dark 🌑
+
+**Neo-Dark is dark and FLAT:** a soft black page (black, but not the deepest black), flat panels, no white glows. The fancy thing: the floating glass panels (the Details panel, the theme menu) are **thick glass that bends** whatever is behind them.
+
+```text
+   the page              ->  a soft black  (#18191c)
+   panels and buttons    ->  flat dark greys,  no glow
+   words                 ->  light
+   Excel's greens        ->  "forest red",  a deep maroon:  moved to red (hue 355°),
+                             just as strong and just as dark as each green:
+       #185c37 -> #5c181e  (the button)     #21a366 -> #a3212c  (the ƒ,  the letters line)
+   the floating panels   ->  bending glass  (only in Neo-Dark)
+```
+
+**1. Give Part 3's glows and lines a name.** Neo-Neutral writes its little white glows and lines right into the clothes, like `rgba(255, 255, 255, 0.45)`. A dark theme has to be able to change them. So in `styleI.css` (after the theme blocks), each one gets a NAME, with the same color as a backup:
+
+```css
+border-bottom: 1px solid var(--line-soft, rgba(255, 255, 255, 0.45));
+```
+
+`var(--line-soft, ...)` = "use the color called `--line-soft`. Nobody set it? Use the backup." Neo-Neutral never sets these names, so it looks exactly the same (we checked, pixel by pixel). Neo-Dark sets them. The names:
+
+| Name | Neo-Neutral's color (the backup) | Where |
+|---|---|---|
+| `--line-soft` | `rgba(255, 255, 255, 0.45)` | the thin line under rows and panels |
+| `--line` | `rgba(255, 255, 255, 0.6)` | the line between 2 joined squares, the row-number column |
+| `--line-grid` | `rgba(255, 255, 255, 0.5)` | the lines between cells |
+| `--inner-glow` / `-soft` / `-hover` | `0.8` / `0.55` / `0.7` white | "glowing white from inside" |
+| `--glow-edge` + `--glow` | `0.95` + `0.9` white | the hover / focus glow (cells, buttons, menu rows, inputs) |
+| `--glow-hover` | `0.7` white | a button's hover glow |
+| `--shine` | `rgba(255, 255, 255, 0.9)` | the shiny line on top of the glass |
+| `--ink` / `--ink-soft` | `#333` / `#555` | words on buttons and headers / row numbers |
+| `--zebra`, `--row-hover`, `--hover-fill` | `0.15` / `0.45` / `0.55` white | striped rows, row hover, cell hover |
+| `--formula-rim` | `#fff` | the ƒ's thin rim |
+| `--cloud`, `--cloud-glow` | `0.18` / `0.9` white | the loader's cloud and its words |
+
+**2. The colors.** Right after the Neo-Neutral block:
+
+```css
+[data-theme="neo-dark"] {
+    --page:         #18191c;                        /*  the page:  a soft black  */
+    --text:         #e3e5e9;                        /*  light words  */
+    --text-soft:    #9aa0a9;                        /*  the not-as-important words  */
+
+    --glass-top:    rgba(255, 255, 255, 0.09);      /*  the glass:  clearer than Neo-Neutral's  */
+    --glass-bottom: rgba(255, 255, 255, 0.025);
+    --glass-edge:   rgba(255, 255, 255, 0.16);
+
+    --line-num-bg:  #212327;                        /*  flat,  solid colors  */
+    --header-bg:    #26282d;
+    --corner-bg:    #2d3036;
+
+    --theme-color:  #d9dbe0;                        /*  the chip:  a light,  flat rectangle  */
+    --theme-glow:   rgba(255, 255, 255, 0.14);
+
+    --square-light: #24262a;                        /*  where you type and read:  a little raised  */
+    --square-dark:  #42464f;                        /*  "this one"  (the target,  open buttons):  raised more,  white words  */
+
+    --control-accent: #2a2d32;                      /*  the buttons  */
+
+    --formula:      #a3212c;                        /*  forest red  (the BRIGHT Excel green's twin)  */
+    --formula-glow: rgba(163, 33, 44, 0.6);         /*  ...and its glow  */
+
+    --line:         rgba(255, 255, 255, 0.09);      /*  the lines:  barely there  */
+    --line-soft:    rgba(255, 255, 255, 0.06);
+    --line-grid:    rgba(255, 255, 255, 0.06);
+    --inner-glow:       transparent;                /*  no glowing-from-inside  */
+    --inner-glow-soft:  transparent;
+    --inner-glow-hover: transparent;
+    --glow-edge:    rgba(255, 255, 255, 0.32);      /*  hover / focus:  a thin edge,  no glow  */
+    --glow:         transparent;
+    --glow-hover:   transparent;
+    --shine:        rgba(255, 255, 255, 0.07);
+    --ink:          #e3e5e9;                        /*  the words on buttons and headers  */
+    --ink-soft:     #7d838c;                        /*  the row numbers  */
+    --formula-rim:  #18191c;
+    --zebra:        rgba(255, 255, 255, 0.025);
+    --row-hover:    rgba(255, 255, 255, 0.05);
+    --hover-fill:   rgba(255, 255, 255, 0.1);
+    --cloud:        rgba(0, 0, 0, 0.35);            /*  the loader's cloud:  dark  */
+    --cloud-glow:   rgba(0, 0, 0, 0.9);
+}
+```
+
+**3. The bending glass.** In `testI.html`, at the very top of `<body>`:
+
+```html
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true" focusable="false">
+        <filter id="glassWarp" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+            <feTurbulence type="fractalNoise" baseFrequency="0.009 0.013" numOctaves="2" seed="7" result="ripples"/>
+            <feDisplacementMap in="SourceGraphic" in2="ripples" scale="30" xChannelSelector="R" yChannelSelector="G"/>
+        </filter>
+    </svg>
+```
+
+And at the very end of `styleI.css`, just above the `[hidden]` rule:
+
+```css
+[data-theme="neo-dark"] #aimRow,
+[data-theme="neo-dark"] #themeMenu {
+    backdrop-filter: url(#glassWarp) blur(3px);
+}
+
+/*  The window:  glassier.  A light catch along the top edge,  and a shadow underneath
+    (darker than Neo-Neutral's,  so it shows on the dark page).
+    Kept LEAN on purpose:  a bigger, softer shadow  (60px)  and a soft glow inside  (40px)  looked nice,
+    but big blurs are slow to redraw:  measured,  they made scrolling and the flip drop frames.  */
+[data-theme="neo-dark"] #output {
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.14),
+        0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+/*  "Spreadsheet View":  forest red  (#5c181e,  the darker Excel green's twin),  solid,  a soft red glow.
+    "CSV View":  black,  with a thin edge  (so it doesn't vanish into the dark page).  */
+[data-theme="neo-dark"] #viewBtn {
+    background: #5c181e;
+    box-shadow: 0 0 12px rgba(163, 33, 44, 0.45);
+}
+
+[data-theme="neo-dark"] #viewBtn:hover {
+    box-shadow: 0 0 18px 2px rgba(163, 33, 44, 0.6);
+}
+
+[data-theme="neo-dark"] #viewBtn.to-csv {
+    background: #020202;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14), 0 0 12px rgba(255, 255, 255, 0.12);
+}
+
+[data-theme="neo-dark"] #viewBtn.to-csv:hover {
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.24), 0 0 18px 2px rgba(255, 255, 255, 0.2);
+}
+
+/*  The theme names:  light,  so they read on the dark squares.  */
+[data-theme="neo-dark"] .theme-name {
+    color: var(--text);
+    text-shadow: none;
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `var(--name, backup)` | "Use this named color. Not set? Use the backup." |
+| `transparent` | No color at all. A glow that's `transparent` is simply gone: that's what makes it flat. |
+| `<filter>` | An SVG recipe for changing a picture. |
+| `feTurbulence` | Makes soft, wavy noise, like the ripples inside thick glass. `baseFrequency` = how close together the waves are. |
+| `feDisplacementMap` | Pushes every pixel by the noise: the red part says how far sideways, the green part how far up or down. `scale="30"` = up to 15 pixels each way. |
+| `color-interpolation-filters="sRGB"` | Do the math in normal screen colors. (The default bends dark colors toward green: we saw it.) |
+| `backdrop-filter: url(#glassWarp) blur(3px)` | Bend what's BEHIND the glass with that recipe, then frost it a little. |
+
+> **Why doesn't the WINDOW bend?** It did, at first. But behind the window there's only the flat page, and bending a flat color looks exactly like not bending it. Meanwhile the bending had to be redone on EVERY frame you scrolled (the rows inside changed): measured, the browser's drawing work went up 4x, and scrolling got choppy. The panels that float OVER the sheet still bend: there you can see it.
+
+> **Why such a plain shadow under the window?** A bigger, softer shadow (60px) and a soft glow inside (40px) looked nice too. But big blurs are slow to redraw: measured, they made scrolling and the flip drop frames now and then. With this lean one, Neo-Dark is as smooth as Neo-Neutral (every frame on time, in every test run).
+
+> **Why is the ƒ the BRIGHT forest red?** Excel's dark green (`#217346`) works on a light page. Its red twin, `#732128`, nearly disappears on a black one. So the ƒ uses `#a3212c`: the twin of Excel's BRIGHT icon green (`#21a366`). Still forest red, just readable.
+
+<br>
+
 ### ✅ Test it
 
 Refresh. You should have:
@@ -3807,6 +3966,9 @@ Refresh. You should have:
 - [ ] Click the name, click anywhere else, or press **Escape** → it goes dark and folds back down into the chip
 - [ ] Open it, close it, open it again: it unfolds every time
 - [ ] Open a CSV with the menu open: the menu is made of the same glass as the CSV window
+- [ ] The menu has 2 themes. Pick **Neo-Dark**: a soft black page, flat dark panels, light words, a deep maroon **Spreadsheet View** button
+- [ ] In Neo-Dark, open the Details panel over the sheet: the rows behind it ripple through the glass
+- [ ] Pick **Neo-Neutral** again: everything is back to normal
 
 **The CSV reader is done!** 🎉 Four more parts: Part 5 teaches it to open Excel files, Part 6 adds the snap menu, Part 7 adds drag mode, and Part 8 adds Spreadsheet View.
 
@@ -7106,6 +7268,9 @@ viewBtn.addEventListener('click', function () {
 | **Let columns get wider** | In `setColumnWidths`, change the `40` |
 | **Change the page color** | In the Neo-Neutral block at the top of the clothes, change `--page` |
 | **Make the glass greyer or clearer** | Change `--glass-top` and `--glass-bottom`. A bigger last number = more solid. |
+| **Make Neo-Dark's glass bend more (or less)** | In `testI.html`'s `#glassWarp`: `scale="30"` = how far it pushes (bigger = wavier), `baseFrequency` = how close together the waves are (smaller = wider, softer waves). |
+| **Make the Neo-Dark window bend too** | Add `[data-theme="neo-dark"] #output,` to the bending-glass rule. Careful: it only has the flat page behind it (nothing to see), and it costs about 4x the browser's drawing while you scroll. |
+| **Make Neo-Dark lighter or darker** | Its `--page` (the background), `--square-light` and `--control-accent` (the panels and buttons). |
 | **Add a new theme** | Copy the whole `[data-theme="neo-neutral"]` block, change the name (like `"midnight"`) and the colors. Then add one line to `THEMES` in the brain with the same `id`. It shows up in the menu by itself. |
 | **Move the theme chip** | `#themeChip` → `top` and `left`. Change `#themeMenu`'s `top` and `left` to the same numbers, so the menu still grows out of it. |
 | **Make the theme menu unfold slower (or faster)** | `#themeMenu` → the `0.42s` (growing) and the `0.26s` wait on `::after` (the cover fading). Change both together, about the same amount. |

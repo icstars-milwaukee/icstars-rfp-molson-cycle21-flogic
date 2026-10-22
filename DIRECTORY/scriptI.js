@@ -3061,6 +3061,7 @@ function finishLoading() {
 
 const THEMES = [
     { id: 'neo-neutral', name: 'Neo-Neutral', color: '#2a2e35', glow: 'rgba(165, 175, 190, 0.95)' },
+    { id: 'neo-dark',    name: 'Neo-Dark',    color: '#d9dbe0', glow: 'rgba(255, 255, 255, 0.14)' },     //  (flat and dark:  its chip is light)
 ];
 
 const themeChip = document.getElementById('themeChip');     //  the chip  (the small dark rectangle)
