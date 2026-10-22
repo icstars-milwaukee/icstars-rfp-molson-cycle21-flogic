@@ -3955,6 +3955,11 @@ queryRun.addEventListener('click', runTheQuery);
 //  Turn the answer into a table  (the same kind the brain keeps for a file),  and put it on screen.
 //  It's written straight into one long string,  and where each row starts is written down as it goes:
 //  so it never has to be cut up again.   (In bites:  a million-row answer never freezes the page.)
+//
+//  Careful with memory:  a 10,000-column answer is 100 million cells.
+//    -  Each line is glued with  join,  never  line += cell.   (+= keeps every little piece alive until the very end:
+//       about 60 bytes a cell,  so a 500 MB answer needed 5+ GB,  and the tab crashed.   join makes ONE flat string.)
+//    -  Each of the engine's rows is let go once it's written,  so the rows and the text are never both whole.
 async function showAnswer(result, text, ms, isCurrent) {
 
     setLoadingLabel('Laying out the answer...');
@@ -3967,30 +3972,33 @@ async function showAnswer(result, text, ms, isCurrent) {
     const starts  = new Uint32Array(rows.length + 1);
     const nullRows = [], nullCols = [];
     const parts = [];
+    const cells = new Array(cols.length);
     let at = 0;
+    let work = 0;                                       //  cells written since the clock was last checked
     let stopAt = performance.now() + CHUNK_TIME;
 
     for (let r = 0; r < rows.length; r++) {
 
-        if ((r & 1023) === 1023 && performance.now() >= stopAt) {
+        work += cols.length;
+        if (((r & 1023) === 1023 || work >= BITE_CELLS) && performance.now() >= stopAt) {
             setProgress(0.9 + 0.1 * r / rows.length);
             await new Promise(function (go) { nextBite(go); });
             if (!isCurrent()) throw QUERY_STALE;
             stopAt = performance.now() + CHUNK_TIME;
         }
+        if (work >= BITE_CELLS) work = 0;
 
         starts[r] = at;
         const row = rows[r];
-        let line = '';
+        rows[r] = null;                                 //  (written down now:  the engine's copy can go)
         for (let c = 0; c < cols.length; c++) {
             const v = row[c];
             if (v === null) { nullRows.push(r + 1); nullCols.push(c); }
             const cell = queryCellText(v, types[c]);
             if (cell.length > longest[c]) longest[c] = cell.length;
-            if (c > 0) line += ',';
-            line += /[",\r\n]/.test(cell) ? '"' + cell.split('"').join('""') + '"' : cell;
+            cells[c] = /[",\r\n]/.test(cell) ? '"' + cell.split('"').join('""') + '"' : cell;
         }
-        line += '\n';
+        const line = cells.join(',') + '\n';
         parts.push(line);
         at += line.length;
     }
@@ -4027,6 +4035,8 @@ function backToFile() {
     if (fileTable === null || !showingAnswer()) return;
     queryId++;                                          //  (a query still running?  It stops.)
     swapIn(fileTable.table, fileLook);
+    answer = null;                                      //  let the answer go  (a big one is as big as a file)
+    queryExport.disabled = true;
     setQueryStatus('', false);
 }
 

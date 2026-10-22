@@ -1688,6 +1688,8 @@ const CELL_REAL = /^[+-]?((0|[1-9]\d*)(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
 const CELL_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const CELL_TIME = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/;
 const SAMPLE_ROWS = 20000;
+const BITE_CELLS  = 16384;      //  a long job takes a breath every 1,024 rows,  OR after this many CELLS,  whichever comes first
+                                //  (1,024 rows of a 10,000-column file is 10 million cells:  seconds,  not a bite)
 
 function columnKinds(table) {
     if (!table.kinds) runNow(lookAtKinds(table));
@@ -1720,8 +1722,10 @@ function* lookAtKinds(table) {
     const look = Math.min(n, SAMPLE_ROWS);
     const step = n / look;
 
+    let work = 0;                   //  cells looked at since the last breath
     for (let s = 0; s < look; s++) {
-        if ((s & 511) === 511) yield;
+        work += width;
+        if ((s & 511) === 511 || work >= BITE_CELLS) { work = 0; yield; }
         const cells = table.row(Math.floor(s * step));
         for (let j = 0; j < width && j < cells.length; j++) {
             const v = cells[j];
@@ -2624,10 +2628,12 @@ function tableSource(table, alias) {
             const emptyIsNull = table.emptyIsNull !== false;
             const n = table.rowCount;
             const emptyRow = new Array(width).fill(null);
+            let work = 0;                   //  cells cut since the last breath  (a row is cut whole,  even for 2 columns)
 
             for (let i = 0; i < n; i++) {
 
-                if ((i & 1023) === 1023) yield i / n;
+                work += used.length === 0 ? 1 : width;
+                if ((i & 1023) === 1023 || work >= BITE_CELLS) { work = 0; yield i / n; }
 
                 //  (No columns used at all,  like COUNT(*)?   Then every row can be the same empty one.)
                 const row = used.length === 0 ? emptyRow : new Array(width);

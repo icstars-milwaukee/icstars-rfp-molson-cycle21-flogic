@@ -10171,6 +10171,8 @@ const CELL_REAL = /^[+-]?((0|[1-9]\d*)(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
 const CELL_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const CELL_TIME = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/;
 const SAMPLE_ROWS = 20000;
+const BITE_CELLS  = 16384;      //  a long job takes a breath every 1,024 rows,  OR after this many CELLS,  whichever comes first
+                                //  (1,024 rows of a 10,000-column file is 10 million cells:  seconds,  not a bite)
 
 function columnKinds(table) {
     if (!table.kinds) runNow(lookAtKinds(table));
@@ -10203,8 +10205,10 @@ function* lookAtKinds(table) {
     const look = Math.min(n, SAMPLE_ROWS);
     const step = n / look;
 
+    let work = 0;                   //  cells looked at since the last breath
     for (let s = 0; s < look; s++) {
-        if ((s & 511) === 511) yield;
+        work += width;
+        if ((s & 511) === 511 || work >= BITE_CELLS) { work = 0; yield; }
         const cells = table.row(Math.floor(s * step));
         for (let j = 0; j < width && j < cells.length; j++) {
             const v = cells[j];
@@ -10244,6 +10248,8 @@ function columnNames(table) {
 ```
 
 > **Why isn't `007` a number?** A leading zero means it's a CODE (a zip code, an ID), not an amount. As a number it would become `7`, and lose its zeros. So a column with `007` in it stays words.
+
+> **Why `BITE_CELLS`?** Long jobs take a breath (let the page draw) every so many ROWS. But a row of a 10,000-column file is 10,000 cells: 1,024 of those rows is 10 million cells, and the page froze for seconds between breaths. So a job also takes a breath after about 16,000 CELLS, whichever comes first. A 10-column file breathes just like before.
 
 <br>
 
@@ -11109,10 +11115,12 @@ function tableSource(table, alias) {
             const emptyIsNull = table.emptyIsNull !== false;
             const n = table.rowCount;
             const emptyRow = new Array(width).fill(null);
+            let work = 0;                   //  cells cut since the last breath  (a row is cut whole,  even for 2 columns)
 
             for (let i = 0; i < n; i++) {
 
-                if ((i & 1023) === 1023) yield i / n;
+                work += used.length === 0 ? 1 : width;
+                if ((i & 1023) === 1023 || work >= BITE_CELLS) { work = 0; yield i / n; }
 
                 //  (No columns used at all,  like COUNT(*)?   Then every row can be the same empty one.)
                 const row = used.length === 0 ? emptyRow : new Array(width);
@@ -12795,6 +12803,11 @@ queryRun.addEventListener('click', runTheQuery);
 //  Turn the answer into a table  (the same kind the brain keeps for a file),  and put it on screen.
 //  It's written straight into one long string,  and where each row starts is written down as it goes:
 //  so it never has to be cut up again.   (In bites:  a million-row answer never freezes the page.)
+//
+//  Careful with memory:  a 10,000-column answer is 100 million cells.
+//    -  Each line is glued with  join,  never  line += cell.   (+= keeps every little piece alive until the very end:
+//       about 60 bytes a cell,  so a 500 MB answer needed 5+ GB,  and the tab crashed.   join makes ONE flat string.)
+//    -  Each of the engine's rows is let go once it's written,  so the rows and the text are never both whole.
 async function showAnswer(result, text, ms, isCurrent) {
 
     setLoadingLabel('Laying out the answer...');
@@ -12807,30 +12820,33 @@ async function showAnswer(result, text, ms, isCurrent) {
     const starts  = new Uint32Array(rows.length + 1);
     const nullRows = [], nullCols = [];
     const parts = [];
+    const cells = new Array(cols.length);
     let at = 0;
+    let work = 0;                                       //  cells written since the clock was last checked
     let stopAt = performance.now() + CHUNK_TIME;
 
     for (let r = 0; r < rows.length; r++) {
 
-        if ((r & 1023) === 1023 && performance.now() >= stopAt) {
+        work += cols.length;
+        if (((r & 1023) === 1023 || work >= BITE_CELLS) && performance.now() >= stopAt) {
             setProgress(0.9 + 0.1 * r / rows.length);
             await new Promise(function (go) { nextBite(go); });
             if (!isCurrent()) throw QUERY_STALE;
             stopAt = performance.now() + CHUNK_TIME;
         }
+        if (work >= BITE_CELLS) work = 0;
 
         starts[r] = at;
         const row = rows[r];
-        let line = '';
+        rows[r] = null;                                 //  (written down now:  the engine's copy can go)
         for (let c = 0; c < cols.length; c++) {
             const v = row[c];
             if (v === null) { nullRows.push(r + 1); nullCols.push(c); }
             const cell = queryCellText(v, types[c]);
             if (cell.length > longest[c]) longest[c] = cell.length;
-            if (c > 0) line += ',';
-            line += /[",\r\n]/.test(cell) ? '"' + cell.split('"').join('""') + '"' : cell;
+            cells[c] = /[",\r\n]/.test(cell) ? '"' + cell.split('"').join('""') + '"' : cell;
         }
-        line += '\n';
+        const line = cells.join(',') + '\n';
         parts.push(line);
         at += line.length;
     }
@@ -12867,6 +12883,8 @@ function backToFile() {
     if (fileTable === null || !showingAnswer()) return;
     queryId++;                                          //  (a query still running?  It stops.)
     swapIn(fileTable.table, fileLook);
+    answer = null;                                      //  let the answer go  (a big one is as big as a file)
+    queryExport.disabled = true;
     setQueryStatus('', false);
 }
 
@@ -12907,6 +12925,9 @@ queryExport.addEventListener('click', function () {
 |---|---|
 | `queryId` | Every Run gets a number. Run again while one is going? The old one sees the number changed, and quits. |
 | `showAnswer` | The answer is written straight into one long string, and where each row starts is written down AS IT GOES: so it never has to be cut up again. |
+| `cells.join(',')` | Each line is glued in ONE go. Gluing with `line += cell` looks the same, but the browser secretly keeps every little piece until the end (about 60 bytes a cell): a `SELECT *` on a 500 MB file needed over 5 GB, and the tab crashed. `join` makes one flat line. |
+| `rows[r] = null` | That row is written down now, so the engine's copy can go. The rows and the text are never both whole at once. |
+| `answer = null` (in `backToFile`) | Back to the file? The answer is let go, and Export turns off. (A big answer is as big as a file.) |
 | `info.result` | The answer is shown in the TABLE look (Part 9): its column types on top, NULLs shown faintly. |
 | `URL.createObjectURL(blob)` | Turns the answer into a pretend web address the browser can "download". (No server: it never leaves your computer.) |
 
@@ -13473,6 +13494,9 @@ The test tables are in `Castle Claude/small-files/query/`:
 | Every condition's value gets quotes, even numbers | `sqlValueOf` gets no column type: check `queryKinds()` and `columnKinds` (Step 10.9). |
 | `7 / 2` gives `3` | That's right! Two whole numbers give a whole answer (like SQLite, SQL Server and PostgreSQL). Write `7.0 / 2` for `3.5`. |
 | A query on a big file freezes the page | A loop in the engine doesn't `yield` (pause). Every loop over all the rows needs one every few thousand rows. |
+| A query on a WIDE file (thousands of columns) freezes the page for seconds | The loop pauses by ROWS only. It needs `|| work >= BITE_CELLS` too, so it also pauses by cells (Step 10.9). |
+| The tab crashes ("Aw, Snap" / "Out of memory") after `SELECT *` on a big file | `showAnswer` glues each line with `line += cell` instead of `cells.join(',')`. The `+=` pieces stay alive until the end: about 10× the file's size. |
+| Memory stays high after "← Back to file" | `backToFile` is missing `answer = null;`. The old answer (as big as a file) is still kept. |
 | "← Back to file" shows the answer again | `backToFile` has to swap in `fileTable.table` (the file), not `answer.table`. |
 | Picking ANY file crashes with `Cannot set properties of null (setting 'hidden')` | The `<div id="fileBadge" hidden></div>` is missing from the skeleton (Step 5.1). |
 | An Excel file shows garbage letters (`PK...`) | The first-bytes check (Step 5.10 #5) is missing, so it got read as text. |
@@ -13587,7 +13611,7 @@ The test tables are in `Castle Claude/small-files/query/`:
 - **Queries: the SELECT part of SQL, not ALL of it.** No `WITH RECURSIVE`, no named windows (`WINDOW w AS ...`), no `GROUPS` frames, no `INTERSECT ALL` / `EXCEPT ALL`. It says so when you use one.
 - **Queries follow SQLite's rules where databases disagree.** `LIKE` ignores big and small letters, `7 / 2` is `3`, `'12abc' + 1` is `13`. A query written for SQL Server or PostgreSQL usually runs as is, but the odd function or detail may differ.
 - **Queries: a column's type is a good guess.** It looks at 20,000 rows. A cell that doesn't fit (a word in a number column) stays words, and a number column with `007` in it is words on purpose (it's a code).
-- **Queries hold the answer in memory.** A question that answers with MILLIONS of rows (like `SELECT *` on a huge file, sorted) needs room for the file AND the answer.
+- **Queries hold the answer in memory.** A question that answers with MILLIONS of rows (like `SELECT *` on a huge file, sorted) needs room for the file AND the answer. A `SELECT *` on a 500 MB file works (about 2 GB at its peak, ~17 s); an answer BIGGER than the browser can hold as text (about 500 MB, like `SELECT *, *` on that file) says "The answer is too big for the browser" instead.
 - **Queries on another sheet or table read it first.** The open one is ready; any other one is read (once) the first time a question asks for it.
 
 - **It expects a header.** The first line is always treated as the column names.
