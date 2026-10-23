@@ -4449,6 +4449,7 @@ async function showAnswer(result, text, ms, isCurrent) {
     const cols    = result.columns;
     const rows    = result.rows;
     const types   = cols.map(function (c) { return c.type; });
+    const looks   = cols.map(function (c) { return c.look || null; });     //  money keeps its look:   $116,450.00
     const header  = cols.map(function (c) { return c.name; });
     const longest = header.map(function (n) { return n.length; });
     const starts  = new Uint32Array(rows.length + 1);
@@ -4476,7 +4477,7 @@ async function showAnswer(result, text, ms, isCurrent) {
         for (let c = 0; c < cols.length; c++) {
             const v = row[c];
             if (v === null) { nullRows.push(r + 1); nullCols.push(c); }
-            const cell = queryCellText(v, types[c]);
+            const cell = queryCellText(v, types[c], looks[c]);
             if (cell.length > longest[c]) longest[c] = cell.length;
             cells[c] = /[",\r\n]/.test(cell) ? '"' + cell.split('"').join('""') + '"' : cell;
         }

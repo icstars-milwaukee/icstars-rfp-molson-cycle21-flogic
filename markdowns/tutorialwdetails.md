@@ -15,7 +15,7 @@ You're going to build a web page that opens a CSV file and shows it like a **min
 - **Spreadsheet View ↔ CSV View**: flip any file between the CSV look and Excel's look (letters on top, Excel's row numbers, a wider grid), like turning a card over (Part 8)
 - It opens **SQL dumps (`.sql`)** too: MySQL, PostgreSQL, and SQLite, one table at a time, in a **table look** (each column's type under its name, a PK badge, faint NULLs) in classic database blue. It flips to the CSV look, too (Part 9)
 - A **query engine** of its own: ask any open table a question in SQL (`WHERE`, `GROUP BY`, `JOIN`, window functions...), or click it together in the **Query** menu's builder. The answer takes the window's place; **← Back to file** brings the file back (Part 10)
-- **Query Flexibility** ("snap to result"): sloppy SQL like `selct * form orders` or `where status = shipped` gets fixed, and it says what it changed. **Type mode**: type your own SQL, then untick it and your SQL snaps back into the builder's buttons. And **click any cell** for its Details: rest the mouse on it and a little black **expand?** tag shows up (Part 11)
+- **Query Flexibility** ("snap to result"): sloppy SQL like `selct * form orders` or `where status = shipped` gets fixed, and it says what it changed. **Type mode**: type your own SQL, then untick it and your SQL snaps back into the builder's buttons. And **click any cell** for its Details: rest the mouse on it and a little black **expand?** tag shows up. And **money columns** (`"$116,450.00"`) count as numbers, so `>`, `SUM`, `MAX` and sorting work, while answers keep the `$` look (Part 11)
 
 You'll build it **one piece at a time**. After each part there's a **✅ Test it** step, so you always know it's working before you move on.
 
@@ -13595,9 +13595,15 @@ async function runQuery(text, catalog, isCurrent, progress, flexible) {
     answer.count = ready.statements.length;
     answer.sql = sql;
     answer.fixes = flex.fixes;
+    const looks = answerLooks(ready.picked, ready.plan, catalog);
+    answer.columns.forEach(function (c, k) { c.look = looks[k]; });
     return answer;
 }
+```
 
+...and below it, its 2 new helpers:
+
+```js
 //  Read a question,  get its tables ready,  and compile it.   (Nothing runs yet.)
 async function readyQuery(text, catalog, isCurrent) {
 
@@ -13991,15 +13997,22 @@ function flexFix(sql, problem, catalog, flex) {
             return flexInsert(sql, prev.to, '*');
         }
 
-        //  3.  No table after FROM  (or JOIN):   FROM    FROM order    FROM WHERE ...
+        //  3.  No table after FROM  (or JOIN):   FROM    FROM order    FROM WHERE ...    FROM all
         if (flexIsWord(prev, 'FROM') || flexIsWord(prev, 'JOIN')) {
             if (t.k === 'id' && SQL_RESERVED.has(t.u)) {
                 const table = tableFor(t.v);                    //  a table called that  (or nearly):   order  ->  orders
                 if (table !== null) { say(sql.slice(t.at, t.to) + '  ->  ' + flexName(table)); return swap(t, t, flexName(table)); }
             }
-            if (main !== null && (atEnd || flexIsOp(t, ')') || (t.k === 'id' && SQL_RESERVED.has(t.u)))) {
+            //  The next part of the query starts right away  (FROM WHERE ...):  the table's name goes in FRONT of it.
+            if (main !== null && (atEnd || flexIsOp(t, ')') || (t.k === 'id' && FLEX_AFTER_FROM.has(t.u)))) {
                 say('added the table  ' + flexName(main));
                 return flexInsert(sql, prev.to, flexName(main));
+            }
+            //  Something that can't be a table  (FROM all,  FROM *,  FROM 2024):  with ONE table,  it means that one.
+            //  (Several tables,  like a SQL dump's?  Which one?  Don't guess.)
+            if (main !== null && names.length === 1 && ((t.k === 'id' && SQL_RESERVED.has(t.u)) || flexIsOp(t, '*') || t.k === 'num' || t.k === 'str')) {
+                say(sql.slice(t.at, t.to) + '  ->  ' + flexName(main) + '   (the open file\'s table)');
+                return swap(t, t, flexName(main));
             }
         }
 
@@ -15185,6 +15198,387 @@ rowsBox.addEventListener('click', function (e) {
 
 <br>
 
+### Step 11.8: Money columns (numbers with a LOOK)
+
+A real file (an employee list, 500,000 rows) had its salaries written the way people write money: `"$116,450.00"`. To SQL, that's WORDS, not a number. And words follow word rules, quietly:
+
+| You ask | You'd expect | Words-rules answer |
+|---|---|---|
+| `WHERE "Annual Salary" > 150000` | 156,396 rows | **every row** (in SQL, words are always "bigger" than numbers) |
+| `WHERE "Annual Salary" < 60000` | 20,554 rows | **no rows** |
+| `MAX("Annual Salary")` | $409,950.00 | **$99,950.00** (as words, "$9..." comes after "$4...") |
+| `SUM(...)`, `AVG(...)` | the total | **0** |
+
+No error, just wrong answers. (Real SQLite answers the same way: it's the SQL rule. That's why the tests against SQLite couldn't catch it: a person had to.)
+
+So the engine learns a 3rd kind of number, a number with a LOOK: `$116,450.00`, `1,200`, `€5`, `-$3`, `($3.00)` (accountants' minus), `12%`. It reads them as the NUMBERS they are, and remembers the look, so an answer can show them the same way.
+
+**1.** How to read a look, and write a number back in it (above `SAMPLE_ROWS`, in "THE TABLES"):
+
+```js
+//  A NUMBER WITH A LOOK:   $116,450.00    1,200    €5    -$3    $-3    ($3.00)    12%
+//  (People write money like that,  and a CSV keeps it as written.   To SQL it's words:  then  >  matches every row,
+//   MAX says $99,950,  SUM says 0.   So the engine reads them as the NUMBERS they are,  and remembers the LOOK,
+//   so an answer can show them the same way.)
+//      1  (       2  a sign       3  the money sign       4  a sign       5  the whole part  (1,200  or  1200)
+//      6  .50     7  %            8  )
+const CELL_LOOK = /^\s*(\()?\s*([-+])?\s*([$€£¥])?\s*([-+])?\s*(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?\s*(%)?\s*(\))?\s*$/;
+
+//  '$116,450.00'   ->   { n: 116450,  pre: '$',  post: '',  commas: true,  places: 2,  parens: false }
+//  null  =  not a number with a look   (a plain number like 1200 is NOT one:  it needs no help)
+function lookOf(s) {
+    const m = CELL_LOOK.exec(s);
+    if (m === null) return null;
+    const parens = m[1] !== undefined;
+    if (parens !== (m[8] !== undefined)) return null;                  //  a  (  needs its  )
+    if (m[2] !== undefined && m[4] !== undefined) return null;         //  -$-5:  one sign at most
+    const sign = m[2] || m[4] || '';
+    if (parens && sign !== '') return null;
+    const commas = m[5].indexOf(',') !== -1;
+    if (!parens && m[3] === undefined && m[7] === undefined && !commas) return null;     //  nothing to look at:  a plain number
+    const n = Number(m[5].split(',').join('') + (m[6] || ''));
+    return { n: parens || sign === '-' ? -n : n, pre: m[3] || '', post: m[7] || '', commas: commas, places: m[6] ? m[6].length - 1 : 0, parens: parens };
+}
+
+//  A number back in its look:   116450.5   ->   $116,450.50
+function lookText(v, look) {
+    let s = Math.abs(v).toFixed(look.places);
+    if (look.commas) {
+        const dot = s.indexOf('.');
+        const whole = dot === -1 ? s : s.slice(0, dot);
+        let grouped = '';
+        for (let k = whole.length; k > 0; k -= 3) grouped = whole.slice(Math.max(0, k - 3), k) + (grouped === '' ? '' : ',' + grouped);
+        s = grouped + (dot === -1 ? '' : s.slice(dot));
+    }
+    s = look.pre + s + look.post;
+    return v < 0 ? (look.parens ? '(' + s + ')' : '-' + s) : s;
+}
+
+//  Words that are a number with a look,  next to a NUMBER   ->   that number   ('$100,000'  ->  100000)
+//  (Anything else:  the same node,  untouched.)
+function lookLiteral(node, otherTy) {
+    if (node.t !== 'lit' || typeof node.v !== 'string' || !(otherTy === 'int' || otherTy === 'real' || otherTy === 'num')) return node;
+    const L = lookOf(node.v);
+    return L === null ? node : { t: 'lit', v: L.n, ty: Number.isInteger(L.n) ? 'int' : 'real' };
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `(\d{1,3}(?:,\d{3})+\|\d+)` | The whole part: `1,200` (commas every 3) or `1200`. `12,34` (Europe's 12.34) doesn't fit: it stays words. Which one was meant? Don't guess. |
+| `return null` (nothing to look at) | A plain `1200` is NOT a look: it needs no help. And `007` stays a code, like before. |
+| `lookLiteral` | `'$100,000'` written IN a question, next to a number: it's the number 100000. |
+
+**2.** Each column's look is worked out WITH its kind, by `lookAtKinds`. Right after `columnKinds`, a way to ask for the looks:
+
+```js
+//  Each column's LOOK  (money,  1,200,  12%),  or null   (worked out together with the kinds).
+function columnLooks(table) {
+    if (!table.kinds) runNow(lookAtKinds(table));
+    return table.looks;
+}
+```
+
+...and `lookAtKinds`, all of it (replace the old one):
+
+```js
+//  The looking itself:  a generator  (see RUN),  so runQuery can do it in bites before a question
+//  (20,000 rows of a wide file,  all at once,  would stop the page for a moment).
+function* lookAtKinds(table) {
+
+    if (table.kinds) return;
+
+    const width = table.columns.length;
+
+    if (table.declared) {
+        table.kinds = table.columns.map(function (name, j) {
+            const declared = table.declared[j];
+            return declared ? typeClass(declared) : 'text';
+        });
+        table.looks = table.columns.map(function () { return null; });     //  (its types are written down:  they win)
+        return;
+    }
+
+    const canInt = new Array(width).fill(true);
+    const canReal = new Array(width).fill(true);
+    const canDate = new Array(width).fill(true);
+    const canTime = new Array(width).fill(true);
+    const canLook = new Array(width).fill(true);        //  every cell a number,  some with a look  ($116,450.00)?
+    const looks = new Array(width).fill(null);
+    const anything = new Array(width).fill(false);
+
+    const n = table.rowCount;
+    const look = Math.min(n, SAMPLE_ROWS);
+    const step = n / look;
+
+    let work = 0;                   //  cells looked at since the last breath
+    for (let s = 0; s < look; s++) {
+        work += width;
+        if ((s & 511) === 511 || work >= BITE_CELLS) { work = 0; yield; }
+        const cells = table.row(Math.floor(s * step));
+        for (let j = 0; j < width && j < cells.length; j++) {
+            const v = cells[j];
+            if (v === '') continue;
+            anything[j] = true;
+            if (canInt[j] && !CELL_INT.test(v)) canInt[j] = false;
+            if (canReal[j] && !CELL_REAL.test(v)) canReal[j] = false;
+            if (canDate[j] && !CELL_DATE.test(v)) canDate[j] = false;
+            if (canTime[j] && !CELL_TIME.test(v) && !CELL_DATE.test(v)) canTime[j] = false;
+            if (canLook[j] && !CELL_REAL.test(v)) {                 //  (a plain number fits a money column too:  0,  1200)
+                const L = lookOf(v);
+                const was = looks[j];
+                if (L === null) canLook[j] = false;
+                else if (was === null) looks[j] = { pre: L.pre, post: L.post, commas: L.commas, places: L.places, parens: L.parens };
+                else if (was.pre !== L.pre || was.post !== L.post) canLook[j] = false;     //  $ AND € in one column?  Which is it?  Words.
+                else {
+                    if (L.places > was.places) was.places = L.places;
+                    if (L.commas) was.commas = true;
+                    if (L.parens) was.parens = true;
+                }
+            }
+        }
+    }
+
+    const money = function (j) { return anything[j] && !canInt[j] && !canReal[j] && canLook[j] && looks[j] !== null; };
+    table.kinds = canInt.map(function (x, j) {
+        if (!anything[j]) return 'text';
+        if (canInt[j]) return 'int';
+        if (canReal[j]) return 'real';
+        if (money(j)) return looks[j].places > 0 ? 'real' : 'int';
+        if (canDate[j]) return 'date';
+        if (canTime[j]) return 'timestamp';
+        return 'text';
+    });
+    table.looks = looks.map(function (L, j) { return money(j) ? L : null; });
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `table.looks` | Next to `table.kinds`: each column's look (`$`, commas, 2 places), or `null`. |
+| `canLook` / `looks` | 2 more notes per column, next to `canInt` ...: is every cell a number (some with a look)? And which look? |
+| `$` AND `€` in one column | Not clear what the column IS: it stays words, like before. One cell like `N/A` too. Better a column of words than wrong numbers. |
+| `if (money(j)) return ... 'real' : 'int'` | A money column is a number: `real` (or `int`, when it never has cents). |
+| `table.declared` | A SQL dump writes its types down: they win (no looks). |
+
+**3.** Reading the rows. At the top of `tableSource`, each column gets its look (replace the `kinds` and `cols` lines):
+
+```js
+    const kinds = columnKinds(table);
+    const looks = columnLooks(table);
+    const cols  = names.map(function (n, j) { const c = newCol(n, alias, kinds[j]); c.look = looks[j]; return c; });
+```
+
+...and in its `scan`, a money cell becomes its number. Under the `numeric` line:
+
+```js
+            const looked  = used.map(function (j) { return looks[j] !== null; });       //  money:  $116,450.00  ->  116450
+```
+
+...and under the `numeric[u] && CELL_REAL.test(s)` line:
+
+```js
+                        else if (looked[u]) { const L = lookOf(s); v = L === null ? s : L.n; }
+```
+
+In `resolveColumn`'s `found`, the look comes along with the column it found (so `LIKE` can use it):
+
+```js
+        const col = sc.grouped ? null : sc.cols[idx];
+        return { depth: d, idx: idx, ty: ty, name: name, look: col && col.look ? col.look : null };
+```
+
+**4.** Money words in a QUESTION (`salary > '$100,000'`, `salary = '$116,450.00'`) become numbers, in `=` `<` `>` ..., `BETWEEN` and `IN`. And `LIKE` looks at a money column the way the FILE writes it (`salary LIKE '$116%'`):
+
+```js
+        case 'cmp': {
+            let A = cx(node.a, scope, ctx), B = cx(node.b, scope, ctx);
+            //  Money words against a number:   salary > '$100,000'   ->   salary > 100000
+            const la = lookLiteral(node.a, B.ty), lb = lookLiteral(node.b, A.ty);
+            if (la !== node.a) A = cx(la, scope, ctx);
+            if (lb !== node.b) B = cx(lb, scope, ctx);
+            const a = A.f, b = B.f;
+            const test = {
+                '=':  function (c) { return c === 0; },
+                '<>': function (c) { return c !== 0; },
+                '<':  function (c) { return c < 0; },
+                '<=': function (c) { return c <= 0; },
+                '>':  function (c) { return c > 0; },
+                '>=': function (c) { return c >= 0; },
+            }[node.op];
+            return { f: function (row, env) {
+                const x = a(row, env);
+                if (x === null) return null;
+                const y = b(row, env);
+                if (y === null) return null;
+                return test(compareValues(x, y));
+            }, ty: 'bool' };
+        }
+```
+
+```js
+        case 'between': {
+            const E = cx(node.e, scope, ctx);
+            const e = E.f, lo = cx(lookLiteral(node.lo, E.ty), scope, ctx).f, hi = cx(lookLiteral(node.hi, E.ty), scope, ctx).f, not = node.not;
+            return { f: function (row, env) {
+                const x = e(row, env);
+                if (x === null) return null;
+                const l = lo(row, env), h = hi(row, env);
+                const aboveLo = l === null ? null : compareValues(x, l) >= 0;
+                const belowHi = h === null ? null : compareValues(x, h) <= 0;
+                let inside;
+                if (aboveLo === false || belowHi === false) inside = false;
+                else if (aboveLo === null || belowHi === null) inside = null;
+                else inside = true;
+                return inside === null ? null : inside !== not;
+            }, ty: 'bool' };
+        }
+```
+
+```js
+        case 'in': {
+            const E = cx(node.e, scope, ctx);
+            const e = E.f;
+            const list = node.list.map(function (item) { return cx(lookLiteral(item, E.ty), scope, ctx).f; });
+            const not = node.not;
+            return { f: function (row, env) {
+                if (list.length === 0) return not;
+                const x = e(row, env);
+                if (x === null) return null;
+                let sawNull = false;
+                for (let k = 0; k < list.length; k++) {
+                    const y = list[k](row, env);
+                    if (y === null) { sawNull = true; continue; }
+                    if (compareValues(x, y) === 0) return !not;
+                }
+                return sawNull ? null : not;
+            }, ty: 'bool' };
+        }
+```
+
+```js
+        case 'like': {
+            const e = cx(node.e, scope, ctx).f;
+            //  A column with a look  (money)?  LIKE sees it the way the FILE writes it:   salary LIKE '$116%'
+            const found = node.e.t === 'col' ? resolveColumn(scope, node.e, true) : null;
+            const look = found !== null && found.look ? found.look : null;
+            const P = node.pat, not = node.not;
+            const esc = node.esc === null ? null : cx(node.esc, scope, ctx).f;
+            //  The pattern never changes?  Build its matcher once.
+            const fixed = P.t === 'lit' && (node.esc === null || node.esc.t === 'lit')
+                ? (P.v === null ? null : likeMatcher(valueText(P.v), node.esc === null ? null : node.esc.v))
+                : undefined;
+            const pat = cx(P, scope, ctx).f;
+            return { f: function (row, env) {
+                const x = e(row, env);
+                if (x === null) return null;
+                let m = fixed;
+                if (m === undefined) {
+                    const p = pat(row, env);
+                    if (p === null) return null;
+                    m = likeMatcher(valueText(p), esc === null ? null : esc(row, env));
+                }
+                if (m === null) return null;
+                return m.test(look !== null && typeof x === 'number' ? lookText(x, look) : valueText(x)) !== not;
+            }, ty: 'bool' };
+        }
+```
+
+**5.** The answer keeps the look. Which answer columns get one? A column that IS a money column (or `*`), or a `SUM` / `MIN` / `MAX` / `AVG` / `TOTAL` of one. (`salary * 2` is a new number: plain.) At the end of `runQuery`:
+
+```js
+    const looks = answerLooks(ready.picked, ready.plan, catalog);
+    answer.columns.forEach(function (c, k) { c.look = looks[k]; });
+```
+
+```js
+//  The LOOK of each answer column  ($116,450.00),  or null  (a plain number,  or words).
+//  A column gets its table's look when it IS that column  (or  *),  or a SUM / MIN / MAX / AVG / TOTAL of it.
+//  (Anything else,  like  salary * 2  or a UNION:  plain numbers.   AVG gets at least 2 places:  it's rarely whole.)
+function answerLooks(picked, plan, catalog) {
+    const none = plan.cols.map(function () { return null; });
+    if (picked.t !== 'query' || picked.body.t !== 'core' || picked.body.from === null) return none;
+    const c = picked.body;
+    const tables = [];
+    (function walk(f) {
+        if (f.t === 'table') {
+            const t = catalog.find(f.name);
+            if (t !== null) tables.push({ keys: [String(f.name).toLowerCase(), String(f.alias || '').toLowerCase()], table: t });
+        } else if (f.t === 'join') { walk(f.a); walk(f.b); }
+    })(c.from);
+    function lookOfCol(e) {
+        if (e.t !== 'col') return null;
+        for (const s of tables) {
+            if (e.table !== null && s.keys.indexOf(String(e.table).toLowerCase()) === -1) continue;
+            const j = columnNames(s.table).map(function (n) { return n.toLowerCase(); }).indexOf(String(e.name).toLowerCase());
+            if (j !== -1) return columnLooks(s.table)[j];
+        }
+        return null;
+    }
+    const out = [];
+    for (const it of c.items) {
+        if (it.star) {
+            tables.forEach(function (s) {
+                if (it.table === null || s.keys.indexOf(String(it.table).toLowerCase()) !== -1) columnLooks(s.table).forEach(function (L) { out.push(L); });
+            });
+            continue;
+        }
+        const e = it.e;
+        let L = lookOfCol(e);
+        if (e.t === 'fn' && !e.over && !e.star && e.args.length === 1 && ['SUM', 'MIN', 'MAX', 'AVG', 'TOTAL'].indexOf(e.name) !== -1) {
+            L = lookOfCol(e.args[0]);
+            if (L !== null && e.name === 'AVG') L = Object.assign({}, L, { places: Math.max(L.places, 2) });
+        }
+        out.push(L);
+    }
+    return out.length === plan.cols.length ? out : none;           //  (didn't line up  (a JOIN with USING?):  play it safe)
+}
+```
+
+```js
+//  A value,  as it's shown in the answer.   (A column with a look  (money):  in its look,   $116,450.00.)
+function queryCellText(v, ty, look) {
+    if (v === null) return '';
+    return look && typeof v === 'number' ? lookText(v, look) : valueText(v, ty);
+}
+```
+
+**6.** The brain prints each answer cell in its column's look (in `showAnswer`):
+
+```js
+    const looks   = cols.map(function (c) { return c.look || null; });     //  money keeps its look:   $116,450.00
+```
+
+```js
+            const cell = queryCellText(v, types[c], looks[c]);
+```
+
+> **The FILE never changes.** The sheet still shows `$116,450.00` exactly as written: only the QUESTIONS see a number. And Export CSV saves the answer in its look too.
+
+<br>
+
+### Step 11.9: What the random tests found
+
+To test "does it find the right rows", a tester (`tools/query-test/fuzz.js`) makes up THOUSANDS of random, correct questions, runs each one here AND in the real SQLite, and compares. Plus the same questions inside the page, a chaos test (random clicking, scrolling, searching, flipping, between questions), and a person's questions on real files. Two things turned up:
+
+**1. `%` with decimals.** `7.9 % 3`: SQLite cuts both sides to WHOLE numbers first (`7 % 3 = 1`). JavaScript's own `%` says `1.9`. In `compileMath`, replace the `%` part:
+
+```js
+        case '%': return { f: function (row, env) {
+                //  SQLite's way:  both sides are cut to WHOLE numbers first   (7.9 % 3  =  7 % 3  =  1,    0.15 % 6  =  0).
+                //  Cut down to 0?  NULL   (7 % 0.5  =  7 % 0).   The sign is the left side's   (-7 % 3  =  -1).
+                const x = a(row, env), y = b(row, env);
+                if (x === null || y === null) return null;
+                const nx = Math.trunc(numOf(x)), ny = Math.trunc(numOf(y));
+                if (ny === 0 || !isFinite(ny)) return null;
+                return nx % ny;
+            }, ty: ty };
+```
+
+**2. `select * from all`.** Flexibility used to "add the table" in FRONT of any keyword after FROM (`from orders all`: then a strange error). Now only in front of the next part of the query (`from WHERE ...`); a word that can't be a table (`all`, `*`, `2024`) is REPLACED by the open table (just one table: otherwise, which one?). That's rule 3 in Step 11.4's `flexFix`.
+
+<br>
+
 ### ✅ Test it
 
 The test tables are in `Castle Claude/small-files/query/`.
@@ -15199,6 +15593,8 @@ The test tables are in `Castle Claude/small-files/query/`.
 8. In the builder: Keep rows **status is Shipped** (big S). Run: 190 rows, and the builder's box now says `shipped`.
 9. Back to file. Rest the mouse on a cell: after a moment, **expand?** shows up on its corner. Click the cell: the Details open, for that row. Click another: they follow. Escape closes them.
 10. Search `pending`, click the 3rd row: the Details say the FILE's row number (not 3).
+11. Type `select * from all`: it runs on the open table (and says `all -> orders`).
+12. Open a file with money in it (like `corporate_500k.csv`, `"$116,450.00"`). Ask `SELECT MAX("Annual Salary"), AVG("Annual Salary") FROM corporate_500k`: `$409,950.00`, and an average with cents. `WHERE "Annual Salary" > 150000` finds 156,396 rows, not all of them.
 
 <br>
 
@@ -15237,6 +15633,8 @@ The test tables are in `Castle Claude/small-files/query/`.
 | **Make the "expand?" tag show up sooner (or later)** | `TAG_WAIT` in `scriptI.js` (600 ms). |
 | **Change the tag's words** | In `testI.html`: `<div id="cellTag" ...>expand?</div>`. |
 | **A different color for the ticked checkbox** | `.query-option input:checked` -> `background:` and `border-color:` (it's `var(--sql)`, SQL blue). |
+| **Read another money sign as money** (like ₹ or ₩) | Add it to `[$€£¥]` in `CELL_LOOK` (`queryI.js`). |
+| **Show averages of money with more (or fewer) cents** | In `answerLooks`: `Math.max(L.places, 2)`. |
 | **Change the button colors** | `#viewBtn` → `background` (`#185c37`, the green) and `#viewBtn.to-csv` → `background` (`#020202`, the black). |
 | **Build more/fewer extra rows** | Change `EXTRA_ROWS`. More = safer for super-fast scrolling, but a little more work per scroll. |
 | **Make the glow stronger** | In `.cell:hover`, raise `14px 2px` to something like `20px 6px` |
@@ -15337,6 +15735,12 @@ The test tables are in `Castle Claude/small-files/query/`.
 | The "expand?" tag never goes away when you scroll | The `scroll` / `wheel` listeners that call `hideTag` are missing. |
 | The tag blocks clicks on the cell under it | `#cellTag` is missing `pointer-events: none;`. |
 | The ✓ shows up floating when the query menu is closed | `.query-option input::after` uses `visibility`. Use `opacity: 0;` (the theme menu's gotcha, Part 4). |
+| `salary > 100000` finds EVERY row (or none), and `MAX(salary)` says $99,950 | The money column is still words: `lookAtKinds` isn't making its kind `real` (check the `money` line), or `tableSource` is missing the `looked[u]` line (the cells stay words). |
+| `SUM(salary)` works, but the answer shows `6166611450.0` instead of `$6,166,611,450.00` | `runQuery` is missing the `answerLooks` lines, or `showAnswer` isn't passing `looks[c]` to `queryCellText`. |
+| `salary = '$116,450.00'` finds nothing | `lookLiteral` isn't used in the `cmp` part (the money words have to become a number). |
+| `salary LIKE '$116%'` finds nothing | `like` isn't using the column's `look` (it's matching `116450.0`). |
+| `7.9 % 3` gives `1.9` | `%` has to `Math.trunc` both sides first, like SQLite (Step 11.9). |
+| `select * from all` gives "Expected the query to end here" | Rule 3 in `flexFix` adds the table in front of `ALL` instead of swapping `ALL` for it. Only the next PART (`WHERE`, `GROUP` ...) gets the table in front. |
 | Picking ANY file crashes with `Cannot set properties of null (setting 'hidden')` | The `<div id="fileBadge" hidden></div>` is missing from the skeleton (Step 5.1). |
 | An Excel file shows garbage letters (`PK...`) | The first-bytes check (Step 5.10 #5) is missing, so it got read as text. |
 | Excel dates show as numbers like `43586` | The date style wasn't found: check `styles` in `readXlsx` (it reads `<cellXfs>`), and that `formatKind` returns a kind for the format. |
@@ -15456,6 +15860,9 @@ The test tables are in `Castle Claude/small-files/query/`.
 - **Snap to result only fixes spelling, and only for `=` and `IN`.** No rows for `status = 'Shipped'` and the file says `shipped`? Fixed. But if the file has `Shipped` AND `SHIPPED`, or the word just isn't there, it leaves your question alone (0 rows is the right answer then).
 - **The builder shows ONE table's simple questions.** A JOIN, a CASE, a function like `UPPER(...)`, HAVING, OFFSET, or AND mixed with OR can't be buttons. Leaving type mode, it says which parts, and asks before dropping them.
 - **Clicking a cell in drag mode moves the sheet** (that's what drag mode is for). Turn it off to click cells.
+- **Money columns have to be ONE look.** A column with `$` in some cells and `€` in others, or a cell like `N/A` in between, stays words (which is it? it doesn't guess). Europe's `1.234,56` stays words too (is `12,34` twelve, or 1234?). `12%` counts as **12** (what you see), not 0.12.
+- **An answer keeps the money look only for the column itself** (and its `SUM`, `MIN`, `MAX`, `AVG`, `TOTAL`). Math on it (`salary * 2`), or a UNION, gives a plain number.
+- **`LIKE` ignores big and small letters for EVERY letter** (`'%Ñ%'` finds `Núñez`). Real SQLite only does it for A to Z: this is one place it's kinder on purpose.
 
 - **It expects a header.** The first line is always treated as the column names.
 - **A quote that never closes still changes its OWN row.** The brain catches a stray `"` and keeps every other row safe, but in that one row, everything after the `"` lands in one cell. (`Bob,5'10",tall` → `[Bob] [5'10,tall]`.) The real fix is in the file.

@@ -1699,6 +1699,52 @@ const CELL_INT  = /^[+-]?(0|[1-9]\d{0,14})$/;
 const CELL_REAL = /^[+-]?((0|[1-9]\d*)(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
 const CELL_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const CELL_TIME = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/;
+//  A NUMBER WITH A LOOK:   $116,450.00    1,200    €5    -$3    $-3    ($3.00)    12%
+//  (People write money like that,  and a CSV keeps it as written.   To SQL it's words:  then  >  matches every row,
+//   MAX says $99,950,  SUM says 0.   So the engine reads them as the NUMBERS they are,  and remembers the LOOK,
+//   so an answer can show them the same way.)
+//      1  (       2  a sign       3  the money sign       4  a sign       5  the whole part  (1,200  or  1200)
+//      6  .50     7  %            8  )
+const CELL_LOOK = /^\s*(\()?\s*([-+])?\s*([$€£¥])?\s*([-+])?\s*(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?\s*(%)?\s*(\))?\s*$/;
+
+//  '$116,450.00'   ->   { n: 116450,  pre: '$',  post: '',  commas: true,  places: 2,  parens: false }
+//  null  =  not a number with a look   (a plain number like 1200 is NOT one:  it needs no help)
+function lookOf(s) {
+    const m = CELL_LOOK.exec(s);
+    if (m === null) return null;
+    const parens = m[1] !== undefined;
+    if (parens !== (m[8] !== undefined)) return null;                  //  a  (  needs its  )
+    if (m[2] !== undefined && m[4] !== undefined) return null;         //  -$-5:  one sign at most
+    const sign = m[2] || m[4] || '';
+    if (parens && sign !== '') return null;
+    const commas = m[5].indexOf(',') !== -1;
+    if (!parens && m[3] === undefined && m[7] === undefined && !commas) return null;     //  nothing to look at:  a plain number
+    const n = Number(m[5].split(',').join('') + (m[6] || ''));
+    return { n: parens || sign === '-' ? -n : n, pre: m[3] || '', post: m[7] || '', commas: commas, places: m[6] ? m[6].length - 1 : 0, parens: parens };
+}
+
+//  A number back in its look:   116450.5   ->   $116,450.50
+function lookText(v, look) {
+    let s = Math.abs(v).toFixed(look.places);
+    if (look.commas) {
+        const dot = s.indexOf('.');
+        const whole = dot === -1 ? s : s.slice(0, dot);
+        let grouped = '';
+        for (let k = whole.length; k > 0; k -= 3) grouped = whole.slice(Math.max(0, k - 3), k) + (grouped === '' ? '' : ',' + grouped);
+        s = grouped + (dot === -1 ? '' : s.slice(dot));
+    }
+    s = look.pre + s + look.post;
+    return v < 0 ? (look.parens ? '(' + s + ')' : '-' + s) : s;
+}
+
+//  Words that are a number with a look,  next to a NUMBER   ->   that number   ('$100,000'  ->  100000)
+//  (Anything else:  the same node,  untouched.)
+function lookLiteral(node, otherTy) {
+    if (node.t !== 'lit' || typeof node.v !== 'string' || !(otherTy === 'int' || otherTy === 'real' || otherTy === 'num')) return node;
+    const L = lookOf(node.v);
+    return L === null ? node : { t: 'lit', v: L.n, ty: Number.isInteger(L.n) ? 'int' : 'real' };
+}
+
 const SAMPLE_ROWS = 20000;
 const BITE_CELLS  = 16384;      //  a long job takes a breath every 1,024 rows,  OR after this many CELLS,  whichever comes first
                                 //  (1,024 rows of a 10,000-column file is 10 million cells:  seconds,  not a bite)
@@ -1706,6 +1752,12 @@ const BITE_CELLS  = 16384;      //  a long job takes a breath every 1,024 rows, 
 function columnKinds(table) {
     if (!table.kinds) runNow(lookAtKinds(table));
     return table.kinds;
+}
+
+//  Each column's LOOK  (money,  1,200,  12%),  or null   (worked out together with the kinds).
+function columnLooks(table) {
+    if (!table.kinds) runNow(lookAtKinds(table));
+    return table.looks;
 }
 
 //  The looking itself:  a generator  (see RUN),  so runQuery can do it in bites before a question
@@ -1721,6 +1773,7 @@ function* lookAtKinds(table) {
             const declared = table.declared[j];
             return declared ? typeClass(declared) : 'text';
         });
+        table.looks = table.columns.map(function () { return null; });     //  (its types are written down:  they win)
         return;
     }
 
@@ -1728,6 +1781,8 @@ function* lookAtKinds(table) {
     const canReal = new Array(width).fill(true);
     const canDate = new Array(width).fill(true);
     const canTime = new Array(width).fill(true);
+    const canLook = new Array(width).fill(true);        //  every cell a number,  some with a look  ($116,450.00)?
+    const looks = new Array(width).fill(null);
     const anything = new Array(width).fill(false);
 
     const n = table.rowCount;
@@ -1747,17 +1802,32 @@ function* lookAtKinds(table) {
             if (canReal[j] && !CELL_REAL.test(v)) canReal[j] = false;
             if (canDate[j] && !CELL_DATE.test(v)) canDate[j] = false;
             if (canTime[j] && !CELL_TIME.test(v) && !CELL_DATE.test(v)) canTime[j] = false;
+            if (canLook[j] && !CELL_REAL.test(v)) {                 //  (a plain number fits a money column too:  0,  1200)
+                const L = lookOf(v);
+                const was = looks[j];
+                if (L === null) canLook[j] = false;
+                else if (was === null) looks[j] = { pre: L.pre, post: L.post, commas: L.commas, places: L.places, parens: L.parens };
+                else if (was.pre !== L.pre || was.post !== L.post) canLook[j] = false;     //  $ AND € in one column?  Which is it?  Words.
+                else {
+                    if (L.places > was.places) was.places = L.places;
+                    if (L.commas) was.commas = true;
+                    if (L.parens) was.parens = true;
+                }
+            }
         }
     }
 
+    const money = function (j) { return anything[j] && !canInt[j] && !canReal[j] && canLook[j] && looks[j] !== null; };
     table.kinds = canInt.map(function (x, j) {
         if (!anything[j]) return 'text';
         if (canInt[j]) return 'int';
         if (canReal[j]) return 'real';
+        if (money(j)) return looks[j].places > 0 ? 'real' : 'int';
         if (canDate[j]) return 'date';
         if (canTime[j]) return 'timestamp';
         return 'text';
     });
+    table.looks = looks.map(function (L, j) { return money(j) ? L : null; });
 }
 
 //  Column names a query can use:   an empty name  ->  column1, column2 ...     the same name twice  ->  name_2
@@ -1857,7 +1927,8 @@ function resolveColumn(scope, ref, quiet) {
         //  Found it OUTSIDE the query it was written in?  Then that query (and every one in between)
         //  depends on the outside row:  it's "correlated",  and has to run again for every outside row.
         if (!quiet) for (let k = 0; k < crossed.length; k++) markCorrelated(crossed[k], sc.owner);
-        return { depth: d, idx: idx, ty: ty, name: name };
+        const col = sc.grouped ? null : sc.cols[idx];
+        return { depth: d, idx: idx, ty: ty, name: name, look: col && col.look ? col.look : null };
     }
 }
 
@@ -1946,7 +2017,12 @@ function cx(node, scope, ctx) {
         }
 
         case 'cmp': {
-            const a = cx(node.a, scope, ctx).f, b = cx(node.b, scope, ctx).f;
+            let A = cx(node.a, scope, ctx), B = cx(node.b, scope, ctx);
+            //  Money words against a number:   salary > '$100,000'   ->   salary > 100000
+            const la = lookLiteral(node.a, B.ty), lb = lookLiteral(node.b, A.ty);
+            if (la !== node.a) A = cx(la, scope, ctx);
+            if (lb !== node.b) B = cx(lb, scope, ctx);
+            const a = A.f, b = B.f;
             const test = {
                 '=':  function (c) { return c === 0; },
                 '<>': function (c) { return c !== 0; },
@@ -2011,7 +2087,8 @@ function cx(node, scope, ctx) {
         }
 
         case 'between': {
-            const e = cx(node.e, scope, ctx).f, lo = cx(node.lo, scope, ctx).f, hi = cx(node.hi, scope, ctx).f, not = node.not;
+            const E = cx(node.e, scope, ctx);
+            const e = E.f, lo = cx(lookLiteral(node.lo, E.ty), scope, ctx).f, hi = cx(lookLiteral(node.hi, E.ty), scope, ctx).f, not = node.not;
             return { f: function (row, env) {
                 const x = e(row, env);
                 if (x === null) return null;
@@ -2027,8 +2104,9 @@ function cx(node, scope, ctx) {
         }
 
         case 'in': {
-            const e = cx(node.e, scope, ctx).f;
-            const list = node.list.map(function (item) { return cx(item, scope, ctx).f; });
+            const E = cx(node.e, scope, ctx);
+            const e = E.f;
+            const list = node.list.map(function (item) { return cx(lookLiteral(item, E.ty), scope, ctx).f; });
             const not = node.not;
             return { f: function (row, env) {
                 if (list.length === 0) return not;
@@ -2100,6 +2178,9 @@ function cx(node, scope, ctx) {
 
         case 'like': {
             const e = cx(node.e, scope, ctx).f;
+            //  A column with a look  (money)?  LIKE sees it the way the FILE writes it:   salary LIKE '$116%'
+            const found = node.e.t === 'col' ? resolveColumn(scope, node.e, true) : null;
+            const look = found !== null && found.look ? found.look : null;
             const P = node.pat, not = node.not;
             const esc = node.esc === null ? null : cx(node.esc, scope, ctx).f;
             //  The pattern never changes?  Build its matcher once.
@@ -2117,7 +2198,7 @@ function cx(node, scope, ctx) {
                     m = likeMatcher(valueText(p), esc === null ? null : esc(row, env));
                 }
                 if (m === null) return null;
-                return m.test(valueText(x)) !== not;
+                return m.test(look !== null && typeof x === 'number' ? lookText(x, look) : valueText(x)) !== not;
             }, ty: 'bool' };
         }
 
@@ -2183,10 +2264,12 @@ function compileMath(node, scope, ctx) {
                 return !real && Number.isInteger(nx) && Number.isInteger(ny) ? Math.trunc(nx / ny) : nx / ny;
             }, ty: ty };
         case '%': return { f: function (row, env) {
+                //  SQLite's way:  both sides are cut to WHOLE numbers first   (7.9 % 3  =  7 % 3  =  1,    0.15 % 6  =  0).
+                //  Cut down to 0?  NULL   (7 % 0.5  =  7 % 0).   The sign is the left side's   (-7 % 3  =  -1).
                 const x = a(row, env), y = b(row, env);
                 if (x === null || y === null) return null;
-                const nx = numOf(x), ny = numOf(y);
-                if (ny === 0) return null;
+                const nx = Math.trunc(numOf(x)), ny = Math.trunc(numOf(y));
+                if (ny === 0 || !isFinite(ny)) return null;
                 return nx % ny;
             }, ty: ty };
     }
@@ -2627,7 +2710,8 @@ function tableSource(table, alias) {
 
     const names = columnNames(table);
     const kinds = columnKinds(table);
-    const cols  = names.map(function (n, j) { return newCol(n, alias, kinds[j]); });
+    const looks = columnLooks(table);
+    const cols  = names.map(function (n, j) { const c = newCol(n, alias, kinds[j]); c.look = looks[j]; return c; });
     const width = cols.length;
 
     return {
@@ -2638,6 +2722,7 @@ function tableSource(table, alias) {
             const used = [];
             for (let j = 0; j < width; j++) if (cols[j].used) used.push(j);
             const numeric = used.map(function (j) { return kinds[j] === 'int' || kinds[j] === 'real' || kinds[j] === 'num'; });
+            const looked  = used.map(function (j) { return looks[j] !== null; });       //  money:  $116,450.00  ->  116450
             const isNull = table.isNull || null;
             const emptyIsNull = table.emptyIsNull !== false;
             const n = table.rowCount;
@@ -2660,6 +2745,7 @@ function tableSource(table, alias) {
                         if (s === undefined) v = null;
                         else if (s === '') v = (isNull !== null && isNull(i, j)) || (isNull === null && emptyIsNull) ? null : '';
                         else if (numeric[u] && CELL_REAL.test(s)) v = Number(s);       //  (a cell that isn't a number stays as words)
+                        else if (looked[u]) { const L = lookOf(s); v = L === null ? s : L.n; }
                         else v = s;
                         row[j] = v;
                     }
@@ -3544,7 +3630,51 @@ async function runQuery(text, catalog, isCurrent, progress, flexible) {
     answer.count = ready.statements.length;
     answer.sql = sql;
     answer.fixes = flex.fixes;
+    const looks = answerLooks(ready.picked, ready.plan, catalog);
+    answer.columns.forEach(function (c, k) { c.look = looks[k]; });
     return answer;
+}
+
+//  The LOOK of each answer column  ($116,450.00),  or null  (a plain number,  or words).
+//  A column gets its table's look when it IS that column  (or  *),  or a SUM / MIN / MAX / AVG / TOTAL of it.
+//  (Anything else,  like  salary * 2  or a UNION:  plain numbers.   AVG gets at least 2 places:  it's rarely whole.)
+function answerLooks(picked, plan, catalog) {
+    const none = plan.cols.map(function () { return null; });
+    if (picked.t !== 'query' || picked.body.t !== 'core' || picked.body.from === null) return none;
+    const c = picked.body;
+    const tables = [];
+    (function walk(f) {
+        if (f.t === 'table') {
+            const t = catalog.find(f.name);
+            if (t !== null) tables.push({ keys: [String(f.name).toLowerCase(), String(f.alias || '').toLowerCase()], table: t });
+        } else if (f.t === 'join') { walk(f.a); walk(f.b); }
+    })(c.from);
+    function lookOfCol(e) {
+        if (e.t !== 'col') return null;
+        for (const s of tables) {
+            if (e.table !== null && s.keys.indexOf(String(e.table).toLowerCase()) === -1) continue;
+            const j = columnNames(s.table).map(function (n) { return n.toLowerCase(); }).indexOf(String(e.name).toLowerCase());
+            if (j !== -1) return columnLooks(s.table)[j];
+        }
+        return null;
+    }
+    const out = [];
+    for (const it of c.items) {
+        if (it.star) {
+            tables.forEach(function (s) {
+                if (it.table === null || s.keys.indexOf(String(it.table).toLowerCase()) !== -1) columnLooks(s.table).forEach(function (L) { out.push(L); });
+            });
+            continue;
+        }
+        const e = it.e;
+        let L = lookOfCol(e);
+        if (e.t === 'fn' && !e.over && !e.star && e.args.length === 1 && ['SUM', 'MIN', 'MAX', 'AVG', 'TOTAL'].indexOf(e.name) !== -1) {
+            L = lookOfCol(e.args[0]);
+            if (L !== null && e.name === 'AVG') L = Object.assign({}, L, { places: Math.max(L.places, 2) });
+        }
+        out.push(L);
+    }
+    return out.length === plan.cols.length ? out : none;           //  (didn't line up  (a JOIN with USING?):  play it safe)
 }
 
 //  Read a question,  get its tables ready,  and compile it.   (Nothing runs yet.)
@@ -3624,9 +3754,10 @@ function queryTypeName(ty) {
     return { int: 'INTEGER', real: 'REAL', num: 'NUMERIC', text: 'TEXT', date: 'DATE', timestamp: 'TIMESTAMP', bool: 'BOOLEAN' }[ty] || '';
 }
 
-//  A value,  as it's shown in the answer.
-function queryCellText(v, ty) {
-    return v === null ? '' : valueText(v, ty);
+//  A value,  as it's shown in the answer.   (A column with a look  (money):  in its look,   $116,450.00.)
+function queryCellText(v, ty, look) {
+    if (v === null) return '';
+    return look && typeof v === 'number' ? lookText(v, look) : valueText(v, ty);
 }
 
 //  Turn a problem into words for you.
@@ -3929,15 +4060,22 @@ function flexFix(sql, problem, catalog, flex) {
             return flexInsert(sql, prev.to, '*');
         }
 
-        //  3.  No table after FROM  (or JOIN):   FROM    FROM order    FROM WHERE ...
+        //  3.  No table after FROM  (or JOIN):   FROM    FROM order    FROM WHERE ...    FROM all
         if (flexIsWord(prev, 'FROM') || flexIsWord(prev, 'JOIN')) {
             if (t.k === 'id' && SQL_RESERVED.has(t.u)) {
                 const table = tableFor(t.v);                    //  a table called that  (or nearly):   order  ->  orders
                 if (table !== null) { say(sql.slice(t.at, t.to) + '  ->  ' + flexName(table)); return swap(t, t, flexName(table)); }
             }
-            if (main !== null && (atEnd || flexIsOp(t, ')') || (t.k === 'id' && SQL_RESERVED.has(t.u)))) {
+            //  The next part of the query starts right away  (FROM WHERE ...):  the table's name goes in FRONT of it.
+            if (main !== null && (atEnd || flexIsOp(t, ')') || (t.k === 'id' && FLEX_AFTER_FROM.has(t.u)))) {
                 say('added the table  ' + flexName(main));
                 return flexInsert(sql, prev.to, flexName(main));
+            }
+            //  Something that can't be a table  (FROM all,  FROM *,  FROM 2024):  with ONE table,  it means that one.
+            //  (Several tables,  like a SQL dump's?  Which one?  Don't guess.)
+            if (main !== null && names.length === 1 && ((t.k === 'id' && SQL_RESERVED.has(t.u)) || flexIsOp(t, '*') || t.k === 'num' || t.k === 'str')) {
+                say(sql.slice(t.at, t.to) + '  ->  ' + flexName(main) + '   (the open file\'s table)');
+                return swap(t, t, flexName(main));
             }
         }
 
