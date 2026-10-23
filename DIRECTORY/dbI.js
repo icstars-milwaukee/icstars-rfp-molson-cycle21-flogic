@@ -18,10 +18,6 @@
 //    And it doesn't trust the file:  every page number and every length is checked,  and every page is read at most
 //    once per table,  so a broken  (or hostile)  file can't freeze or crash the page.   The worst it gets is "damaged".
 //
-//    A busy database  (an app that's open,  like Firefox)  often keeps its newest changes in a 2nd file next to it:
-//    "places.sqlite-wal",  "notes.db-wal"  (SQLite's "write-ahead log").   Pick both together,  and the newest pages are
-//    read from there  (see THE -WAL FILE).
-//
 // ----------------------------------------------------------
 
 const DB_STALE   = new Error('stale');          //  "a newer file was picked:  forget this one"  (not a real problem)
@@ -45,17 +41,16 @@ function dbIsSqlite(b) {
 //
 //    READ A DATABASE
 //
-//    readDb(file, isCurrent, choice, wal)   ->   a "promise" of  { text, info }   (like readSql)
+//    readDb(file, isCurrent, choice)   ->   a "promise" of  { text, info }   (like readSql)
 //        text  =  the table,  as CSV text
-//        info  =  the SQL notes  (see sqlI.js),  with  format: 'db'   (and its -wal file's:  see the end)
+//        info  =  the SQL notes  (see sqlI.js),  with  format: 'db'
 //
 //    choice       =  which table to show  (0 = the first one).   null  =  the first one that HAS rows.
 //    isCurrent()  says if this file is still the one you want.  (Picked a newer one?  Stop.)
-//    wal          =  its -wal file,  if you picked that too.   (null:  none)
 //
 // ----------------------------------------------------------
 
-async function readDb(file, isCurrent, choice, wal) {
+async function readDb(file, isCurrent, choice) {
 
     const size = file.size;
 
@@ -73,78 +68,45 @@ async function readDb(file, isCurrent, choice, wal) {
 
     //  ---- THE FILE'S NOTES:  its first 100 bytes ----
     if (size === 0) throw new Error('notables');                   //  (an empty file IS an empty database,  to SQLite)
-    const first = new Uint8Array(await file.slice(0, 100).arrayBuffer());
-    if (first.length < 100 || !dbIsSqlite(first)) throw new Error('notsqlite');
-    let pageSize = (first[16] << 8) | first[17];
+    const head = new Uint8Array(await file.slice(0, 100).arrayBuffer());
+    if (head.length < 100 || !dbIsSqlite(head)) throw new Error('notsqlite');
+    let pageSize = (head[16] << 8) | head[17];
     if (pageSize === 1) pageSize = 65536;
     if (pageSize < 512 || pageSize > 65536 || (pageSize & (pageSize - 1)) !== 0) throw DB_DAMAGED;
-    const word = function (b, at) { return ((b[at] << 24) | (b[at + 1] << 16) | (b[at + 2] << 8) | b[at + 3]) >>> 0; };
-    let pageCount = Math.floor(size / pageSize);                   //  (the file's own size is the truth:  a page past it isn't there)
-
-
-    //  ---- ITS -WAL FILE  (if you picked it too):  which pages have newer bytes in there ----
-    let walPages = null, walNote = '';
-    if (wal) {
-        const w = await readWal(wal, pageSize, isCurrent);
-        if (w.pages !== null) { walPages = w.pages; pageCount = w.size; }       //  (the database's size:  the newest save's)
-        walNote = w.note;
-    } else if (first[19] === 2) walNote = 'missing';               //  a database that USES a -wal file,  picked alone
-    const frameSize = 24 + pageSize;
-    const framesPerChunk = Math.floor(DB_CHUNK / frameSize);
-    const most = size + (walPages !== null ? wal.size : 0);         //  (no value can be longer than both files)
-
-
-    //  ---- THE PAGES:  read 4 MB at a time,  the recent ones kept ----
-    //  A page that has newer bytes in the -wal file  (frame f)  is read from there.
-    const chunks = new Map();
-    async function page(no) {
-        if (!(no >= 1 && no <= pageCount)) throw DB_DAMAGED;
-        const f = walPages === null ? undefined : walPages.get(no);
-        let c, source, from, to, at;
-        if (f === undefined) {
-            const offset = (no - 1) * pageSize;
-            c = Math.floor(offset / DB_CHUNK);
-            source = file;  from = c * DB_CHUNK;  to = Math.min(size, from + DB_CHUNK);
-            at = offset - from;
-        } else {
-            const k = Math.floor(f / framesPerChunk);
-            c = -1 - k;                                            //  (the -wal file's pieces:  -1, -2, -3 ...)
-            source = wal;  from = 32 + k * framesPerChunk * frameSize;  to = Math.min(wal.size, from + framesPerChunk * frameSize);
-            at = (f - k * framesPerChunk) * frameSize + 24;
-        }
-        let chunk = chunks.get(c);
-        if (chunk === undefined) {
-            chunk = new Uint8Array(await source.slice(from, to).arrayBuffer());
-            if (!isCurrent()) throw DB_STALE;
-            if (chunks.size >= DB_KEEP) chunks.delete(chunks.keys().next().value);
-        } else chunks.delete(c);
-        chunks.set(c, chunk);                                      //  (the one used last goes to the back:  the oldest goes first)
-        if (at + pageSize > chunk.length) throw DB_DAMAGED;
-        return chunk.subarray(at, at + pageSize);
-    }
-
-    //  "Which pages has this table used?"   One byte a page  (a database too big for that,  which only a broken
-    //  -wal file can claim to be:  a list that only takes room for the pages really used).
-    function newSeen() { return pageCount <= 67108864 ? new Uint8Array(pageCount + 1) : []; }
-
-
-    //  ---- THE NOTES THAT COUNT:  the NEWEST page 1's  (the -wal file's,  if it has a newer one) ----
-    const head = await page(1);
-    if (!dbIsSqlite(head) || head[16] !== first[16] || head[17] !== first[17]) throw DB_DAMAGED;
-    if (head[19] > 2) throw new Error('newer');                    //  (a file format from a newer SQLite:  it says so itself)
     const usable = pageSize - head[20];                            //  (each page can keep some bytes for itself at its end)
     if (usable < 480) throw DB_DAMAGED;
     if (head[21] !== 64 || head[22] !== 32 || head[23] !== 32) throw DB_DAMAGED;
+    const word = function (b, at) { return ((b[at] << 24) | (b[at + 1] << 16) | (b[at + 2] << 8) | b[at + 3]) >>> 0; };
     const schemaFormat = word(head, 44);
     if (schemaFormat > 4) throw DB_DAMAGED;
     const encoding = word(head, 56);                               //  1  UTF-8,   2  UTF-16 little end first,   3  big end first
     const decoder = new TextDecoder(encoding === 2 ? 'utf-16le' : encoding === 3 ? 'utf-16be' : 'utf-8');
     const utf8 = encoding !== 2 && encoding !== 3;
+    const pageCount = Math.floor(size / pageSize);                 //  (the file's own size is the truth:  a page past it isn't there)
 
     //  How much of a cell is ON its page  (the rest goes to overflow pages)   (SQLite's numbers,  exactly)
     const tableX = usable - 35;
     const indexX = Math.floor((usable - 12) * 64 / 255) - 23;
     const minLocal = Math.floor((usable - 12) * 32 / 255) - 23;
+
+
+    //  ---- THE PAGES:  read 4 MB at a time,  the recent ones kept ----
+    const chunks = new Map();
+    async function page(no) {
+        if (!(no >= 1 && no <= pageCount)) throw DB_DAMAGED;
+        const offset = (no - 1) * pageSize;
+        const c = Math.floor(offset / DB_CHUNK);
+        let chunk = chunks.get(c);
+        if (chunk === undefined) {
+            chunk = new Uint8Array(await file.slice(c * DB_CHUNK, Math.min(size, (c + 1) * DB_CHUNK)).arrayBuffer());
+            if (!isCurrent()) throw DB_STALE;
+            if (chunks.size >= DB_KEEP) chunks.delete(chunks.keys().next().value);
+        } else chunks.delete(c);
+        chunks.set(c, chunk);                                      //  (the one used last goes to the back:  the oldest goes first)
+        const at = offset - c * DB_CHUNK;
+        if (at + pageSize > chunk.length) throw DB_DAMAGED;
+        return chunk.subarray(at, at + pageSize);
+    }
 
 
     //  ---- READING INSIDE A PAGE ----
@@ -176,7 +138,7 @@ async function readDb(file, isCurrent, choice, wal) {
     //  A cell's whole payload  (its first part is on the page;  the rest,  if any,  in a chain of overflow pages)
     //  X  =  how much fits on the page for this kind of cell.   seen  =  the pages this table already used.
     async function payload(b, at, P, X, seen) {
-        if (typeof P !== 'number' || P > most || P > 1e9) throw DB_DAMAGED;      //  (no value can be longer than the files)
+        if (typeof P !== 'number' || P > size || P > 1e9) throw DB_DAMAGED;      //  (no value can be longer than the file)
         let local = P;
         if (P > X) {
             const K = minLocal + (P - minLocal) % (usable - 4);
@@ -292,7 +254,7 @@ async function readDb(file, isCurrent, choice, wal) {
     //  Every row of a rowid table,  in order:   each(rowid, payload).
     //  (Only the bottom pages,  the "leaves"  (13),  hold rows.   The ones above  (5)  just say which way to go.)
     async function walkTable(root, each) {
-        const seen = newSeen();
+        const seen = new Uint8Array(pageCount + 1);
         async function visit(no, depth) {
             if (depth > DB_DEPTH || !(no >= 1 && no <= pageCount) || seen[no] === 1) throw DB_DAMAGED;
             seen[no] = 1;
@@ -321,7 +283,7 @@ async function readDb(file, isCurrent, choice, wal) {
     //  Every row of a WITHOUT ROWID table  (an "index" tree:  10 = a bottom page,  2 = a page above),  in order:
     //  each(payload).   Here the pages ABOVE hold rows too:  each one sits between the rows of 2 of its pages below.
     async function walkIndex(root, each) {
-        const seen = newSeen();
+        const seen = new Uint8Array(pageCount + 1);
         async function visit(no, depth) {
             if (depth > DB_DEPTH || !(no >= 1 && no <= pageCount) || seen[no] === 1) throw DB_DAMAGED;
             seen[no] = 1;
@@ -365,7 +327,7 @@ async function readDb(file, isCurrent, choice, wal) {
         if (/^sqlite_/i.test(name)) return;                                         //  SQLite's own notes  (sqlite_sequence ...)
         tables.push({ name: name, root: values[3], sql: kinds[4] === 't' ? values[4] : '' });
     });
-    if (tables.length === 0) throw Object.assign(new Error('notables'), { walMissing: walNote === 'missing' });     //  (all in a -wal file?)
+    if (tables.length === 0) throw new Error('notables');
     //  (A table whose top page is broken doesn't stop the others:  it just can't be opened itself,  like in SQLite.)
     for (const t of tables) {
         try { t.hasData = await hasRows(t.root); }
@@ -465,93 +427,9 @@ async function readDb(file, isCurrent, choice, wal) {
             rows:        rowCount,
             nullCount:   nullCount,
             nullRows:    nullRows.subarray(0, nullCount),
-            nullCols:    nullCols.subarray(0, nullCount),
-            wal:         wal || null,                              //  (so its other tables are read with it too)
-            walNote:     walNote
+            nullCols:    nullCols.subarray(0, nullCount)
         }
     };
-}
-
-
-// ----------------------------------------------------------
-//
-//    THE -WAL FILE   (SQLite's "write-ahead log":  a busy database's newest changes,  not copied into it yet)
-//
-//    32 bytes of notes,  then "frames":  24 bytes of notes + ONE page each  (that page's new bytes).
-//        the notes:   magic  (377F0682 or 377F0683)   version   page size   checkpoint   salt 1   salt 2   checksum 1, 2
-//        a frame:     its page   the database's size in pages  (only on the LAST frame of a save:  a "commit")
-//                     salt 1   salt 2   checksum 1, 2
-//
-//    A frame only counts if its salts are the notes' AND its checksum is right.   Each checksum carries on from the one
-//    before,  so after one wrong byte nothing counts.   (A -wal file that was started over has the old frames after the
-//    new ones:  their salts are old,  so they stop it there.)   And only frames up to the LAST commit:  a save that was
-//    still being written when the files were copied is left out.   Those are SQLite's own rules when it opens one.
-//
-//    readWal(wal, pageSize, isCurrent)   ->   { pages,  size,  note }
-//        pages  =  Map(a page  ->  its newest saved frame)   (null:  nothing to use)
-//        size   =  the database's size in pages,  as of that save
-//        note   =  'used'    'empty'  (nothing saved in it)    'notwal'  (it isn't one)    'other'  (another database's)
-//
-// ----------------------------------------------------------
-
-async function readWal(wal, pageSize, isCurrent) {
-
-    const none = function (note) { return { pages: null, size: 0, note: note }; };
-    if (wal.size < 32) return none(wal.size === 0 ? 'empty' : 'notwal');      //  (0 bytes:  SQLite empties it,  after copying it all in)
-    const head = new Uint8Array(await wal.slice(0, 32).arrayBuffer());
-    if (!isCurrent()) throw DB_STALE;
-    const word = function (b, at) { return ((b[at] << 24) | (b[at + 1] << 16) | (b[at + 2] << 8) | b[at + 3]) >>> 0; };
-    const magic = word(head, 0);
-    if ((magic !== 0x377F0682 && magic !== 0x377F0683) || word(head, 4) !== 3007000) return none('notwal');
-    if (word(head, 8) !== pageSize) return none('other');
-    const bigEnd = magic === 0x377F0683;                           //  the checksum's numbers:  big end first  (...83)  or little  (...82)
-    const salt1 = word(head, 16), salt2 = word(head, 20);
-
-    //  The checksum:  the bytes as 32-bit numbers,  2 at a time,  into 2 running sums   (SQLite's walChecksumBytes)
-    let s0 = 0, s1 = 0;
-    function sum(b, from, to) {
-        for (let k = from; k < to; k += 8) {
-            const x0 = bigEnd ? word(b, k)     : ((b[k + 3] << 24) | (b[k + 2] << 16) | (b[k + 1] << 8) | b[k]) >>> 0;
-            const x1 = bigEnd ? word(b, k + 4) : ((b[k + 7] << 24) | (b[k + 6] << 16) | (b[k + 5] << 8) | b[k + 4]) >>> 0;
-            s0 = (s0 + x0 + s1) >>> 0;
-            s1 = (s1 + x1 + s0) >>> 0;
-        }
-    }
-    sum(head, 0, 24);
-    if (s0 !== word(head, 24) || s1 !== word(head, 28)) return none('empty');    //  (half-written notes:  "nothing saved",  to SQLite)
-
-    //  Every frame,  ~4 MB of them at a time:  which page it is,  and where the last commit is
-    const frameSize = 24 + pageSize;
-    const frames = Math.floor((wal.size - 32) / frameSize);
-    const perRead = Math.floor(DB_CHUNK / frameSize);
-    const pageOf = new Uint32Array(frames);
-    let lastCommit = -1, size = 0;
-    reading:
-    for (let start = 0; start < frames; start += perRead) {
-        setLoadingLabel('Reading the newest changes  (the -wal file)...  ' + Math.floor(100 * start / frames) + '%');
-        const count = Math.min(perRead, frames - start);
-        const at = 32 + start * frameSize;
-        const b = new Uint8Array(await wal.slice(at, at + count * frameSize).arrayBuffer());
-        if (!isCurrent()) throw DB_STALE;
-        if (b.length < count * frameSize) break;
-        for (let k = 0; k < count; k++) {
-            const o = k * frameSize;
-            const no = word(b, o);
-            if (no === 0 || word(b, o + 8) !== salt1 || word(b, o + 12) !== salt2) break reading;
-            sum(b, o, o + 8);
-            sum(b, o + 24, o + frameSize);
-            if (s0 !== word(b, o + 16) || s1 !== word(b, o + 20)) break reading;
-            pageOf[start + k] = no;
-            const commit = word(b, o + 4);
-            if (commit !== 0) { lastCommit = start + k; size = commit; }
-        }
-    }
-    if (lastCommit === -1) return none('empty');
-
-    //  Each page's newest bytes:  its LAST frame up to the last commit
-    const pages = new Map();
-    for (let f = 0; f <= lastCommit; f++) pages.set(pageOf[f], f);
-    return { pages: pages, size: size, note: 'used' };
 }
 
 
@@ -753,45 +631,9 @@ function dbProblem(problem, name) {
     const what = '"' + name + '"';
     switch (problem && problem.message) {
         case 'notsqlite': return 'Couldn\'t open ' + what + ': it isn\'t a SQLite database. (Some apps lock theirs with a password, like WhatsApp\'s and Signal\'s backups: those can\'t be read without it.)';
-        case 'notables':  return 'Couldn\'t open ' + what + ': the database has no tables.' +
-                                 (problem.walMissing ? ' (Not saved into it yet? If "' + name + '-wal" is next to it, pick both together: the tables may be in there.)' : '');
+        case 'notables':  return 'Couldn\'t open ' + what + ': the database has no tables.';
         case 'toobig':    return 'Couldn\'t open ' + what + ': that table is too big to show (over 450 MB as text).';
         case 'damaged':   return 'Couldn\'t open ' + what + ': it looks damaged (a page points somewhere it can\'t), so it isn\'t read any further.';
-        case 'newer':     return 'Couldn\'t open ' + what + ': it\'s from a newer kind of SQLite than this page can read.';
         default:          return 'Couldn\'t read ' + what + ' as a SQLite database' + (problem && problem.message ? ' (' + problem.message + ')' : '') + '.';
-    }
-}
-
-
-//  A file that goes WITH a database  (but isn't one),  picked on its own?   Say what it is.   (b = its first bytes)
-//  null:  it isn't one of those.
-function dbSideFile(b, name) {
-    const what = '"' + name + '"';
-    const main = /-(wal|shm|journal)$/i.test(name) ? '"' + name.slice(0, name.lastIndexOf('-')) + '"' : 'its database';
-    if (b.length >= 4 && b[0] === 0x37 && b[1] === 0x7F && b[2] === 0x06 && (b[3] === 0x82 || b[3] === 0x83)) {
-        return 'That\'s ' + what + ': the newest changes of a SQLite database, not a database itself. Pick ' + main + ' and ' + what + ' together (Ctrl+click both).';
-    }
-    if (b.length >= 8 && b[0] === 0xD9 && b[1] === 0xD5 && b[2] === 0x05 && b[3] === 0xF9 && b[4] === 0x20 && b[5] === 0xA1 && b[6] === 0x63 && b[7] === 0xD7) {
-        return 'That\'s ' + what + ': SQLite\'s notes for undoing a save that didn\'t finish (no rows in it). Pick ' + main + ' instead.';
-    }
-    const shm = b.length >= 4 && ((b[0] === 0x18 && b[1] === 0xE2 && b[2] === 0x2D && b[3] === 0) ||     //  (its version,  3007000,
-                                  (b[0] === 0 && b[1] === 0x2D && b[2] === 0xE2 && b[3] === 0x18) ||     //   either way round,
-                                  (b[0] === 0 && b[1] === 0 && b[2] === 0 && b[3] === 0));               //   or nothing yet)
-    if (shm && /-shm$/i.test(name)) {
-        return 'That\'s ' + what + ': a scratch file SQLite keeps while a database is open (no rows in it). Pick ' + main + ' instead (and its -wal file too, if it\'s there).';
-    }
-    return null;
-}
-
-//  What the -wal file did,  in a few words  (for the "Rows 1–15" line)
-function dbWalNote(info) {
-    const wal = info.wal !== null ? '"' + info.wal.name + '"' : '';
-    switch (info.walNote) {
-        case 'used':    return '  ·  with its newest changes  (from ' + wal + ')';
-        case 'empty':   return '  ·  ' + wal + ' had no newer changes in it';
-        case 'notwal':  return '  ·  ' + wal + ' was left out:  it isn\'t a -wal file';
-        case 'other':   return '  ·  ' + wal + ' was left out:  it\'s another database\'s  (its pages are a different size)';
-        case 'missing': return '  ·  if "' + info.file.name + '-wal" is next to it,  pick both together:  it may have newer changes';
-        default:        return '';
     }
 }

@@ -339,41 +339,16 @@ chooseBtn.addEventListener('click', function () {
 
 fileInput.addEventListener('change', function (event) {
 
-    const files = Array.from(event.target.files);       //  the file(s) you picked
+    const file = event.target.files[0];     //  the file you picked
 
-    if (files.length === 0) return;                     //  (you clicked "Cancel"?  Then there's no file:  do nothing)
-
-    const pick = withItsWal(files);
-    loadFile(pick.file, null, pick.wal);
+    if (file) loadFile(file, null);         //  (you clicked "Cancel"?  Then there's no file:  do nothing)
 });
-
-
-//  Which file to open,  of the ones you picked   (and its -wal file:  a SQLite database's newest changes,  see dbI.js)
-//      places.sqlite  +  places.sqlite-wal   ->  places.sqlite,  with its newest changes   (the names say they go together)
-//      notes.db  +  copy.db-wal              ->  the same   (just one file and one -wal file:  you picked them together)
-//      anything else                         ->  the first one  (that isn't a -wal,  -shm or -journal file)
-function withItsWal(files) {
-
-    const isWal  = function (f) { return /-wal$/i.test(f.name); };
-    const isSide = function (f) { return /-(wal|shm|journal)$/i.test(f.name); };
-
-    for (const wal of files.filter(isWal)) {
-        const name = wal.name.slice(0, -4).toLowerCase();
-        const file = files.find(function (f) { return f.name.toLowerCase() === name; });
-        if (file !== undefined) return { file: file, wal: wal };
-    }
-    const mains = files.filter(function (f) { return !isSide(f); });
-    const wals  = files.filter(isWal);
-    if (mains.length === 1 && wals.length === 1) return { file: mains[0], wal: wals[0] };
-    return { file: mains.length > 0 ? mains[0] : files[0], wal: null };
-}
 
 
 //  READ A FILE, and show it.
 //  "sheet"  =  for an Excel file:  which sheet to show  (0 = the first).   null  =  the first real one that isn't hidden.
-//  "wal"    =  a SQLite database's -wal file,  if you picked that too  (or null)
 //  (Picking a file calls this.  So does clicking a sheet tab:  same file, another sheet.)
-function loadFile(file, sheet, wal) {
+function loadFile(file, sheet) {
 
     const myLoad = ++loadId;                //  this file's number.  (Pick another file?  It gets a new number.)
 
@@ -604,8 +579,7 @@ function loadFile(file, sheet, wal) {
                   (excel.unsolved > 0 ? '  ·  ' + excel.unsolved + ' formula(s) had no saved answer  (shown as formulas)' : '') +
                   (excel.recalc ? '  ·  ⚠ this file asks Excel to recalculate:  formula answers may be out of date' : '')
                 : sql !== null
-                ? (sql.nullCount > 0 ? '  ·  ' + sql.nullCount.toLocaleString() + ' NULL' + (sql.nullCount === 1 ? '' : 's') + ' kept' : '') +
-                  (sql.format === 'db' ? dbWalNote(sql) : '')       //  a database:  what its -wal file added  (see dbI.js)
+                ? (sql.nullCount > 0 ? '  ·  ' + sql.nullCount.toLocaleString() + ' NULL' + (sql.nullCount === 1 ? '' : 's') + ' kept' : '')
                 : encoding === 'windows-1252'
                 ? '  ·  read as Windows-1252  (an older Excel format)'
                 : '';
@@ -642,13 +616,6 @@ function loadFile(file, sheet, wal) {
 
         if (b.length === 16 && dbIsSqlite(b)) {
             readAsDb();
-            return;
-        }
-
-        //  A file that goes WITH a database  (its -wal file,  -shm,  -journal),  picked on its own?   Say what it is.
-        const side = dbSideFile(b, file.name);
-        if (side !== null) {
-            couldNotRead(side);
             return;
         }
 
@@ -728,7 +695,7 @@ function loadFile(file, sheet, wal) {
 
         setLoadingLabel('Opening the database...');
 
-        readDb(file, function () { return myLoad === loadId; }, sheet, wal || null).then(function (result) {
+        readDb(file, function () { return myLoad === loadId; }, sheet).then(function (result) {
 
             if (myLoad !== loadId) return;
             setProgress(0.2);               //  the table is read  =  the "reading" part is done
@@ -911,10 +878,9 @@ function showSheetTabs() {
             tab.title = 'A chart sheet:  it has no rows to show.';
         } else if (!current) {
             const file = book.file;                             //  (the file, as it is right now)
-            const wal  = book.wal || null;                      //  (a database's -wal file:  read with it again)
             tab.title = 'Open the ' + (book === sqlInfo ? 'table' : 'sheet') + ' "' + sheet.name + '"';
             tab.addEventListener('click', function () {
-                loadFile(file, i, wal);
+                loadFile(file, i);
             });
         }
 
@@ -3699,7 +3665,7 @@ async function loadOtherTable(sheet, isCurrent) {
     const result = t.excel !== null
         ? await readXlsx(file, isCurrent, sheet.index)
         : t.sql.format === 'db'
-        ? await readDb(file, isCurrent, sheet.index, t.sql.wal)         //  (a database:  only that table's pages are read)
+        ? await readDb(file, isCurrent, sheet.index)                    //  (a database:  only that table's pages are read)
         : await readSql(await file.text(), file, isCurrent, sheet.index);
 
     const rows = cutCsvText(result.text);
