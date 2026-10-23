@@ -131,8 +131,9 @@
             which sits out of sight.
 
             type="file"          ->  makes it a "pick a file" picker
-            accept=".csv,.xlsx,.sql,.db,.sqlite,.sqlite3,.db3"  ->  only shows CSV,  Excel,  SQL dumps,  and SQLite databases when you pick
-                                 (a database with no ending,  like Chrome's "History":  pick "All files")
+            accept=".csv,.xlsx,.sql,.db,.sqlite,.sqlite3,.db3 ..."  ->  only shows CSV,  Excel,  SQL dumps,  and SQLite databases when you pick
+                                 (and their -wal files.   A database with no ending,  like Chrome's "History":  pick "All files")
+            multiple             ->  you can pick more than one  (Ctrl+click):  a database AND its -wal file,  together
 
             The AIMBOT window  (the snap menu):  search for something,
             and it locks onto a match.  ◀ ▶  snap the sheet right to it.
@@ -150,7 +151,7 @@
 
         <div id="fileBar">
             <button id="chooseBtn" type="button">Choose File</button>
-            <input type="file" id="csvFileInput" accept=".csv,.xlsx,.sql,.db,.sqlite,.sqlite3,.db3" tabindex="-1" aria-hidden="true">
+            <input type="file" id="csvFileInput" accept=".csv,.xlsx,.sql,.db,.sqlite,.sqlite3,.db3,.db-wal,.sqlite-wal,.sqlite3-wal,.db3-wal" multiple tabindex="-1" aria-hidden="true">
 
             <div id="aimbot" role="group" aria-label="Snap to search matches">
                 <div class="aim-head">
