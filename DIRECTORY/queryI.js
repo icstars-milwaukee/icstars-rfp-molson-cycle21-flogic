@@ -117,6 +117,7 @@ function sqlTokens(text) {
     let p = 0;
 
     const NUMBER = /(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/y;
+    const HEX    = /[0-9a-fA-F]+/y;
     const WORD   = /[A-Za-z_À-￿][A-Za-z0-9_$À-￿]*/y;
 
     //  Read up to the closing mark.   Two closing marks in a row  =  one real one  ('it''s').
@@ -173,10 +174,28 @@ function sqlTokens(text) {
         if (c === '[') { p++; tokens.push({ k: 'qid', v: quoted(']', 'A name in [brackets]'), at: at }); continue; }
 
         if ((c >= '0' && c <= '9') || (c === '.' && text[p + 1] >= '0' && text[p + 1] <= '9')) {
+            //  0x1F:  a whole number written in hex   (SQLite:  up to 16 hex digits,  64 bits:   0xFFFFFFFFFFFFFFFF  =  -1)
+            if (c === '0' && (text[p + 1] === 'x' || text[p + 1] === 'X')) {
+                HEX.lastIndex = p + 2;
+                const h = HEX.exec(text);
+                if (h !== null) {
+                    const digits = h[0].replace(/^0+/, '');
+                    if (digits.length > 16) queryFail('The hex number  0x' + h[0] + '  is too big:  at most 16 hex digits  (64 bits).');
+                    let b = BigInt('0x' + (digits || '0'));
+                    if (b > INT64_MAX) b -= 18446744073709551616n;         //  (the top bit set:  a negative number,  "two's complement")
+                    p = HEX.lastIndex;
+                    tokens.push({ k: 'num', v: exactInt(b), int: true, at: at });
+                    continue;
+                }
+            }
             NUMBER.lastIndex = p;
             const m = NUMBER.exec(text);
             p = NUMBER.lastIndex;
-            tokens.push({ k: 'num', v: Number(m[0]), int: m[0].indexOf('.') === -1 && m[2] === undefined, at: at });
+            const int = m[0].indexOf('.') === -1 && m[2] === undefined;
+            //  A whole number with more than 15 digits is read EXACTLY  (see BIG WHOLE NUMBERS).
+            //  9223372036854775808 is one past the 64-bit top  (a REAL),  unless a minus comes before it:  see unaryE.
+            const v = int && m[0].length > 15 ? wholeWords(m[0], Number(m[0])) : Number(m[0]);
+            tokens.push({ k: 'num', v: v, int: int, edge: m[0] === '9223372036854775808', at: at });
             continue;
         }
 
@@ -662,7 +681,10 @@ function parseSql(text) {
     function unaryE() {
         if (eatO('-')) {
             const e = unaryE();
+            //  -9223372036854775808:  the smallest 64-bit whole number  (its digits alone are one past the top:  SQLite's special case)
+            if (e.t === 'lit' && e.edge === true) return { t: 'lit', v: INT64_MIN, ty: 'int' };
             if (e.t === 'lit' && typeof e.v === 'number') return { t: 'lit', v: -e.v, ty: e.ty };    //  -5  is just a number
+            if (e.t === 'lit' && typeof e.v === 'bigint') return e.v === INT64_MIN ? { t: 'lit', v: -Number(e.v), ty: 'real' } : { t: 'lit', v: exactInt(-e.v), ty: 'int' };
             return { t: 'neg', e: e };
         }
         if (eatO('+')) return unaryE();
@@ -676,7 +698,12 @@ function parseSql(text) {
 
         const t = tk[i];
 
-        if (t.k === 'num') { i++; return { t: 'lit', v: t.v, ty: t.int && Number.isSafeInteger(t.v) ? 'int' : 'real' }; }
+        if (t.k === 'num') {
+            i++;
+            const lit = { t: 'lit', v: t.v, ty: t.int && isWhole(t.v) ? 'int' : 'real' };
+            if (t.edge) lit.edge = true;
+            return lit;
+        }
         if (t.k === 'str') { i++; return { t: 'lit', v: t.v, ty: 'text' }; }
 
         if (t.k === 'op' && t.v === '(') {
@@ -944,6 +971,7 @@ function typeClass(declared) {
 //    Inside the engine,  a value is one of these:
 //        null                      NULL  (unknown / missing)
 //        a number                  42,   3.5
+//        a BigInt                  123456789012345678n   (a whole number too big for a plain number:  see BIG WHOLE NUMBERS)
 //        some words  (a string)    'Chicago'
 //        true / false              (the answer to a comparison)
 //
@@ -959,23 +987,91 @@ const NUMBER_WORDS = /^\s*[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?\s*$/;
 const NUMBER_START = /^\s*[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/;
 
 
+//  ---- BIG WHOLE NUMBERS ----
+//  A plain JavaScript number is EXACT only up to 9,007,199,254,740,991  (2^53 - 1,  its "safe" limit).   Past it,
+//  123456789012345678 quietly becomes 123456789012345680,  and 2 different IDs look the same.   SQLite's whole numbers
+//  go up to 9,223,372,036,854,775,807  (64 bits),  exactly.   So a whole number past the safe limit is kept as a BigInt
+//  (JavaScript's exact whole numbers:  123456789012345678n),  and every other number stays a plain number  (quick).
+//  The rule is strict,  so the 2 never get mixed up:
+//      a BigInt                        =  a whole number past the safe limit   (never a small one:  5n is always just 5)
+//      a plain number past the limit   =  a REAL   (a number that was never exact,  like 1.5e17)
+const INT64_MAX  = 9223372036854775807n;
+const INT64_MIN  = -9223372036854775808n;
+const SAFE_MAX   = 9007199254740991n;
+const CELL_WHOLE = /^\s*[+-]?\d+\s*$/;          //  words that are a whole number   (' -12 ')
+
+//  A BigInt in its rightful form:  a plain number when it's small enough   (5n  ->  5).
+function exactInt(b) {
+    return b >= -SAFE_MAX && b <= SAFE_MAX ? Number(b) : b;
+}
+
+//  Is it an EXACT whole number?   (A plain number past the safe limit isn't:  that's a REAL.)
+function isWhole(v) {
+    return typeof v === 'bigint' || Number.isSafeInteger(v);
+}
+
+//  Whole-number words,  exactly:   '123456789012345678'  ->  123456789012345678n.
+//  Too big even for 64 bits?  Then  n,  the REAL   (like SQLite:   '99999999999999999999'  ->  1.0e+20).
+function wholeWords(s, n) {
+    const b = BigInt(s);
+    return b >= INT64_MIN && b <= INT64_MAX ? exactInt(b) : n;
+}
+
+//  Words that ARE a number  (see NUMBER_WORDS),  as that number   (a long whole number:  exactly).
+function wordsNumber(s) {
+    const n = Number(s);
+    return Number.isSafeInteger(n) || !Number.isInteger(n) || !CELL_WHOLE.test(s) ? n : wholeWords(s, n);
+}
+
+//  A value as a number,  EXACTLY:  like numOf,  but a whole number past the safe limit stays exact  (a BigInt).
+function exactOf(v) {
+    if (typeof v === 'number' || typeof v === 'bigint') return v;
+    if (typeof v === 'boolean') return v ? 1 : 0;
+    if (v === null) return null;
+    const m = NUMBER_START.exec(v);
+    if (m === null) return 0;
+    const n = Number(m[0]);
+    return Number.isSafeInteger(n) || !Number.isInteger(n) || !CELL_WHOLE.test(m[0]) ? n : wholeWords(m[0], n);
+}
+
+//  A number as a 64-bit whole number,  SQLite's way:  cut toward 0  (3.9 -> 3),  and kept inside the 64 bits
+//  (a REAL past the top counts as the biggest one there is).
+function toInt64(v) {
+    if (typeof v === 'bigint') return v;
+    if (Number.isNaN(v)) return 0n;
+    if (v >= 9223372036854775807) return INT64_MAX;         //  (as a plain number,  that's 2^63:  just past the top)
+    if (v <= -9223372036854775808) return INT64_MIN;
+    return BigInt(Math.trunc(v));
+}
+
+
 //  A value as WORDS.   ty  =  its type,  if known:  a  real  number that's whole shows as  2.0  (like SQLite).
 function valueText(v, ty) {
     if (v === null || typeof v === 'string') return v;
+    if (typeof v === 'bigint') return String(v);                    //  every digit:   123456789012345678
     if (typeof v === 'boolean') return v ? 'true' : 'false';
-    if (ty === 'real' && Number.isInteger(v) && Math.abs(v) < 1e15) return v.toFixed(1);
-    return numberText(v);
+    return numberText(v, ty === 'real');
 }
 
-function numberText(v) {
-    if (Number.isInteger(v)) return String(v);
+//  real  =  it's a REAL:  a whole one shows as  2.0.   A plain number past the safe limit is always a REAL,  and past
+//  17 digits SQLite writes it short   (1.2345678901234568e+17):   so it can't pass for an exact whole number.
+function numberText(v, real) {
+    if (Number.isInteger(v)) {
+        if (!real && Number.isSafeInteger(v)) return String(v);
+        const size = Math.abs(v);
+        if (size < 1e15) return String(v) + '.0';
+        if (size < 1e17) return String(BigInt(v)) + '.0';          //  every digit the computer holds
+        const parts = v.toPrecision(17).split('e');
+        return parts[0].replace(/0+$/, '').replace(/\.$/, '.0') + 'e' + parts[1];
+    }
     if (!isFinite(v)) return v > 0 ? 'Inf' : v < 0 ? '-Inf' : 'NaN';
-    return String(Number(v.toPrecision(15)));       //  15 digits,  like SQLite:   0.1 + 0.2  ->  0.3
+    return String(Number(v.toPrecision(15)));       //  15 digits:   0.1 + 0.2  ->  0.3   (SQLite 3.54 writes 17:  0.30000000000000004)
 }
 
 //  A value as a NUMBER.   (Words that aren't a number count as 0,  like SQLite:   'abc' + 1  =  1.)
 function numOf(v) {
     if (typeof v === 'number') return v;
+    if (typeof v === 'bigint') return Number(v);                    //  (near enough for SQRT,  LOG ...:  they're REALs anyway)
     if (typeof v === 'boolean') return v ? 1 : 0;
     if (v === null) return null;
     const m = NUMBER_START.exec(v);
@@ -997,16 +1093,18 @@ function logic(v) {
 //  COMPARE 2 values  (neither is NULL):   -1  (a is smaller),   0  (the same),   1  (a is bigger).
 //  A number and words that ARE a number  ('42')  compare as numbers.
 //  Otherwise,  every number comes before any words  (like SQLite).
+//  (A BigInt and a plain number compare EXACTLY:   9007199254740993n  >  9007199254740992.)
 function compareValues(a, b) {
     if (typeof a === 'boolean') a = a ? 1 : 0;
     if (typeof b === 'boolean') b = b ? 1 : 0;
-    if (typeof a === 'number') {
-        if (typeof b === 'number') return a < b ? -1 : a > b ? 1 : 0;
-        if (NUMBER_WORDS.test(b)) { const nb = Number(b); return a < nb ? -1 : a > nb ? 1 : 0; }
+    const an = typeof a === 'number' || typeof a === 'bigint', bn = typeof b === 'number' || typeof b === 'bigint';
+    if (an) {
+        if (bn) return a < b ? -1 : a > b ? 1 : 0;
+        if (NUMBER_WORDS.test(b)) { const nb = wordsNumber(b); return a < nb ? -1 : a > nb ? 1 : 0; }
         return -1;
     }
-    if (typeof b === 'number') {
-        if (NUMBER_WORDS.test(a)) { const na = Number(a); return na < b ? -1 : na > b ? 1 : 0; }
+    if (bn) {
+        if (NUMBER_WORDS.test(a)) { const na = wordsNumber(a); return na < b ? -1 : na > b ? 1 : 0; }
         return 1;
     }
     return a < b ? -1 : a > b ? 1 : 0;
@@ -1017,7 +1115,7 @@ function compareValues(a, b) {
 function sortValues(a, b) {
     if (typeof a === 'boolean') a = a ? 1 : 0;
     if (typeof b === 'boolean') b = b ? 1 : 0;
-    const an = typeof a === 'number', bn = typeof b === 'number';
+    const an = typeof a === 'number' || typeof a === 'bigint', bn = typeof b === 'number' || typeof b === 'bigint';
     if (an && bn) return a < b ? -1 : a > b ? 1 : 0;
     if (an) return -1;
     if (bn) return 1;
@@ -1026,12 +1124,14 @@ function sortValues(a, b) {
 
 //  A value as a KEY  (to spot "the same value" fast:  GROUP BY,  DISTINCT,  UNION).
 //  1  and  1.0  are the same key.   1  and  '1'  are not  (a number isn't words).
+//  (A REAL past the safe limit gets its EXACT digits,  so it matches the same BigInt:   2^60 as a REAL  =  2^60.)
 const KEY_NULL = String.fromCharCode(0) + 'N';
 const KEY_SPLIT = String.fromCharCode(1);
 
 function keyOf(v) {
     if (v === null) return KEY_NULL;
-    if (typeof v === 'number') return 'n' + (v === 0 ? 0 : v);
+    if (typeof v === 'number') return 'n' + (v === 0 ? 0 : (v < 9007199254740992 && v > -9007199254740992) || !Number.isInteger(v) ? v : BigInt(v));
+    if (typeof v === 'bigint') return 'n' + v;
     if (typeof v === 'boolean') return v ? 'n1' : 'n0';
     return 's' + v;
 }
@@ -1046,7 +1146,7 @@ function rowKey(row, count) {
 //  unless both sides are words  (then  '007'  and  '7'  stay different,  like SQLite).
 function matchKey(v, wordsOnly) {
     if (v === null) return null;
-    if (typeof v === 'string' && !wordsOnly && NUMBER_WORDS.test(v)) return 'n' + (Number(v) === 0 ? 0 : Number(v));
+    if (typeof v === 'string' && !wordsOnly && NUMBER_WORDS.test(v)) return keyOf(wordsNumber(v));
     return keyOf(v);
 }
 
@@ -1182,41 +1282,553 @@ function shiftDate(ms, modifier) {
     return null;
 }
 
-//  Apply every modifier  (any one that doesn't make sense  ->  NULL).
-function datePlus(args) {
-    let ms = dateMs(args[0]);
-    for (let k = 1; k < args.length && ms !== null; k++) ms = shiftDate(ms, args[k]);
-    return ms;
+//  ---- SQLITE'S DATE FUNCTIONS:   date,  time,  datetime,  julianday,  unixepoch,  strftime ----
+//  These follow SQLite's OWN rules,  step by step  (its date.c,  written again here):  which words are a moment,
+//  what every modifier does  ('+1 month',  'unixepoch',  'localtime',  'subsec' ...),  and what's out of range
+//  (NULL).   Inside,  a moment is a whole number of milliseconds since "Julian day 0"  (noon,  November 24,
+//  4714 BC),  like SQLite,  so every rounding comes out the same.
+//  (One difference,  on purpose:  'now' is YOUR clock,  not London's,  like CURRENT_DATE.   'utc' gives London's.)
+
+const JD_UNIX = 210866760000000;            //  1970-01-01,  in Julian-day milliseconds
+const JD_LAST = 464269060799999;            //  9999-12-31 23:59:59.999:  the last moment SQLite allows
+const MODIFIER_NUMBER = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
+
+//  A moment's notes  (SQLite's "DateTime"):  which parts of it are known so far.
+//  (s holds the seconds,  or the raw number a moment was given as:  rawS.   Like SQLite,  one place for both.)
+function newMoment() {
+    return { jd: 0, Y: 0, M: 0, D: 0, h: 0, m: 0, s: 0, tz: 0, nFloor: 0,
+             validJD: false, validYMD: false, validHMS: false, validTZ: false,
+             rawS: false, isLocal: false, isUtc: false, subsec: false, isError: false };
+}
+function momentError(p) { Object.assign(p, newMoment()); p.isError = true; }
+function clearParts(p)  { p.validYMD = false; p.validHMS = false; p.validTZ = false; }
+function isSpaceCode(c) { return c === 32 || (c >= 9 && c <= 13); }
+function isDigitCode(c) { return c >= 48 && c <= 57; }
+
+//  Exactly  count  digits,  from  min  to  max,  then the  next  letter   (SQLite's getDigits).   ->  the numbers read
+function getDigits(s, at, groups) {
+    const out = [];
+    for (let g = 0; g < groups.length; g++) {
+        const [count, min, max, next] = groups[g];
+        let v = 0;
+        for (let k = 0; k < count; k++, at++) {
+            const c = s.charCodeAt(at);
+            if (!isDigitCode(c)) return out;
+            v = v * 10 + c - 48;
+        }
+        if (v < min || v > max || (next !== '' && s[at] !== next)) return out;
+        out.push(v);
+        at++;
+    }
+    return out;
 }
 
-//  STRFTIME('%Y-%m', d)   (SQLite's way of writing a date any way you like)
-//  (The common ones get a quick path:  no Date,  just pieces of the words.)
-function formatDate(format, ms) {
-    if (format === null || ms === null) return null;
-    if (format === '%Y' || format === '%Y-%m' || format === '%Y-%m-%d') {
-        const day = dateText(ms);
-        return format === '%Y' ? day.slice(0, 4) : format === '%Y-%m' ? day.slice(0, 7) : day;
-    }
-    const d = new Date(ms);
-    const startOfYear = utc(d.getUTCFullYear(), 0, 1);
-    return String(format).replace(/%([a-zA-Z%])/g, function (all, letter) {
-        switch (letter) {
-            case 'Y': return pad(d.getUTCFullYear(), 4);
-            case 'm': return pad(d.getUTCMonth() + 1, 2);
-            case 'd': return pad(d.getUTCDate(), 2);
-            case 'H': return pad(d.getUTCHours(), 2);
-            case 'M': return pad(d.getUTCMinutes(), 2);
-            case 'S': return pad(d.getUTCSeconds(), 2);
-            case 'f': return pad(d.getUTCSeconds(), 2) + '.' + pad(d.getUTCMilliseconds(), 3);
-            case 'j': return pad(Math.floor((ms - startOfYear) / DAY_MS) + 1, 3);
-            case 'w': return String(d.getUTCDay());
-            case 'u': return String(d.getUTCDay() || 7);
-            case 's': return String(Math.floor(ms / 1000));
-            case 'J': return numberText(ms / DAY_MS + 2440587.5);
-            case '%': return '%';
-            default:  return all;
+//  year,  month,  day,  hour ...   ->   Julian-day milliseconds
+function momentJD(p) {
+    if (p.validJD) return;
+    let Y = 2000, M = 1, D = 1;                                     //  (no day given:  January 1, 2000)
+    if (p.validYMD) { Y = p.Y; M = p.M; D = p.D; }
+    if (Y < -4713 || Y > 9999 || p.rawS) { momentError(p); return; }
+    if (M <= 2) { Y--; M += 12; }
+    const A = Math.trunc((Y + 4800) / 100);
+    const B = 38 - A + Math.trunc(A / 4);
+    const X1 = Math.trunc(36525 * (Y + 4716) / 100);
+    const X2 = Math.trunc(306001 * (M + 1) / 10000);
+    p.jd = Math.trunc((X1 + X2 + D + B - 1524.5) * 86400000);
+    p.validJD = true;
+    if (p.validHMS) {
+        p.jd += p.h * 3600000 + p.m * 60000 + Math.trunc(p.s * 1000 + 0.5);
+        if (p.validTZ) {
+            p.jd -= p.tz * 60000;
+            clearParts(p);
         }
-    });
+    }
+}
+
+//  Julian-day milliseconds   ->   year,  month,  day
+function momentYMD(p) {
+    if (p.validYMD) return;
+    if (!p.validJD) { p.Y = 2000; p.M = 1; p.D = 1; }
+    else if (!(p.jd >= 0 && p.jd <= JD_LAST)) { momentError(p); return; }
+    else {
+        const Z = Math.trunc((p.jd + 43200000) / 86400000);
+        const alpha = Math.trunc((Z + 32044.75) / 36524.25) - 52;
+        const A = Z + 1 + alpha - Math.trunc((alpha + 100) / 4) + 25;
+        const B = A + 1524;
+        const C = Math.trunc((B - 122.1) / 365.25);
+        const D = Math.trunc((36525 * (C & 32767)) / 100);
+        const E = Math.trunc((B - D) / 30.6001);
+        const X1 = Math.trunc(30.6001 * E);
+        p.D = B - D - X1;
+        p.M = E < 14 ? E - 1 : E - 13;
+        p.Y = p.M > 2 ? C - 4716 : C - 4715;
+    }
+    p.validYMD = true;
+}
+
+//  ...   ->   hour,  minute,  second
+function momentHMS(p) {
+    if (p.validHMS) return;
+    momentJD(p);
+    const dayMs = (p.jd + 43200000) % 86400000;
+    p.s = (dayMs % 60000) / 1000;
+    const dayMin = Math.trunc(dayMs / 60000);
+    p.m = dayMin % 60;
+    p.h = Math.trunc(dayMin / 60);
+    p.rawS = false;
+    p.validHMS = true;
+}
+
+//  How many days a "+1 month" ran past the end of the month   (Jan 31 + 1 month = "Feb 31":  'floor' takes them back)
+function momentFloor(p) {
+    if (p.D <= 28) p.nFloor = 0;
+    else if ((1 << p.M) & 0x15aa) p.nFloor = 0;                     //  (a month with 31 days)
+    else if (p.M !== 2) p.nFloor = p.D === 31 ? 1 : 0;
+    else if (p.Y % 4 !== 0 || (p.Y % 100 === 0 && p.Y % 400 !== 0)) p.nFloor = p.D - 28;
+    else p.nFloor = p.D - 29;
+}
+
+//  A raw number:  a Julian day  (if it can be one),  unless a modifier says it's Unix time  ('unixepoch',  'auto')
+function rawMoment(p, r) {
+    p.s = r;
+    p.rawS = true;
+    if (r >= 0 && r < 5373484.5) { p.jd = Math.trunc(r * 86400000 + 0.5); p.validJD = true; }
+}
+
+//  'now':  your clock  (see above)
+function nowMoment(p) {
+    p.jd = nowMs() + JD_UNIX;
+    p.validJD = true;
+    p.isLocal = true;
+    p.isUtc = false;
+    clearParts(p);
+}
+
+//  The parsers.   Each one gives back  true  when the words AREN'T what it reads   (like SQLite:  1 = no).
+//  ' +02:00'   ' Z'   (or nothing):  the time zone after a time
+function parseZone(s, at, p) {
+    while (isSpaceCode(s.charCodeAt(at))) at++;
+    p.tz = 0;
+    const c = s[at];
+    if (c === 'Z' || c === 'z') { at++; p.isLocal = false; p.isUtc = true; }
+    else if (c === '+' || c === '-') {
+        const d = getDigits(s, at + 1, [[2, 0, 14, ':'], [2, 0, 59, '']]);
+        if (d.length !== 2) return true;
+        at += 6;
+        p.tz = (c === '-' ? -1 : 1) * (d[1] + d[0] * 60);
+    }
+    else return at < s.length;
+    while (isSpaceCode(s.charCodeAt(at))) at++;
+    return at < s.length;
+}
+
+//  HH:MM,   HH:MM:SS,   HH:MM:SS.SSS   (and a time zone)
+function parseTime(s, at, p) {
+    const d = getDigits(s, at, [[2, 0, 24, ':'], [2, 0, 59, '']]);
+    if (d.length !== 2) return true;
+    at += 5;
+    let sec = 0, part = 0;
+    if (s[at] === ':') {
+        const e = getDigits(s, at + 1, [[2, 0, 59, '']]);
+        if (e.length !== 1) return true;
+        sec = e[0];
+        at += 3;
+        if (s[at] === '.' && isDigitCode(s.charCodeAt(at + 1))) {
+            let scale = 1;
+            at++;
+            while (isDigitCode(s.charCodeAt(at))) { part = part * 10 + s.charCodeAt(at) - 48; scale *= 10; at++; }
+            part /= scale;
+            if (part > 0.999) part = 0.999;
+        }
+    }
+    if (d[0] === 24 && (d[1] !== 0 || sec !== 0 || part !== 0)) return true;      //  hour 24 only as 24:00:00  (the next midnight)
+    p.validJD = false;
+    p.rawS = false;
+    p.validHMS = true;
+    p.h = d[0];
+    p.m = d[1];
+    p.s = sec + part;
+    if (parseZone(s, at, p)) return true;
+    p.validTZ = p.tz !== 0;
+    return false;
+}
+
+//  YYYY-MM-DD,  maybe with a time   (exactly 4 + 2 + 2 digits,  like SQLite:   2024-1-5  isn't one)
+function parseDay(s, p) {
+    let at = 0, neg = false;
+    if (s[0] === '-') { at = 1; neg = true; }
+    const d = getDigits(s, at, [[4, 0, 14712, '-'], [2, 1, 12, '-'], [2, 1, 31, '']]);
+    if (d.length !== 3) return true;
+    at += 10;
+    while (isSpaceCode(s.charCodeAt(at)) || s[at] === 'T') at++;
+    if (parseTime(s, at, p)) {
+        if (at < s.length) return true;
+        p.validHMS = false;
+    }
+    p.validJD = false;
+    p.validYMD = true;
+    p.Y = neg ? -d[0] : d[0];
+    p.M = d[1];
+    p.D = d[2];
+    momentFloor(p);
+    if (p.tz) momentJD(p);
+    return false;
+}
+
+//  Any moment in words:  a day,  a time,  'now',  or a number
+function parseMoment(s, p) {
+    if (!parseDay(s, p)) return false;
+    if (!parseTime(s, 0, p)) return false;
+    const low = s.toLowerCase();
+    if (low === 'now') { nowMoment(p); return false; }
+    if (NUMBER_WORDS.test(s)) { rawMoment(p, Number(s)); return false; }
+    if (low === 'subsec' || low === 'subsecond') { p.subsec = true; nowMoment(p); return false; }
+    return true;
+}
+
+//  Your clock's hour for a moment  (SQLite's 'localtime').   Like SQLite,  a year outside 1970 to 2037 is looked up as a
+//  year with the same leap-ness inside it  (the clock's rules only go that far),  then put back.
+function toLocalMoment(p) {
+    momentJD(p);
+    let yearDiff = 0, t;
+    if (p.jd < 210866760000000 || p.jd > 213014145600000) {
+        const x = Object.assign({}, p);
+        momentYMD(x);
+        momentHMS(x);
+        yearDiff = (2000 + x.Y % 4) - x.Y;
+        x.Y += yearDiff;
+        x.validJD = false;
+        momentJD(x);
+        t = Math.trunc(x.jd / 1000) - 210866760000;
+    } else {
+        t = Math.trunc(p.jd / 1000) - 210866760000;
+    }
+    const local = new Date(t * 1000);
+    p.Y = local.getFullYear() - yearDiff;
+    p.M = local.getMonth() + 1;
+    p.D = local.getDate();
+    p.h = local.getHours();
+    p.m = local.getMinutes();
+    p.s = local.getSeconds() + (p.jd % 1000) * 0.001;
+    p.validYMD = true;
+    p.validHMS = true;
+    p.validJD = false;
+    p.rawS = false;
+    p.validTZ = false;
+    p.isError = false;
+}
+
+//  How far a "+NNN unit" modifier can go,  and what one unit is in seconds   (SQLite keeps these as 32-bit floats)
+const DATE_UNITS = [
+    ['second', Math.fround(4.6427e14), 1],
+    ['minute', Math.fround(7.7379e12), 60],
+    ['hour',   Math.fround(1.2897e11), 3600],
+    ['day',    Math.fround(5373485.0), 86400],
+    ['month',  Math.fround(176546.0),  2592000],
+    ['year',   Math.fround(14713.0),   31536000],
+];
+
+//  ONE modifier   (k = which one it is:  1 = the first)    ->   true  when it doesn't make sense  (then:  NULL)
+function applyModifier(z, k, p) {
+    const low = z.toLowerCase();
+    switch (low[0]) {
+        case 'a':                                                   //  auto:  a Julian day or Unix time,  by its size
+            if (low !== 'auto') return true;
+            if (k > 1) return true;
+            if (!p.rawS || p.validJD) { p.rawS = false; return false; }
+            if (p.s >= -210866760000 && p.s <= 253402300799) {
+                const r = p.s * 1000 + JD_UNIX;
+                clearParts(p);
+                p.jd = Math.trunc(r + 0.5);
+                p.validJD = true;
+                p.rawS = false;
+                return false;
+            }
+            return true;
+        case 'c':                                                   //  ceiling:  Jan 31 + 1 month = March 2  (the usual)
+            if (low !== 'ceiling') return true;
+            momentJD(p);
+            clearParts(p);
+            p.nFloor = 0;
+            return false;
+        case 'f':                                                   //  floor:  Jan 31 + 1 month = Feb 29
+            if (low !== 'floor') return true;
+            momentJD(p);
+            p.jd -= p.nFloor * 86400000;
+            clearParts(p);
+            return false;
+        case 'j':                                                   //  julianday:  the number IS a Julian day
+            if (low !== 'julianday' || k > 1) return true;
+            if (p.validJD && p.rawS) { p.rawS = false; return false; }
+            return true;
+        case 'l':                                                   //  localtime:  UTC  ->  your clock
+            if (low !== 'localtime') return true;
+            if (!p.isLocal) toLocalMoment(p);
+            p.isUtc = false;
+            p.isLocal = true;
+            return false;
+        case 'u':
+            if (low === 'unixepoch' && p.rawS) {                   //  unixepoch:  the number is seconds since 1970
+                if (k > 1) return true;
+                const r = p.s * 1000 + JD_UNIX;
+                if (r >= 0 && r < 464269060800000) {
+                    clearParts(p);
+                    p.jd = Math.trunc(r + 0.5);
+                    p.validJD = true;
+                    p.rawS = false;
+                    return false;
+                }
+                return true;
+            }
+            if (low === 'utc') {                                    //  utc:  your clock  ->  UTC   (a guess,  checked,  up to 4 times)
+                if (!p.isUtc) {
+                    momentJD(p);
+                    const was = p.jd;
+                    let guess = was, off = 0, tries = 0;
+                    do {
+                        guess -= off;
+                        const x = newMoment();
+                        x.jd = guess;
+                        x.validJD = true;
+                        toLocalMoment(x);
+                        momentJD(x);
+                        off = x.jd - was;
+                    } while (off !== 0 && tries++ < 3);
+                    Object.assign(p, newMoment());
+                    p.jd = guess;
+                    p.validJD = true;
+                    p.isUtc = true;
+                }
+                return false;
+            }
+            return true;
+        case 'w': {                                                 //  weekday N:  forward to the next day N  (0 = Sunday)
+            if (!low.startsWith('weekday ') || !NUMBER_WORDS.test(z.slice(8))) return true;
+            const n = Number(z.slice(8));
+            if (!(n >= 0 && n < 7 && Math.trunc(n) === n)) return true;
+            momentYMD(p);
+            momentHMS(p);
+            p.tz = 0;
+            p.validJD = false;
+            momentJD(p);
+            let day = Math.trunc((p.jd + 129600000) / 86400000) % 7;
+            if (day > n) day -= 7;
+            p.jd += (n - day) * 86400000;
+            clearParts(p);
+            return false;
+        }
+        case 's':                                                   //  start of month / year / day,   subsec
+            if (!low.startsWith('start of ')) {
+                if (low === 'subsec' || low === 'subsecond') { p.subsec = true; return false; }
+                return true;
+            }
+            if (!p.validJD && !p.validYMD && !p.validHMS) return true;
+            momentYMD(p);
+            p.validHMS = true;
+            p.h = 0;
+            p.m = 0;
+            p.s = 0;
+            p.rawS = false;
+            p.tz = 0;
+            p.validJD = false;
+            if (low === 'start of month') { p.D = 1; return false; }
+            if (low === 'start of year') { p.M = 1; p.D = 1; return false; }
+            return low !== 'start of day';
+        case '+': case '-': case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9': {
+            const sign = z[0];
+            let n = 1;
+            for (; n < z.length; n++) {
+                if (z[n] === ':' || isSpaceCode(z.charCodeAt(n))) break;
+                if (z[n] === '-') {
+                    if (n === 5 && getDigits(z, 1, [[4, 0, 14712, '']]).length === 1) break;
+                    if (n === 6 && getDigits(z, 1, [[5, 0, 14712, '']]).length === 1) break;
+                }
+            }
+            if (!MODIFIER_NUMBER.test(z.slice(0, n))) return true;
+            let r = Number(z.slice(0, n));
+            let timeAt = 0, timeN = n;                              //  where a  HH:MM  part would start
+            if (z[n] === '-') {
+                //  +YYYY-MM-DD   (maybe  +YYYY-MM-DD HH:MM):   years,  months  (0 to 11)  and days  (0 to 30)  at once
+                if (sign !== '+' && sign !== '-') return true;
+                const wide = n === 6 ? 1 : 0;
+                const d = getDigits(z, 1, [[4 + wide, 0, 14712, '-'], [2, 0, 12, '-'], [2, 0, 31, '']]);
+                if (d.length !== 3 || d[1] >= 12 || d[2] >= 31) return true;
+                momentYMD(p);
+                momentHMS(p);
+                p.validJD = false;
+                let D = d[2];
+                if (sign === '-') { p.Y -= d[0]; p.M -= d[1]; D = -D; }
+                else { p.Y += d[0]; p.M += d[1]; }
+                const x = p.M > 0 ? Math.trunc((p.M - 1) / 12) : Math.trunc((p.M - 12) / 12);
+                p.Y += x;
+                p.M -= x * 12;
+                momentFloor(p);
+                momentJD(p);
+                p.validHMS = false;
+                p.validYMD = false;
+                p.jd += D * 86400000;
+                const end = 11 + wide;
+                if (end >= z.length) return false;
+                if (!isSpaceCode(z.charCodeAt(end)) || getDigits(z, end + 1, [[2, 0, 24, ':'], [2, 0, 59, '']]).length !== 2) return true;
+                timeAt = end + 1;
+                timeN = 2;
+            }
+            if (z[timeAt + timeN] === ':') {
+                //  +HH:MM,   +HH:MM:SS.SSS:   a time to add  (or take away)
+                const tx = newMoment();
+                if (parseTime(z, timeAt + (isDigitCode(z.charCodeAt(timeAt)) ? 0 : 1), tx)) return true;
+                momentJD(tx);
+                tx.jd -= 43200000;
+                tx.jd -= Math.trunc(tx.jd / 86400000) * 86400000;
+                if (sign === '-') tx.jd = -tx.jd;
+                momentJD(p);
+                clearParts(p);
+                p.jd += tx.jd;
+                return false;
+            }
+            //  +NNN days   (seconds,  minutes,  hours,  days,  months,  years:  a fraction is fine,  "+1.5 months")
+            let at = n;
+            while (isSpaceCode(z.charCodeAt(at))) at++;
+            let unit = low.slice(at);
+            if (unit.length < 3 || unit.length > 10) return true;
+            if (unit[unit.length - 1] === 's') unit = unit.slice(0, -1);
+            momentJD(p);
+            const rounder = r < 0 ? -0.5 : 0.5;
+            p.nFloor = 0;
+            for (const [name, limit, seconds] of DATE_UNITS) {
+                if (unit !== name || !(r > -limit && r < limit)) continue;
+                if (name === 'month' || name === 'year') {
+                    momentYMD(p);
+                    momentHMS(p);
+                    if (name === 'month') {
+                        p.M += Math.trunc(r);
+                        const x = p.M > 0 ? Math.trunc((p.M - 1) / 12) : Math.trunc((p.M - 12) / 12);
+                        p.Y += x;
+                        p.M -= x * 12;
+                    } else p.Y += Math.trunc(r);
+                    momentFloor(p);
+                    p.validJD = false;
+                    r -= Math.trunc(r);
+                }
+                momentJD(p);
+                p.jd += Math.trunc(r * 1000 * seconds + rounder);
+                clearParts(p);
+                return false;
+            }
+            clearParts(p);
+            return true;
+        }
+    }
+    return true;
+}
+
+//  A moment from a date function's values  (the moment,  then its modifiers)   ->   its notes,  or null  (NULL)
+function sqliteMoment(args) {
+    const p = newMoment();
+    if (args.length === 0) nowMoment(p);
+    else {
+        const v = args[0];
+        if (v === null) return null;
+        if (typeof v === 'number' || typeof v === 'bigint') rawMoment(p, Number(v));
+        else if (typeof v === 'boolean') rawMoment(p, v ? 1 : 0);
+        else if (parseMoment(v, p)) return null;
+    }
+    for (let k = 1; k < args.length; k++) {
+        if (args[k] === null || applyModifier(valueText(args[k]), k, p)) return null;
+    }
+    momentJD(p);
+    if (p.isError || !(p.jd >= 0 && p.jd <= JD_LAST)) return null;
+    if (args.length === 1 && p.validYMD && p.D > 28) p.validYMD = false;      //  2023-02-31  ->  2023-03-03
+    return p;
+}
+
+//  A moment as words,  SQLite's way   (a year below 0 gets a minus:   -0001-12-31)
+function two(n) { return n < 10 ? '0' + n : String(n); }
+function momentDay(p) {
+    momentYMD(p);
+    const Y = Math.abs(p.Y);
+    return (p.Y < 0 ? '-' : '') + String(Math.trunc(Y / 1000) % 10) + Math.trunc(Y / 100) % 10 + Math.trunc(Y / 10) % 10 + Y % 10 + '-' + two(p.M) + '-' + two(p.D);
+}
+function momentClock(p) {
+    momentHMS(p);
+    if (!p.subsec) return two(p.h) + ':' + two(p.m) + ':' + two(Math.trunc(p.s));
+    const ms = Math.trunc(1000 * p.s + 0.5);
+    return two(p.h) + ':' + two(p.m) + ':' + two(Math.trunc(ms / 1000) % 100) + '.' + String(ms % 1000).padStart(3, '0');
+}
+
+//  C's  %04d / %02d / %2d   (a minus counts as one of the places,  like C:   -1  ->  -001)
+function cNumber(n, width, fill) {
+    const digits = String(Math.abs(n));
+    const body = n < 0 ? width - 1 : width;
+    return (n < 0 ? '-' : '') + (digits.length >= body ? digits : fill.repeat(body - digits.length) + digits);
+}
+
+//  Days since January 1,  and since Monday / Sunday   (SQLite's daysAfterJan01,  daysAfterMonday,  daysAfterSunday)
+function daysAfterJan01(p) {
+    const jan01 = Object.assign({}, p);
+    jan01.validJD = false;
+    jan01.M = 1;
+    jan01.D = 1;
+    momentJD(jan01);
+    return Math.trunc((p.jd - jan01.jd + 43200000) / 86400000);
+}
+function daysAfterMonday(p) { return Math.trunc((p.jd + 43200000) / 86400000) % 7; }
+function daysAfterSunday(p) { return Math.trunc((p.jd + 129600000) / 86400000) % 7; }
+
+//  The Thursday of a moment's week  (that's the week's ISO year,  %G,  and ISO week,  %V)
+function isoThursday(p) {
+    const y = Object.assign({}, p);
+    y.jd += (3 - daysAfterMonday(p)) * 86400000;
+    y.validYMD = false;
+    momentYMD(y);
+    return y;
+}
+
+//  STRFTIME('%Y-%m', d):   SQLite's way of writing a moment any way you like.   A letter it doesn't know  ->  NULL.
+function strftimeText(format, p) {
+    momentJD(p);
+    momentYMD(p);
+    momentHMS(p);
+    let out = '';
+    for (let i = 0; i < format.length; i++) {
+        const ch = format[i];
+        if (ch !== '%') { out += ch; continue; }
+        i++;
+        switch (format[i]) {
+            case 'd': out += cNumber(p.D, 2, '0'); break;
+            case 'e': out += cNumber(p.D, 2, ' '); break;
+            case 'f': out += Math.min(p.s, 59.999).toFixed(3).padStart(6, '0'); break;
+            case 'F': out += cNumber(p.Y, 4, '0') + '-' + cNumber(p.M, 2, '0') + '-' + cNumber(p.D, 2, '0'); break;
+            case 'G': out += cNumber(isoThursday(p).Y, 4, '0'); break;
+            case 'g': out += cNumber(isoThursday(p).Y % 100, 2, '0'); break;
+            case 'H': out += cNumber(p.h, 2, '0'); break;
+            case 'k': out += cNumber(p.h, 2, ' '); break;
+            case 'I': case 'l': {
+                const h = p.h > 12 ? p.h - 12 : p.h === 0 ? 12 : p.h;
+                out += cNumber(h, 2, format[i] === 'I' ? '0' : ' ');
+                break;
+            }
+            case 'j': out += cNumber(daysAfterJan01(p) + 1, 3, '0'); break;
+            case 'J': out += String(Number((p.jd / 86400000).toPrecision(16))).replace(/e([+-])(\d)$/, 'e$10$2'); break;
+            case 'm': out += cNumber(p.M, 2, '0'); break;
+            case 'M': out += cNumber(p.m, 2, '0'); break;
+            case 'p': out += p.h >= 12 ? 'PM' : 'AM'; break;
+            case 'P': out += p.h >= 12 ? 'pm' : 'am'; break;
+            case 'R': out += cNumber(p.h, 2, '0') + ':' + cNumber(p.m, 2, '0'); break;
+            case 's': out += p.subsec ? ((p.jd - JD_UNIX) / 1000).toFixed(3) : String(Math.trunc(p.jd / 1000) - 210866760000); break;
+            case 'S': out += cNumber(Math.trunc(p.s), 2, '0'); break;
+            case 'T': out += cNumber(p.h, 2, '0') + ':' + cNumber(p.m, 2, '0') + ':' + cNumber(Math.trunc(p.s), 2, '0'); break;
+            case 'u': out += String(daysAfterSunday(p) || 7); break;
+            case 'w': out += String(daysAfterSunday(p)); break;
+            case 'U': out += cNumber(Math.trunc((daysAfterJan01(p) - daysAfterSunday(p) + 7) / 7), 2, '0'); break;
+            case 'V': out += cNumber(Math.trunc(daysAfterJan01(isoThursday(p)) / 7) + 1, 2, '0'); break;
+            case 'W': out += cNumber(Math.trunc((daysAfterJan01(p) - daysAfterMonday(p) + 7) / 7), 2, '0'); break;
+            case 'Y': out += cNumber(p.Y, 4, '0'); break;
+            case '%': out += '%'; break;
+            default:  return null;
+        }
+    }
+    return out;
 }
 
 //  One part of a date:   year,  month,  day,  hour,  minute,  second,  quarter,  dow (0 = Sunday),  doy,  week,  epoch
@@ -1407,12 +2019,22 @@ const QUERY_FUNCTIONS = {
     QUOTE:       { args: [1, 1], ty: 'text', keep: true, f: function (v) { return v === null ? 'NULL' : typeof v === 'string' ? "'" + v.split("'").join("''") + "'" : valueText(v); } },
 
     //  ---- numbers ----
-    ABS:     { args: [1, 1], ty: numberLike, f: function (x) { return Math.abs(numOf(x)); } },
+    ABS:     { args: [1, 1], ty: numberLike, f: function (x) {
+                 if (typeof x !== 'bigint') return Math.abs(numOf(x));
+                 if (x === INT64_MIN) queryFail('ABS(...) of the smallest 64-bit whole number is past the top  ("integer overflow",  like SQLite).');
+                 return x < 0n ? -x : x;
+             } },
     ROUND:   { args: [1, 2], ty: 'real', f: function (x, d) { return roundTo(numOf(x), d === undefined ? 0 : numOf(d)); } },
-    FLOOR:   { args: [1, 1], ty: numberLike, f: function (x) { return Math.floor(numOf(x)); } },
-    CEIL:    { args: [1, 1], ty: numberLike, f: function (x) { return Math.ceil(numOf(x)); } },
+    //  (A whole number is already as round as it gets:  it comes back exactly,  like SQLite.)
+    FLOOR:   { args: [1, 1], ty: numberLike, f: function (x) { const n = exactOf(x); return typeof n === 'bigint' ? n : Math.floor(n); } },
+    CEIL:    { args: [1, 1], ty: numberLike, f: function (x) { const n = exactOf(x); return typeof n === 'bigint' ? n : Math.ceil(n); } },
     CEILING: { alias: 'CEIL' },
-    TRUNC:   { args: [1, 2], ty: numberLike, f: function (x, d) { const s = Math.pow(10, d === undefined ? 0 : Math.trunc(numOf(d))); return Math.trunc(numOf(x) * s) / s; } },
+    TRUNC:   { args: [1, 2], ty: numberLike, f: function (x, d) {
+                 const n = exactOf(x), places = d === undefined ? 0 : Math.trunc(numOf(d));
+                 if (typeof n === 'bigint' && places >= 0) return n;
+                 const s = Math.pow(10, places);
+                 return Math.trunc(Number(n) * s) / s;
+             } },
     TRUNCATE: { alias: 'TRUNC' },
     SIGN:    { args: [1, 1], ty: 'int', f: function (x) { return Math.sign(numOf(x)); } },
     SQRT:    { args: [1, 1], ty: 'real', f: function (x) { const n = numOf(x); return n < 0 ? null : Math.sqrt(n); } },
@@ -1450,15 +2072,23 @@ const QUERY_FUNCTIONS = {
     //  MIN(a, b) and MAX(a, b) with 2 or more values  (SQLite):  any NULL  ->  NULL.
     MIN_OF:   { args: [2, -1], ty: anyOf, f: function () { let best = arguments[0]; for (let k = 1; k < arguments.length; k++) if (sortValues(arguments[k], best) < 0) best = arguments[k]; return best; } },
     MAX_OF:   { args: [2, -1], ty: anyOf, f: function () { let best = arguments[0]; for (let k = 1; k < arguments.length; k++) if (sortValues(arguments[k], best) > 0) best = arguments[k]; return best; } },
-    TYPEOF:   { args: [1, 1], ty: 'text', keep: true, f: function (v) { return v === null ? 'null' : typeof v === 'string' ? 'text' : typeof v === 'boolean' ? 'integer' : Number.isInteger(v) ? 'integer' : 'real'; } },
+    TYPEOF:   { args: [1, 1], ty: 'text', keep: true, f: function (v) { return v === null ? 'null' : typeof v === 'string' ? 'text' : typeof v === 'boolean' || isWhole(v) ? 'integer' : 'real'; } },
 
     //  ---- dates ----
-    DATE:       { args: [1, -1], ty: 'date',      f: function () { return dateText(datePlus(Array.from(arguments))); } },
-    DATETIME:   { args: [1, -1], ty: 'timestamp', f: function () { return dateTimeText(datePlus(Array.from(arguments))); } },
-    TIME:       { args: [1, -1], ty: 'text',      f: function () { const ms = datePlus(Array.from(arguments)); return ms === null ? null : dateTimeText(ms).slice(11); } },
-    JULIANDAY:  { args: [1, -1], ty: 'real',      f: function () { const ms = datePlus(Array.from(arguments)); return ms === null ? null : ms / DAY_MS + 2440587.5; } },
-    UNIXEPOCH:  { args: [1, -1], ty: 'int',       f: function () { const ms = datePlus(Array.from(arguments)); return ms === null ? null : Math.floor(ms / 1000); } },
-    STRFTIME:   { args: [2, -1], ty: 'text',      f: function (format) { return formatDate(format, datePlus(Array.from(arguments).slice(1))); } },
+    //  (SQLite's 6:  see SQLITE'S DATE FUNCTIONS.   With nothing in the brackets:  'now'.)
+    DATE:       { args: [0, -1], ty: 'date',      f: function () { const p = sqliteMoment(Array.from(arguments)); return p === null ? null : momentDay(p); } },
+    DATETIME:   { args: [0, -1], ty: 'timestamp', f: function () { const p = sqliteMoment(Array.from(arguments)); return p === null ? null : momentDay(p) + ' ' + momentClock(p); } },
+    TIME:       { args: [0, -1], ty: 'text',      f: function () { const p = sqliteMoment(Array.from(arguments)); return p === null ? null : momentClock(p); } },
+    JULIANDAY:  { args: [0, -1], ty: 'real',      f: function () { const p = sqliteMoment(Array.from(arguments)); return p === null ? null : p.jd / 86400000; } },
+    UNIXEPOCH:  { args: [0, -1], ty: 'int',       f: function () {
+                    const p = sqliteMoment(Array.from(arguments));
+                    return p === null ? null : p.subsec ? (p.jd - JD_UNIX) / 1000 : Math.trunc(p.jd / 1000) - 210866760000;
+                } },
+    STRFTIME:   { args: [1, -1], ty: 'text',      f: function (format) {
+                    if (format === null) return null;
+                    const p = sqliteMoment(Array.from(arguments).slice(1));
+                    return p === null ? null : strftimeText(valueText(format), p);
+                } },
     YEAR:       { args: [1, 1], ty: 'int', f: function (d) { return datePart('year', dateMs(d)); } },
     QUARTER:    { args: [1, 1], ty: 'int', f: function (d) { return datePart('quarter', dateMs(d)); } },
     MONTH:      { args: [1, 1], ty: 'int', f: function (d) { return datePart('month', dateMs(d)); } },
@@ -1530,16 +2160,74 @@ function findFunction(name) {
 //
 // ----------------------------------------------------------
 
-//  A sum that doesn't lose tiny bits  (adding 0.1 a million times stays close to 100000).
-//  "Neumaier summation":  it keeps the bits that fall off,  and adds them back at the end.
-function newSum() { return { sum: 0, lost: 0, n: 0, whole: true }; }
-function addSum(s, x) {
+//  A SUM,  SQLite's way:
+//      only whole numbers   ->  EXACT,  in 64 bits   (past 9,223,372,036,854,775,807:  an error,  "integer overflow")
+//      a REAL in it         ->  a REAL,  that doesn't lose tiny bits  (adding 0.1 a million times stays close to 100000):
+//                               "Neumaier summation" keeps the bits that fall off,  and adds them back at the end.
+//  x  =  an exact number  (exactOf),   real  =  it's a REAL column  (then even  5  is a REAL,  5.0).
+function newSum() { return { sum: 0, lost: 0, n: 0, whole: true, big: null, over: false }; }
+function addSum(s, x, real) {
+    s.n++;
+    const exact = !real && isWhole(x);
+    if (s.whole) {
+        if (exact) {
+            if (s.big === null && typeof x === 'number') {
+                const t = s.sum + x;
+                if (Number.isSafeInteger(t)) { s.sum = t; return; }         //  (the usual:  quick,  and exact)
+            }
+            const b = (s.big === null ? BigInt(s.sum) : s.big) + BigInt(x);
+            if (b >= INT64_MIN && b <= INT64_MAX) { s.big = b; return; }
+            s.over = true;                          //  past 64 bits:  "integer overflow"  (unless a REAL comes along later)
+        }
+        //  From here on it's a REAL.   The exact sum so far moves over  (a big one as 2 parts,  big + small:  no bits lost).
+        const so = s.big === null ? s.sum : s.big;
+        s.whole = false;
+        s.big = null;
+        if (typeof so === 'bigint' || Math.abs(so) >= 4503599627370496) {
+            const b = BigInt(so), small = b % 16384n;
+            s.sum = Number(b - small);
+            s.lost = Number(small);
+        } else {
+            s.sum = so;
+            s.lost = 0;
+        }
+    }
+    if (exact) { wholeStep(s, x); return; }
+    s.over = false;                                 //  (SQLite:  a REAL after the overflow means there's no error after all)
+    //  One step of the Neumaier sum  (written out here:  it's the usual one,  for every row of a REAL column)
+    const v = typeof x === 'number' ? x : Number(x);
+    const t = s.sum + v;
+    if (Math.abs(s.sum) > Math.abs(v)) s.lost += (s.sum - t) + v;
+    else s.lost += (v - t) + s.sum;
+    s.sum = t;
+}
+
+//  A WHOLE number into a REAL sum:  past 2^52 it goes in as 2 parts,  big + small  (each one exact,  like SQLite).
+function wholeStep(s, x) {
+    if (typeof x === 'bigint' || Math.abs(x) >= 4503599627370496) {
+        const b = BigInt(x), small = b % 16384n;
+        neumaier(s, Number(b - small));
+        neumaier(s, Number(small));
+        return;
+    }
+    neumaier(s, x);
+}
+function neumaier(s, x) {
     const t = s.sum + x;
-    if (Math.abs(s.sum) >= Math.abs(x)) s.lost += (s.sum - t) + x;
+    if (Math.abs(s.sum) > Math.abs(x)) s.lost += (s.sum - t) + x;
     else s.lost += (x - t) + s.sum;
     s.sum = t;
-    s.n++;
-    if (!Number.isInteger(x)) s.whole = false;
+}
+
+//  SUM's answer   (TOTAL's and AVG's are always a REAL:  sumReal).
+function sumAnswer(s) {
+    if (s.whole) return s.big !== null ? exactInt(s.big) : s.sum;
+    if (s.over) queryFail('The SUM is past the biggest 64-bit whole number  ("integer overflow",  like SQLite).   TOTAL(...) gives it as a REAL.');
+    return isFinite(s.lost) ? s.sum + s.lost : s.sum;
+}
+function sumReal(s) {
+    if (s.whole) return s.big !== null ? Number(s.big) : s.sum;
+    return isFinite(s.lost) ? s.sum + s.lost : s.sum;
 }
 
 function sortedNumbers(list) {
@@ -1570,16 +2258,16 @@ const QUERY_TOTALS = {
               end: function (t) { return t.n; } },
     SUM:    { ty: numberLike,
               start: newSum,
-              add: function (t, x) { addSum(t, numOf(x)); },
-              end: function (t, ty) { return t.n === 0 ? null : t.sum + t.lost; } },
+              add: function (t, x, extra, types) { addSum(t, typeof x === 'number' ? x : exactOf(x), types[0] === 'real'); },
+              end: function (t) { return t.n === 0 ? null : sumAnswer(t); } },
     TOTAL:  { ty: function () { return 'real'; },
               start: newSum,
-              add: function (t, x) { addSum(t, numOf(x)); },
-              end: function (t) { return t.sum + t.lost; } },
+              add: function (t, x, extra, types) { addSum(t, typeof x === 'number' ? x : exactOf(x), types[0] === 'real'); },
+              end: function (t) { return sumReal(t); } },
     AVG:    { ty: function () { return 'real'; },
               start: newSum,
-              add: function (t, x) { addSum(t, numOf(x)); },
-              end: function (t) { return t.n === 0 ? null : (t.sum + t.lost) / t.n; } },
+              add: function (t, x, extra, types) { addSum(t, typeof x === 'number' ? x : exactOf(x), types[0] === 'real'); },
+              end: function (t) { return t.n === 0 ? null : sumReal(t) / t.n; } },
     MIN:    { ty: sameAsFirst,
               start: function () { return { v: null }; },
               add: function (t, x) { if (t.v === null || sortValues(x, t.v) < 0) t.v = x; },
@@ -1686,6 +2374,7 @@ function isWindow(node) {
 //    The engine works out what TYPE each column holds  (it looks at the cells):
 //
 //        all whole numbers   ->  int          (but not  007:  that's a code,  so it stays words)
+//                                             (up to 64 bits:  an ID like 123456789012345678 is read EXACTLY)
 //        all numbers         ->  real
 //        all dates           ->  date  /  timestamp
 //        anything else       ->  text
@@ -1696,7 +2385,16 @@ function isWindow(node) {
 // ----------------------------------------------------------
 
 const CELL_INT  = /^[+-]?(0|[1-9]\d{0,14})$/;
+const CELL_LONG = /^[+-]?[1-9]\d{15,18}$/;      //  16 to 19 digits:  a whole number,  if it fits in 64 bits
 const CELL_REAL = /^[+-]?((0|[1-9]\d*)(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
+
+//  A whole number that fits in 64 bits?   ('-9223372036854775808' yes,   '9223372036854775808' no:  that's a REAL)
+function isIntCell(s) {
+    if (CELL_INT.test(s)) return true;
+    if (!CELL_LONG.test(s)) return false;
+    const b = BigInt(s);
+    return b >= INT64_MIN && b <= INT64_MAX;
+}
 const CELL_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const CELL_TIME = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/;
 //  A NUMBER WITH A LOOK:   $116,450.00    1,200    €5    -$3    $-3    ($3.00)    12%
@@ -1833,7 +2531,7 @@ function* lookAtKinds(table, only) {
             const v = cells[j];
             if (v === '') continue;
             anything[k] = true;
-            if (canInt[k] && !CELL_INT.test(v)) canInt[k] = false;
+            if (canInt[k] && !isIntCell(v)) canInt[k] = false;
             if (canReal[k] && !CELL_REAL.test(v)) canReal[k] = false;
             if (canDate[k] && !CELL_DATE.test(v)) canDate[k] = false;
             if (canTime[k] && !CELL_TIME.test(v) && !CELL_DATE.test(v)) canTime[k] = false;
@@ -1975,6 +2673,7 @@ function markCorrelated(owner, stop) {
 //  A tree's "nodePrint":  2 trees that mean the same thing get the same one.
 //  (That's how  SELECT YEAR(d) ... GROUP BY YEAR(d)  knows the 2 are the same group key.)
 function nodePrint(node, scope) {
+    if (typeof node === 'bigint') return node + 'n';                //  (JSON can't write a BigInt)
     if (node === null || typeof node !== 'object') return JSON.stringify(node === undefined ? null : node);
     if (Array.isArray(node)) {
         let out = '[';
@@ -2037,7 +2736,14 @@ function cx(node, scope, ctx) {
         case 'neg': {
             const A = cx(node.e, scope, ctx);
             const a = A.f;
-            return { f: function (row, env) { const v = a(row, env); return v === null ? null : -numOf(v); }, ty: numberLike([A.ty]) };
+            return { f: function (row, env) {
+                const v = a(row, env);
+                if (v === null) return null;
+                if (typeof v === 'number') return -v;
+                const x = exactOf(v);
+                if (typeof x !== 'bigint') return -x;
+                return x === INT64_MIN ? -Number(x) : exactInt(-x);        //  (minus the smallest one is past the top:  a REAL)
+            }, ty: numberLike([A.ty]) };
         }
 
         case 'bin':  return compileMath(node, scope, ctx);
@@ -2286,42 +2992,117 @@ function compileMath(node, scope, ctx) {
     const a = A.f, b = B.f;
     const real = A.ty === 'real' || B.ty === 'real';
     const ty = A.ty === 'int' && B.ty === 'int' ? 'int' : real ? 'real' : 'num';
+    //  (Each one has a quick way for 2 plain numbers,  the usual.   A BigInt,  words,  or a whole answer past the safe
+    //   limit go the EXACT way:  see BIG WHOLE NUMBERS.)
     switch (node.op) {
-        case '+': return { f: function (row, env) { const x = a(row, env), y = b(row, env); return x === null || y === null ? null : numOf(x) + numOf(y); }, ty: ty };
-        case '-': return { f: function (row, env) { const x = a(row, env), y = b(row, env); return x === null || y === null ? null : numOf(x) - numOf(y); }, ty: ty };
-        case '*': return { f: function (row, env) { const x = a(row, env), y = b(row, env); return x === null || y === null ? null : numOf(x) * numOf(y); }, ty: ty };
+        case '+': return { f: function (row, env) {
+                const x = a(row, env), y = b(row, env);
+                if (x === null || y === null) return null;
+                if (typeof x === 'number' && typeof y === 'number') {
+                    const r = x + y;
+                    if (real || Number.isSafeInteger(r) || !Number.isSafeInteger(x) || !Number.isSafeInteger(y)) return r;
+                }
+                return wholeMath('+', x, y, real);
+            }, ty: ty };
+        case '-': return { f: function (row, env) {
+                const x = a(row, env), y = b(row, env);
+                if (x === null || y === null) return null;
+                if (typeof x === 'number' && typeof y === 'number') {
+                    const r = x - y;
+                    if (real || Number.isSafeInteger(r) || !Number.isSafeInteger(x) || !Number.isSafeInteger(y)) return r;
+                }
+                return wholeMath('-', x, y, real);
+            }, ty: ty };
+        case '*': return { f: function (row, env) {
+                const x = a(row, env), y = b(row, env);
+                if (x === null || y === null) return null;
+                if (typeof x === 'number' && typeof y === 'number') {
+                    const r = x * y;
+                    if (real || Number.isSafeInteger(r) || !Number.isSafeInteger(x) || !Number.isSafeInteger(y)) return r;
+                }
+                return wholeMath('*', x, y, real);
+            }, ty: ty };
         case '/': return { f: function (row, env) {
                 //  Two WHOLE numbers  ->  a whole answer  (7 / 2 = 3,  like SQLite,  SQL Server,  PostgreSQL).   Dividing by 0  ->  NULL.
                 const x = a(row, env), y = b(row, env);
                 if (x === null || y === null) return null;
-                const nx = numOf(x), ny = numOf(y);
-                if (ny === 0) return null;
-                return !real && Number.isInteger(nx) && Number.isInteger(ny) ? Math.trunc(nx / ny) : nx / ny;
+                if (typeof x === 'number' && typeof y === 'number') {
+                    if (y === 0) return null;
+                    return !real && Number.isSafeInteger(x) && Number.isSafeInteger(y) ? Math.trunc(x / y) : x / y;
+                }
+                return wholeDivide(x, y, real);
             }, ty: ty };
         case '%': return { f: function (row, env) {
                 //  SQLite's way:  both sides are cut to WHOLE numbers first   (7.9 % 3  =  7 % 3  =  1,    0.15 % 6  =  0).
                 //  Cut down to 0?  NULL   (7 % 0.5  =  7 % 0).   The sign is the left side's   (-7 % 3  =  -1).
                 const x = a(row, env), y = b(row, env);
                 if (x === null || y === null) return null;
-                const nx = Math.trunc(numOf(x)), ny = Math.trunc(numOf(y));
-                if (ny === 0 || !isFinite(ny)) return null;
-                return nx % ny;
+                if (typeof x === 'number' && typeof y === 'number' && Math.abs(x) <= 9007199254740991 && Math.abs(y) <= 9007199254740991) {
+                    const nx = Math.trunc(x), ny = Math.trunc(y);
+                    return ny === 0 ? null : nx % ny;
+                }
+                return wholeRemainder(x, y);
             }, ty: ty };
     }
+}
+
+//  + - *  the EXACT way:  64-bit whole numbers,  like SQLite.   A REAL in it  (or  real,  a REAL type)?  Plain math.
+//  Past 64 bits?  Then it's a REAL too   (like SQLite:   9223372036854775807 + 1  =  9.2233720368547758e+18).
+function wholeMath(op, x, y, real) {
+    const X = exactOf(x), Y = exactOf(y);
+    if (!real && isWhole(X) && isWhole(Y)) {
+        const bx = BigInt(X), by = BigInt(Y);
+        const r = op === '+' ? bx + by : op === '-' ? bx - by : bx * by;
+        if (r >= INT64_MIN && r <= INT64_MAX) return exactInt(r);
+    }
+    const nx = Number(X), ny = Number(Y);
+    return op === '+' ? nx + ny : op === '-' ? nx - ny : nx * ny;
+}
+
+//  /  the EXACT way   (a whole answer,  cut toward 0:   -7 / 2  =  -3).
+function wholeDivide(x, y, real) {
+    const X = exactOf(x), Y = exactOf(y);
+    if (Y === 0) return null;
+    if (!real && isWhole(X) && isWhole(Y)) {
+        const bx = BigInt(X), by = BigInt(Y);
+        if (!(bx === INT64_MIN && by === -1n)) return exactInt(bx / by);      //  (that one's past the top:  a REAL)
+    }
+    return Number(X) / Number(Y);
+}
+
+//  %  the EXACT way:  both sides as 64-bit whole numbers  (see toInt64).
+function wholeRemainder(x, y) {
+    const bx = toInt64(exactOf(x)), by = toInt64(exactOf(y));
+    if (by === 0n) return null;
+    if (by === -1n) return 0;                                       //  (always 0,  and the smallest one % -1 would overflow)
+    return exactInt(bx % by);
 }
 
 //  CAST(x AS type)   (SQLite's rules:   CAST('12abc' AS INTEGER)  =  12,   CAST(3.9 AS INTEGER)  =  3)
 function castValue(v, to, from) {
     if (v === null) return null;
     switch (to) {
-        case 'int':  { const n = numOf(v); return Number.isFinite(n) ? Math.trunc(n) : 0; }
+        case 'int':  return castWhole(v);
         case 'real': return numOf(v);
-        case 'num':  return numOf(v);
+        case 'num':  return exactOf(v);
         case 'bool': return truthy(v);
         case 'date': return dateText(dateMs(v));
         case 'timestamp': return dateTimeText(dateMs(v));
         default:     return valueText(v, from);
     }
+}
+
+//  CAST(x AS INTEGER):   a REAL is cut toward 0,   words give the whole number they START with   ('12abc' -> 12,
+//  '1e5' -> 1:  the  e5  isn't part of a whole number),   and past 64 bits it stops at the biggest one   (all like SQLite).
+const LEADING_WHOLE = /^\s*[+-]?\d+/;
+function castWhole(v) {
+    if (typeof v === 'bigint') return v;
+    if (typeof v === 'boolean') return v ? 1 : 0;
+    if (typeof v === 'number') return Number.isSafeInteger(v) ? v : exactInt(toInt64(v));
+    const m = LEADING_WHOLE.exec(v);
+    if (m === null) return 0;
+    const b = BigInt(m[0]);
+    return exactInt(b > INT64_MAX ? INT64_MAX : b < INT64_MIN ? INT64_MIN : b);
 }
 
 //  LIKE 'Chi%':   %  =  any letters,   _  =  one letter.   (Big and small letters count as the same,  like SQLite.)
@@ -2767,6 +3548,7 @@ function tableSource(table, alias) {
             const used = [];
             for (let j = 0; j < width; j++) if (cols[j].used) used.push(j);
             const numeric = used.map(function (j) { const k = kindAt(table, j); return k === 'int' || k === 'real' || k === 'num'; });
+            const whole   = used.map(function (j) { const k = kindAt(table, j); return k === 'int' || k === 'num'; });     //  (past 15 digits:  exactly)
             const looked  = used.map(function (j) { return lookAt(table, j) !== null; });     //  money:  $116,450.00  ->  116450
             const isNull = table.isNull || null;
             const emptyIsNull = table.emptyIsNull !== false;
@@ -2815,7 +3597,7 @@ function tableSource(table, alias) {
                         cells = cutPre ? table.rowUpTo(i, testTo) : table.row(i);
                         for (let k = 0; k < nPre; k++) {
                             const u = preU[k], j = used[u], s = cells[j];
-                            scratch[j] = s === undefined ? null : s === '' ? empty(i, j) : numeric[u] && CELL_REAL.test(s) ? Number(s) : looked[u] ? money(s) : s;
+                            scratch[j] = s === undefined ? null : s === '' ? empty(i, j) : numeric[u] && CELL_REAL.test(s) ? (whole[u] && s.length > 15 ? wordsNumber(s) : Number(s)) : looked[u] ? money(s) : s;
                         }
                     }
                     if (!truthy(pre.test(scratch, env))) continue;                 //  doesn't pass:  the rest is never cut
@@ -2827,7 +3609,7 @@ function tableSource(table, alias) {
                         work += upTo;
                         for (let k = 0; k < nRest; k++) {
                             const u = restU[k], j = used[u], s = cells[j];
-                            row[j] = s === undefined ? null : s === '' ? empty(i, j) : numeric[u] && CELL_REAL.test(s) ? Number(s) : looked[u] ? money(s) : s;
+                            row[j] = s === undefined ? null : s === '' ? empty(i, j) : numeric[u] && CELL_REAL.test(s) ? (whole[u] && s.length > 15 ? wordsNumber(s) : Number(s)) : looked[u] ? money(s) : s;
                         }
                     }
                     if (!sink(row)) return;
@@ -2840,7 +3622,7 @@ function tableSource(table, alias) {
                     const cells = cutAll ? table.rowUpTo(i, upTo) : table.row(i);
                     for (let u = 0; u < nUsed; u++) {
                         const j = used[u], s = cells[j];
-                        row[j] = s === undefined ? null : s === '' ? empty(i, j) : numeric[u] && CELL_REAL.test(s) ? Number(s) : looked[u] ? money(s) : s;
+                        row[j] = s === undefined ? null : s === '' ? empty(i, j) : numeric[u] && CELL_REAL.test(s) ? (whole[u] && s.length > 15 ? wordsNumber(s) : Number(s)) : looked[u] ? money(s) : s;
                     }
                 }
                 if (!sink(row)) return;
@@ -3554,20 +4336,25 @@ function* sortByKeys(rows, sortBy, keep) {
     const keys = [];
     for (let k = 0; k < sortBy.length; k++) {
         const s = sortBy[k];
-        let numbers = true, nulls = false;
+        let numbers = true, nulls = false, big = false;
         for (let r = 0; r < n; r++) {
             const v = rows[r][s.idx];
             if (v === null) nulls = true;
-            else if (typeof v !== 'number') { numbers = false; break; }
+            else if (typeof v !== 'number') {
+                if (typeof v === 'bigint') big = true;
+                else { numbers = false; break; }
+            }
             if ((r & 65535) === 65535) yield;
         }
-        const key = { idx: s.idx, how: s, desc: s.desc, nullsFirst: s.nulls === null ? !s.desc : s.nulls === 'first', vals: null, nul: null };
+        const key = { idx: s.idx, how: s, desc: s.desc, nullsFirst: s.nulls === null ? !s.desc : s.nulls === 'first', vals: null, nul: null, big: big };
         if (numbers) {
+            //  (A BigInt goes in as the plain number nearest to it.   2 that come out the same  (they're within a hair)
+            //   are looked at again,  exactly:  see compare.)
             key.vals = new Float64Array(n);
             if (nulls) key.nul = new Uint8Array(n);
             for (let r = 0; r < n; r++) {
                 const v = rows[r][s.idx];
-                if (v === null) key.nul[r] = 1; else key.vals[r] = v;
+                if (v === null) key.nul[r] = 1; else key.vals[r] = typeof v === 'bigint' ? Number(v) : v;
                 if ((r & 65535) === 65535) yield;
             }
         }
@@ -3584,6 +4371,7 @@ function* sortByKeys(rows, sortBy, keep) {
                 else {
                     const x = key.vals[a], y = key.vals[b];
                     c = x < y ? -1 : x > y ? 1 : 0;
+                    if (c === 0 && key.big) c = sortValues(rows[a][key.idx], rows[b][key.idx]);
                     if (key.desc) c = -c;
                 }
             } else {
