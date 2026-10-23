@@ -4104,9 +4104,9 @@ function buildFromSql(text) {
         return k === -1 ? null : columns[k];
     }
 
-    //  A value  (words or a number,  a long whole number too)   ->   what the builder's value box holds   (or null)
+    //  A value  (words or a number)   ->   what the builder's value box holds   (or null)
     function valueOf(e) {
-        return e !== null && e.t === 'lit' && (typeof e.v === 'string' || typeof e.v === 'number' || typeof e.v === 'bigint') ? String(e.v) : null;
+        return e !== null && e.t === 'lit' && (typeof e.v === 'string' || typeof e.v === 'number') ? String(e.v) : null;
     }
 
     //  A total the builder has:   COUNT(*)  COUNT(x)  COUNT(DISTINCT x)  SUM  AVG  MIN  MAX  MEDIAN   ->   { fn, col }   (or null)
