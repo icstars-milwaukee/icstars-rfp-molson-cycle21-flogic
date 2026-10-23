@@ -604,26 +604,14 @@ function loadFile(file, sheet) {
     //  GO!   But first:  WHAT KIND of file is it?
     //  Not by its name:  by its first few bytes.  (A file can be named anything.)
     //
-    //      SQLite format 3        =  a SQLite database  (.db,  .sqlite ...  or no ending)  ->  dbI.js reads it
     //      50 4B 03 04   ("PK")   =  a zip file  =  an Excel .xlsx         ->  xlsxI.js reads it
     //      D0 CF 11 E0            =  an old Excel .xls  (or a password-locked .xlsx)  ->  say so
     //      anything else          =  text  (a CSV)
-    file.slice(0, 16).arrayBuffer().then(function (head) {
+    file.slice(0, 8).arrayBuffer().then(function (head) {
 
         if (myLoad !== loadId) return;      //  a newer file?  Forget this one.
 
         const b = new Uint8Array(head);
-
-        if (b.length === 16 && dbIsSqlite(b)) {
-            readAsDb();
-            return;
-        }
-
-        //  NAMED like a database,  but it isn't one?   (Some apps lock theirs with a password,  like WhatsApp's backups.)
-        if (/\.(db|sqlite|sqlite3|db3)$/i.test(file.name)) {
-            couldNotRead(dbProblem(new Error(file.size === 0 ? 'notables' : 'notsqlite'), file.name));
-            return;
-        }
 
         if (b[0] === 0x50 && b[1] === 0x4B && b[2] === 0x03 && b[3] === 0x04) {
             readAsExcel();
@@ -686,26 +674,6 @@ function loadFile(file, sheet) {
 
             if (myLoad !== loadId || problem === SQL_STALE) return;      //  a newer file?  Not a real problem.
             couldNotRead(sqlProblem(problem, file.name));
-        });
-    }
-
-
-    //  A SQLite database:  dbI.js turns one of its tables into CSV text  (with the same SQL notes a dump gets).
-    function readAsDb() {
-
-        setLoadingLabel('Opening the database...');
-
-        readDb(file, function () { return myLoad === loadId; }, sheet).then(function (result) {
-
-            if (myLoad !== loadId) return;
-            setProgress(0.2);               //  the table is read  =  the "reading" part is done
-            sql = result.info;
-            useText(result.text);
-
-        }, function (problem) {
-
-            if (myLoad !== loadId || problem === DB_STALE) return;       //  a newer file?  Not a real problem.
-            couldNotRead(dbProblem(problem, file.name));
         });
     }
 }
@@ -779,10 +747,9 @@ function swapIn(table, look) {
 //
 //  (It shows the first sheet that isn't hidden.  "2 of 3"  =  the 1st one was hidden.)
 //
-//    A SQL dump says so too,  and a SQLite database:
+//    A SQL dump says so too:
 //
 //        SQL DUMP  ·  MySQL  ·  users  ·  2 of 5 tables
-//        SQLITE DATABASE  ·  users  ·  2 of 5 tables
 //
 //    A CSV?  No badge.
 //    (An Excel file or a SQL dump keeps its badge in BOTH looks,  so flipping never moves anything above the window.)
@@ -811,7 +778,7 @@ function showBadge() {
     }
 
     if (sqlInfo !== null) {
-        fileBadge.textContent = (sqlInfo.format === 'db' ? 'SQLITE DATABASE' : 'SQL DUMP' + (sqlInfo.dialect ? '  ·  ' + sqlInfo.dialect : '')) + '  ·  ' + sqlInfo.sheetName +
+        fileBadge.textContent = 'SQL DUMP' + (sqlInfo.dialect ? '  ·  ' + sqlInfo.dialect : '') + '  ·  ' + sqlInfo.sheetName +
             (sqlInfo.sheetCount > 1 ? '  ·  ' + sqlInfo.sheetNumber + ' of ' + sqlInfo.sheetCount + ' tables' : '');
         fileBadge.hidden = false;
         return;
@@ -3664,8 +3631,6 @@ async function loadOtherTable(sheet, isCurrent) {
     setLoadingLabel('Reading "' + sheet.name + '"...');
     const result = t.excel !== null
         ? await readXlsx(file, isCurrent, sheet.index)
-        : t.sql.format === 'db'
-        ? await readDb(file, isCurrent, sheet.index)                    //  (a database:  only that table's pages are read)
         : await readSql(await file.text(), file, isCurrent, sheet.index);
 
     const rows = cutCsvText(result.text);
