@@ -339,41 +339,16 @@ chooseBtn.addEventListener('click', function () {
 
 fileInput.addEventListener('change', function (event) {
 
-    const files = Array.from(event.target.files);       //  the file(s) you picked
+    const file = event.target.files[0];     //  the file you picked
 
-    if (files.length === 0) return;                     //  (you clicked "Cancel"?  Then there's no file:  do nothing)
-
-    const pick = withItsWal(files);
-    loadFile(pick.file, null, pick.wal);
+    if (file) loadFile(file, null);         //  (you clicked "Cancel"?  Then there's no file:  do nothing)
 });
-
-
-//  Which file to open,  of the ones you picked   (and its -wal file:  a SQLite database's newest changes,  see dbI.js)
-//      places.sqlite  +  places.sqlite-wal   ->  places.sqlite,  with its newest changes   (the names say they go together)
-//      notes.db  +  copy.db-wal              ->  the same   (just one file and one -wal file:  you picked them together)
-//      anything else                         ->  the first one  (that isn't a -wal,  -shm or -journal file)
-function withItsWal(files) {
-
-    const isWal  = function (f) { return /-wal$/i.test(f.name); };
-    const isSide = function (f) { return /-(wal|shm|journal)$/i.test(f.name); };
-
-    for (const wal of files.filter(isWal)) {
-        const name = wal.name.slice(0, -4).toLowerCase();
-        const file = files.find(function (f) { return f.name.toLowerCase() === name; });
-        if (file !== undefined) return { file: file, wal: wal };
-    }
-    const mains = files.filter(function (f) { return !isSide(f); });
-    const wals  = files.filter(isWal);
-    if (mains.length === 1 && wals.length === 1) return { file: mains[0], wal: wals[0] };
-    return { file: mains.length > 0 ? mains[0] : files[0], wal: null };
-}
 
 
 //  READ A FILE, and show it.
 //  "sheet"  =  for an Excel file:  which sheet to show  (0 = the first).   null  =  the first real one that isn't hidden.
-//  "wal"    =  a SQLite database's -wal file,  if you picked that too  (or null)
 //  (Picking a file calls this.  So does clicking a sheet tab:  same file, another sheet.)
-function loadFile(file, sheet, wal) {
+function loadFile(file, sheet) {
 
     const myLoad = ++loadId;                //  this file's number.  (Pick another file?  It gets a new number.)
 
@@ -604,8 +579,7 @@ function loadFile(file, sheet, wal) {
                   (excel.unsolved > 0 ? '  ·  ' + excel.unsolved + ' formula(s) had no saved answer  (shown as formulas)' : '') +
                   (excel.recalc ? '  ·  ⚠ this file asks Excel to recalculate:  formula answers may be out of date' : '')
                 : sql !== null
-                ? (sql.nullCount > 0 ? '  ·  ' + sql.nullCount.toLocaleString() + ' NULL' + (sql.nullCount === 1 ? '' : 's') + ' kept' : '') +
-                  (sql.format === 'db' ? dbWalNote(sql) : '')       //  a database:  what its -wal file added  (see dbI.js)
+                ? (sql.nullCount > 0 ? '  ·  ' + sql.nullCount.toLocaleString() + ' NULL' + (sql.nullCount === 1 ? '' : 's') + ' kept' : '')
                 : encoding === 'windows-1252'
                 ? '  ·  read as Windows-1252  (an older Excel format)'
                 : '';
@@ -630,33 +604,14 @@ function loadFile(file, sheet, wal) {
     //  GO!   But first:  WHAT KIND of file is it?
     //  Not by its name:  by its first few bytes.  (A file can be named anything.)
     //
-    //      SQLite format 3        =  a SQLite database  (.db,  .sqlite ...  or no ending)  ->  dbI.js reads it
     //      50 4B 03 04   ("PK")   =  a zip file  =  an Excel .xlsx         ->  xlsxI.js reads it
     //      D0 CF 11 E0            =  an old Excel .xls  (or a password-locked .xlsx)  ->  say so
     //      anything else          =  text  (a CSV)
-    file.slice(0, 16).arrayBuffer().then(function (head) {
+    file.slice(0, 8).arrayBuffer().then(function (head) {
 
         if (myLoad !== loadId) return;      //  a newer file?  Forget this one.
 
         const b = new Uint8Array(head);
-
-        if (b.length === 16 && dbIsSqlite(b)) {
-            readAsDb();
-            return;
-        }
-
-        //  A file that goes WITH a database  (its -wal file,  -shm,  -journal),  picked on its own?   Say what it is.
-        const side = dbSideFile(b, file.name);
-        if (side !== null) {
-            couldNotRead(side);
-            return;
-        }
-
-        //  NAMED like a database,  but it isn't one?   (Some apps lock theirs with a password,  like WhatsApp's backups.)
-        if (/\.(db|sqlite|sqlite3|db3)$/i.test(file.name)) {
-            couldNotRead(dbProblem(new Error(file.size === 0 ? 'notables' : 'notsqlite'), file.name));
-            return;
-        }
 
         if (b[0] === 0x50 && b[1] === 0x4B && b[2] === 0x03 && b[3] === 0x04) {
             readAsExcel();
@@ -719,26 +674,6 @@ function loadFile(file, sheet, wal) {
 
             if (myLoad !== loadId || problem === SQL_STALE) return;      //  a newer file?  Not a real problem.
             couldNotRead(sqlProblem(problem, file.name));
-        });
-    }
-
-
-    //  A SQLite database:  dbI.js turns one of its tables into CSV text  (with the same SQL notes a dump gets).
-    function readAsDb() {
-
-        setLoadingLabel('Opening the database...');
-
-        readDb(file, function () { return myLoad === loadId; }, sheet, wal || null).then(function (result) {
-
-            if (myLoad !== loadId) return;
-            setProgress(0.2);               //  the table is read  =  the "reading" part is done
-            sql = result.info;
-            useText(result.text);
-
-        }, function (problem) {
-
-            if (myLoad !== loadId || problem === DB_STALE) return;       //  a newer file?  Not a real problem.
-            couldNotRead(dbProblem(problem, file.name));
         });
     }
 }
@@ -812,10 +747,9 @@ function swapIn(table, look) {
 //
 //  (It shows the first sheet that isn't hidden.  "2 of 3"  =  the 1st one was hidden.)
 //
-//    A SQL dump says so too,  and a SQLite database:
+//    A SQL dump says so too:
 //
 //        SQL DUMP  ·  MySQL  ·  users  ·  2 of 5 tables
-//        SQLITE DATABASE  ·  users  ·  2 of 5 tables
 //
 //    A CSV?  No badge.
 //    (An Excel file or a SQL dump keeps its badge in BOTH looks,  so flipping never moves anything above the window.)
@@ -844,7 +778,7 @@ function showBadge() {
     }
 
     if (sqlInfo !== null) {
-        fileBadge.textContent = (sqlInfo.format === 'db' ? 'SQLITE DATABASE' : 'SQL DUMP' + (sqlInfo.dialect ? '  ·  ' + sqlInfo.dialect : '')) + '  ·  ' + sqlInfo.sheetName +
+        fileBadge.textContent = 'SQL DUMP' + (sqlInfo.dialect ? '  ·  ' + sqlInfo.dialect : '') + '  ·  ' + sqlInfo.sheetName +
             (sqlInfo.sheetCount > 1 ? '  ·  ' + sqlInfo.sheetNumber + ' of ' + sqlInfo.sheetCount + ' tables' : '');
         fileBadge.hidden = false;
         return;
@@ -911,10 +845,9 @@ function showSheetTabs() {
             tab.title = 'A chart sheet:  it has no rows to show.';
         } else if (!current) {
             const file = book.file;                             //  (the file, as it is right now)
-            const wal  = book.wal || null;                      //  (a database's -wal file:  read with it again)
             tab.title = 'Open the ' + (book === sqlInfo ? 'table' : 'sheet') + ' "' + sheet.name + '"';
             tab.addEventListener('click', function () {
-                loadFile(file, i, wal);
+                loadFile(file, i);
             });
         }
 
@@ -3698,8 +3631,6 @@ async function loadOtherTable(sheet, isCurrent) {
     setLoadingLabel('Reading "' + sheet.name + '"...');
     const result = t.excel !== null
         ? await readXlsx(file, isCurrent, sheet.index)
-        : t.sql.format === 'db'
-        ? await readDb(file, isCurrent, sheet.index, t.sql.wal)         //  (a database:  only that table's pages are read)
         : await readSql(await file.text(), file, isCurrent, sheet.index);
 
     const rows = cutCsvText(result.text);
@@ -4173,9 +4104,9 @@ function buildFromSql(text) {
         return k === -1 ? null : columns[k];
     }
 
-    //  A value  (words or a number,  a long whole number too)   ->   what the builder's value box holds   (or null)
+    //  A value  (words or a number)   ->   what the builder's value box holds   (or null)
     function valueOf(e) {
-        return e !== null && e.t === 'lit' && (typeof e.v === 'string' || typeof e.v === 'number' || typeof e.v === 'bigint') ? String(e.v) : null;
+        return e !== null && e.t === 'lit' && (typeof e.v === 'string' || typeof e.v === 'number') ? String(e.v) : null;
     }
 
     //  A total the builder has:   COUNT(*)  COUNT(x)  COUNT(DISTINCT x)  SUM  AVG  MIN  MAX  MEDIAN   ->   { fn, col }   (or null)
