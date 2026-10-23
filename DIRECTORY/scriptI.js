@@ -3587,9 +3587,20 @@ function engineTable(table, name) {
         declared: typed ? sql.columns.map(function (c) { return c.type; }) : null,
         rowCount: table.count,
         row: function (i) { return splitIntoCells(tableRowText(table, i)); },
+        rowUpTo: function (i, count) { return cellsUpTo(tableRowText(table, i), count); },     //  just the first  count  cells
         isNull: sql !== null ? function (i, j) { return sqlIsNull(sql, i + 1, j); } : null,
         emptyIsNull: sql === null,         //  a CSV or Excel file:  an empty cell means NULL  (it has no other way to say it)
     };
+}
+
+//  Just the first  count  cells of a line   (a question about column 3 of a 10,000-column file doesn't cut the other 9,997).
+//  No quotes in those cells?  One quick  split.   Quotes?  The careful way  (splitIntoCells),  then keep the first  count.
+function cellsUpTo(line, count) {
+    const first = line.split(',', count);
+    for (let k = 0; k < first.length; k++) {
+        if (first[k].indexOf('"') !== -1) return splitIntoCells(line).slice(0, count);
+    }
+    return first;
 }
 
 //  Cut CSV text  (an Excel sheet or a SQL table,  turned into CSV by the translator)  into rows of cells.
@@ -3727,16 +3738,34 @@ function queryColumns() { return columnNames(fileTable.engine); }
 function queryKinds()   { return columnKinds(fileTable.engine); }
 
 //  A little drop-down list.   options  =  [[value, words]]
+//  A LONG one  (a file with thousands of columns)?  Its options are only made when you OPEN it.
+//  (5 lists x 10,000 columns = 50,000 options,  made on every load AND on every pick:  ~0.1 s each time.)
+//  Until then it holds just the one that's picked,  and the longest one  (so it's already as wide as it'll be).
+const LAZY_LIST = 200;
+
 function pickList(options, chosen, label, onPick) {
     const list = document.createElement('select');
     list.setAttribute('aria-label', label);
-    options.forEach(function (o) {
-        const option = document.createElement('option');
-        option.value = o[0];
-        option.textContent = o[1];
-        if (o[0] === chosen) option.selected = true;
-        list.appendChild(option);
-    });
+    function fillWith(some) {
+        const box = document.createDocumentFragment();
+        some.forEach(function (o) {
+            const option = document.createElement('option');
+            option.value = o[0];
+            option.textContent = o[1];
+            if (o[0] === chosen) option.selected = true;
+            box.appendChild(option);
+        });
+        list.appendChild(box);
+    }
+    if (options.length <= LAZY_LIST) fillWith(options);
+    else {
+        const picked = options.find(function (o) { return o[0] === chosen; }) || options[0];
+        const longest = options.reduce(function (a, o) { return o[1].length > a[1].length ? o : a; }, picked);
+        fillWith(longest === picked ? [picked] : [picked, longest]);
+        let full = false;
+        const fill = function () { if (full) return; full = true; list.textContent = ''; fillWith(options); };
+        ['mousedown', 'focus', 'keydown', 'touchstart'].forEach(function (e) { list.addEventListener(e, fill, { passive: true }); });
+    }
     list.addEventListener('change', function () { onPick(list.value); });
     return list;
 }
@@ -3966,7 +3995,7 @@ function builderSql() {
     //  (A column's TYPE is only worked out when a condition needs it:  that looks at up to 20,000 rows,
     //   too much to do for every new file just in case.)
     const columns = queryColumns();
-    function kindOf(col) { return queryKinds()[columns.indexOf(col)]; }
+    function kindOf(col) { return kindAt(fileTable.engine, columns.indexOf(col)); }      //  (just that column's:  a wide file has thousands)
 
     const grouped = build.group.length > 0 || build.totals.length > 0;
     const names = totalNames();
@@ -4455,6 +4484,7 @@ async function showAnswer(result, text, ms, isCurrent) {
     const starts  = new Uint32Array(rows.length + 1);
     const nullRows = [], nullCols = [];
     const parts = [];
+    const pieces = [];                                  //  each bite's lines,  glued into ONE piece at the end of that bite
     const cells = new Array(cols.length);
     let at = 0;
     let work = 0;                                       //  cells written since the clock was last checked
@@ -4465,6 +4495,9 @@ async function showAnswer(result, text, ms, isCurrent) {
         work += cols.length;
         if (((r & 1023) === 1023 || work >= BITE_CELLS) && performance.now() >= stopAt) {
             setProgress(0.9 + 0.1 * r / rows.length);
+            //  (Gluing as it goes:  270,000 lines glued in ONE go at the end held the page still for ~50 ms.)
+            pieces.push(parts.join(''));
+            parts.length = 0;
             await new Promise(function (go) { nextBite(go); });
             if (!isCurrent()) throw QUERY_STALE;
             stopAt = performance.now() + CHUNK_TIME;
@@ -4498,8 +4531,9 @@ async function showAnswer(result, text, ms, isCurrent) {
         result: { sql: text, ms: ms, rows: rows.length, from: mainTableName(), fixes: result.fixes || [] },
     };
 
+    pieces.push(parts.join(''));
     const table = {
-        header: header, text: parts.join(''), starts: starts, count: rows.length, longest: longest,
+        header: header, text: pieces.length === 1 ? pieces[0] : pieces.join(''), starts: starts, count: rows.length, longest: longest,
         excel: null, sql: info, name: fileTable.file.name,
         note: result.count > 1 ? '  ·  ran the last of ' + result.count + ' queries' : '',
     };

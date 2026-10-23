@@ -13623,11 +13623,24 @@ async function readyQuery(text, catalog, isCurrent) {
     if (!isCurrent()) throw QUERY_STALE;
 
     //  Their column types:  worked out first,  in bites  (then compiling just reads them).
+    //  Only the columns the question NAMES   (SELECT *,  or a NATURAL / USING join:  all of them).
+    const named = new Set();
+    let everything = false;
+    (function look(node) {
+        if (node === null || typeof node !== 'object') return;
+        if (Array.isArray(node)) { node.forEach(look); return; }
+        if (node.t === 'col') named.add(String(node.name).toLowerCase());
+        if (node.star === true && node.t === undefined) everything = true;          //  SELECT *   /   t.*
+        if (node.t === 'join' && (node.natural || node.using)) everything = true;
+        for (const k in node) if (node[k] !== null && typeof node[k] === 'object') look(node[k]);
+    })(picked);
     let stopAt = performance.now() + CHUNK_TIME;
     for (const name of wanted) {
         const table = catalog.find(name);
         if (table === null) continue;                   //  (a WITH table,  or a mistake:  compiling says so)
-        const looking = lookAtKinds(table);
+        const only = everything ? undefined : [];
+        if (!everything) columnNames(table).forEach(function (n, j) { if (named.has(n.toLowerCase())) only.push(j); });
+        const looking = lookAtKinds(table, only);
         while (!looking.next().done) {
             if (performance.now() >= stopAt) {
                 await new Promise(function (go) { nextBite(go); });
@@ -13638,15 +13651,16 @@ async function readyQuery(text, catalog, isCurrent) {
     }
 
     const plan = compileQuery(picked, null, { catalog: catalog, ctes: new Map(), owner: null });
-    return { statements: statements, picked: picked, plan: plan };
+    return { statements: statements, picked: picked, plan: plan, stopAt: stopAt };
 }
 
 //  Run a compiled question,  in bites.
+//  (The clock carries on from getting ready:  the first bite is ONE bite long,  not getting-ready + a bite.)
 async function runPlan(ready, isCurrent, progress) {
 
     const plan = ready.plan;
     const gen = plan.run({ outer: [] }, Infinity);
-    let stopAt = performance.now() + CHUNK_TIME;
+    let stopAt = ready.stopAt !== undefined ? ready.stopAt : performance.now() + CHUNK_TIME;
 
     for (;;) {
         const step = gen.next();
@@ -14308,7 +14322,7 @@ async function flexSnap(sql, picked, catalog, isCurrent) {
 //  The ONE way the file spells this word  (loosely the same,  but not exactly).   null:  none,  two,  or it's there as typed.
 async function flexSpelling(ask, isCurrent) {
     const want = flexLoose(ask.word);
-    const table = ask.table, n = table.rowCount, width = Math.max(table.columns.length, 1);
+    const table = ask.table, n = table.rowCount, width = table.rowUpTo ? ask.col + 1 : Math.max(table.columns.length, 1);
     let found = null, work = 0, stopAt = performance.now() + CHUNK_TIME;
     for (let i = 0; i < n; i++) {
         work += width;
@@ -14320,7 +14334,7 @@ async function flexSpelling(ask, isCurrent) {
                 stopAt = performance.now() + CHUNK_TIME;
             }
         }
-        const v = table.row(i)[ask.col];
+        const v = (table.rowUpTo ? table.rowUpTo(i, ask.col + 1) : table.row(i))[ask.col];
         if (v === undefined || v === '') continue;
         if (v === ask.word) return null;                //  it IS in the file,  just as you typed it:  something else left no rows
         if (flexLoose(v) !== want) continue;
@@ -15269,67 +15283,102 @@ function lookLiteral(node, otherTy) {
 | `return null` (nothing to look at) | A plain `1200` is NOT a look: it needs no help. And `007` stays a code, like before. |
 | `lookLiteral` | `'$100,000'` written IN a question, next to a number: it's the number 100000. |
 
-**2.** Each column's look is worked out WITH its kind, by `lookAtKinds`. Right after `columnKinds`, a way to ask for the looks:
+**2.** Each column's look is worked out WITH its kind, by `lookAtKinds`. Replace `columnKinds` and `lookAtKinds` with these. (They also do the speed tricks of Step 11.10: a column's kind and look are worked out only when a question needs that column.)
 
 ```js
+//  Every column's kind  (all of them:  the ones not worked out yet are,  now).
+function columnKinds(table) {
+    runNow(lookAtKinds(table));
+    return table.kinds;
+}
+
 //  Each column's LOOK  (money,  1,200,  12%),  or null   (worked out together with the kinds).
 function columnLooks(table) {
-    if (!table.kinds) runNow(lookAtKinds(table));
+    runNow(lookAtKinds(table));
     return table.looks;
 }
-```
 
-...and `lookAtKinds`, all of it (replace the old one):
+//  ONE column's kind  /  look   (worked out now,  if it isn't yet).
+//  (Safety:  a question that keeps asking for columns one by one?  After a few,  just do all the rest at once:
+//   then it's never slower than looking at every column was.)
+function kindAt(table, j) {
+    if (!table.kinds || table.kinds[j] === undefined) {
+        table.misses = (table.misses || 0) + 1;
+        runNow(lookAtKinds(table, table.misses > 4 ? undefined : [j]));
+    }
+    return table.kinds[j];
+}
+function lookAt(table, j) {
+    kindAt(table, j);
+    return table.looks[j];
+}
+```
 
 ```js
 //  The looking itself:  a generator  (see RUN),  so runQuery can do it in bites before a question
 //  (20,000 rows of a wide file,  all at once,  would stop the page for a moment).
-function* lookAtKinds(table) {
-
-    if (table.kinds) return;
+//  only  =  which columns to look at  (their numbers).   Left out:  all of them.
+//  (A question about 2 columns of a 10,000-column file only needs THOSE 2.   The others wait until they're asked for.)
+function* lookAtKinds(table, only) {
 
     const width = table.columns.length;
+    if (!table.kinds) {
+        table.kinds = new Array(width);                 //  (undefined  =  not worked out yet)
+        table.looks = new Array(width).fill(null);
+    }
+    const kindsOut = table.kinds, looksOut = table.looks;
 
     if (table.declared) {
-        table.kinds = table.columns.map(function (name, j) {
+        for (let j = 0; j < width; j++) {               //  (its types are written down:  they win.   No looks.)
             const declared = table.declared[j];
-            return declared ? typeClass(declared) : 'text';
-        });
-        table.looks = table.columns.map(function () { return null; });     //  (its types are written down:  they win)
+            kindsOut[j] = declared ? typeClass(declared) : 'text';
+        }
         return;
     }
 
-    const canInt = new Array(width).fill(true);
-    const canReal = new Array(width).fill(true);
-    const canDate = new Array(width).fill(true);
-    const canTime = new Array(width).fill(true);
-    const canLook = new Array(width).fill(true);        //  every cell a number,  some with a look  ($116,450.00)?
-    const looks = new Array(width).fill(null);
-    const anything = new Array(width).fill(false);
+    //  The columns still to do  (in order)
+    const wanted = only === undefined ? null : new Set(only);
+    const todo = [];
+    for (let j = 0; j < width; j++) if (kindsOut[j] === undefined && (wanted === null || wanted.has(j))) todo.push(j);
+    if (todo.length === 0) return;
+    const m = todo.length;
+    const upTo = todo[m - 1] + 1;                       //  cut each row only this far
+
+    const canInt = new Array(m).fill(true);
+    const canReal = new Array(m).fill(true);
+    const canDate = new Array(m).fill(true);
+    const canTime = new Array(m).fill(true);
+    const canLook = new Array(m).fill(true);            //  every cell a number,  some with a look  ($116,450.00)?
+    const looks = new Array(m).fill(null);
+    const anything = new Array(m).fill(false);
 
     const n = table.rowCount;
-    const look = Math.min(n, SAMPLE_ROWS);
-    const step = n / look;
+    const sample = Math.min(n, SAMPLE_ROWS, Math.max(1000, Math.floor(SAMPLE_CELLS / Math.max(m, 1))));
+    const step = n / sample;
+    const partial = table.rowUpTo && upTo < width;
 
     let work = 0;                   //  cells looked at since the last breath
-    for (let s = 0; s < look; s++) {
-        work += width;
+    for (let s = 0; s < sample; s++) {
+        work += upTo;
         if ((s & 511) === 511 || work >= BITE_CELLS) { work = 0; yield; }
-        const cells = table.row(Math.floor(s * step));
-        for (let j = 0; j < width && j < cells.length; j++) {
+        const r = Math.floor(s * step);
+        const cells = partial ? table.rowUpTo(r, upTo) : table.row(r);
+        for (let k = 0; k < m; k++) {
+            const j = todo[k];
+            if (j >= cells.length) continue;
             const v = cells[j];
             if (v === '') continue;
-            anything[j] = true;
-            if (canInt[j] && !CELL_INT.test(v)) canInt[j] = false;
-            if (canReal[j] && !CELL_REAL.test(v)) canReal[j] = false;
-            if (canDate[j] && !CELL_DATE.test(v)) canDate[j] = false;
-            if (canTime[j] && !CELL_TIME.test(v) && !CELL_DATE.test(v)) canTime[j] = false;
-            if (canLook[j] && !CELL_REAL.test(v)) {                 //  (a plain number fits a money column too:  0,  1200)
+            anything[k] = true;
+            if (canInt[k] && !CELL_INT.test(v)) canInt[k] = false;
+            if (canReal[k] && !CELL_REAL.test(v)) canReal[k] = false;
+            if (canDate[k] && !CELL_DATE.test(v)) canDate[k] = false;
+            if (canTime[k] && !CELL_TIME.test(v) && !CELL_DATE.test(v)) canTime[k] = false;
+            if (canLook[k] && !CELL_REAL.test(v)) {                 //  (a plain number fits a money column too:  0,  1200)
                 const L = lookOf(v);
-                const was = looks[j];
-                if (L === null) canLook[j] = false;
-                else if (was === null) looks[j] = { pre: L.pre, post: L.post, commas: L.commas, places: L.places, parens: L.parens };
-                else if (was.pre !== L.pre || was.post !== L.post) canLook[j] = false;     //  $ AND € in one column?  Which is it?  Words.
+                const was = looks[k];
+                if (L === null) canLook[k] = false;
+                else if (was === null) looks[k] = { pre: L.pre, post: L.post, commas: L.commas, places: L.places, parens: L.parens };
+                else if (was.pre !== L.pre || was.post !== L.post) canLook[k] = false;     //  $ AND € in one column?  Which is it?  Words.
                 else {
                     if (L.places > was.places) was.places = L.places;
                     if (L.commas) was.commas = true;
@@ -15339,17 +15388,17 @@ function* lookAtKinds(table) {
         }
     }
 
-    const money = function (j) { return anything[j] && !canInt[j] && !canReal[j] && canLook[j] && looks[j] !== null; };
-    table.kinds = canInt.map(function (x, j) {
-        if (!anything[j]) return 'text';
-        if (canInt[j]) return 'int';
-        if (canReal[j]) return 'real';
-        if (money(j)) return looks[j].places > 0 ? 'real' : 'int';
-        if (canDate[j]) return 'date';
-        if (canTime[j]) return 'timestamp';
-        return 'text';
-    });
-    table.looks = looks.map(function (L, j) { return money(j) ? L : null; });
+    for (let k = 0; k < m; k++) {
+        const money = anything[k] && !canInt[k] && !canReal[k] && canLook[k] && looks[k] !== null;
+        kindsOut[todo[k]] = !anything[k] ? 'text'
+            : canInt[k] ? 'int'
+            : canReal[k] ? 'real'
+            : money ? (looks[k].places > 0 ? 'real' : 'int')
+            : canDate[k] ? 'date'
+            : canTime[k] ? 'timestamp'
+            : 'text';
+        looksOut[todo[k]] = money ? looks[k] : null;
+    }
 }
 ```
 
@@ -15358,30 +15407,10 @@ function* lookAtKinds(table) {
 | `table.looks` | Next to `table.kinds`: each column's look (`$`, commas, 2 places), or `null`. |
 | `canLook` / `looks` | 2 more notes per column, next to `canInt` ...: is every cell a number (some with a look)? And which look? |
 | `$` AND `€` in one column | Not clear what the column IS: it stays words, like before. One cell like `N/A` too. Better a column of words than wrong numbers. |
-| `if (money(j)) return ... 'real' : 'int'` | A money column is a number: `real` (or `int`, when it never has cents). |
+| `money ? (places > 0 ? 'real' : 'int')` | A money column is a number: `real` (or `int`, when it never has cents). |
 | `table.declared` | A SQL dump writes its types down: they win (no looks). |
 
-**3.** Reading the rows. At the top of `tableSource`, each column gets its look (replace the `kinds` and `cols` lines):
-
-```js
-    const kinds = columnKinds(table);
-    const looks = columnLooks(table);
-    const cols  = names.map(function (n, j) { const c = newCol(n, alias, kinds[j]); c.look = looks[j]; return c; });
-```
-
-...and in its `scan`, a money cell becomes its number. Under the `numeric` line:
-
-```js
-            const looked  = used.map(function (j) { return looks[j] !== null; });       //  money:  $116,450.00  ->  116450
-```
-
-...and under the `numeric[u] && CELL_REAL.test(s)` line:
-
-```js
-                        else if (looked[u]) { const L = lookOf(s); v = L === null ? s : L.n; }
-```
-
-In `resolveColumn`'s `found`, the look comes along with the column it found (so `LIKE` can use it):
+**3.** Reading the rows: in `tableSource` (Step 11.10), a money cell becomes its number: `looked[u] ? money(s)`. In `resolveColumn`'s `found`, the look comes along with the column it found (so `LIKE` can use it):
 
 ```js
         const col = sc.grouped ? null : sc.cols[idx];
@@ -15511,7 +15540,7 @@ function answerLooks(picked, plan, catalog) {
         for (const s of tables) {
             if (e.table !== null && s.keys.indexOf(String(e.table).toLowerCase()) === -1) continue;
             const j = columnNames(s.table).map(function (n) { return n.toLowerCase(); }).indexOf(String(e.name).toLowerCase());
-            if (j !== -1) return columnLooks(s.table)[j];
+            if (j !== -1) return lookAt(s.table, j);
         }
         return null;
     }
@@ -15579,6 +15608,268 @@ To test "does it find the right rows", a tester (`tools/query-test/fuzz.js`) mak
 
 <br>
 
+### Step 11.10: Faster on big and WIDE files
+
+Measured first, changed second, measured again (and kept only what really helped). The big one: on a WIDE file (`square_10000.csv`: 10,000 columns), every question looked at all 10,000 columns, even one about column 1:
+
+| `square_10000.csv`  (straight through the engine, in the page) | Before | After |
+|---|---|---|
+| `SELECT C1, COUNT(*) ... GROUP BY 1` | ~10 s | **56 ms** |
+| `SELECT * ... WHERE C1 > 9990` | 5.3 s | **0.73 s** |
+| `square_5000.csv`: `SELECT * ... WHERE C1 > 4990` | 2.9 s | **0.36 s** |
+| 1 million rows: `SELECT * ... WHERE price > 499` | 346 ms | **266 ms** |
+| 1 million rows sorted: the longest the page stood still | 84–98 ms | **18 ms** |
+| any question: its first bite | ~23 ms | **12 ms** (one bite, like the rest) |
+| a 10,000-column file opening: the query menu's lists | 67 ms | **8 ms** |
+
+Four tricks:
+
+| Trick | Baby words |
+|---|---|
+| **Cut only as far as needed** | A question about column 3 cuts each row into 3 cells, not 10,000 (`rowUpTo`). |
+| **Types only for the columns named** | `readyQuery` works out the kinds of the columns the question NAMES. `SELECT *` needs them all. A wide file samples fewer rows (`SAMPLE_CELLS`): 400 rows x 10,000 columns, not 20,000 x 10,000. |
+| **WHERE first** | One table? It tests the WHERE with ONLY the WHERE's columns, and cuts the rest of a row only if it passes. |
+| **No long stops** | A sort's row numbers go in a typed list (`Int32Array`: cheap for the browser's cleaner-upper), and every big loop takes breaths. |
+
+**1.** The brain's table gets a 2nd way to read a row: just the first `count` cells. Next to `row:` in `engineTable`:
+
+```js
+        rowUpTo: function (i, count) { return cellsUpTo(tableRowText(table, i), count); },     //  just the first  count  cells
+```
+
+...using this, right above `cutCsvText`:
+
+```js
+//  Just the first  count  cells of a line   (a question about column 3 of a 10,000-column file doesn't cut the other 9,997).
+//  No quotes in those cells?  One quick  split.   Quotes?  The careful way  (splitIntoCells),  then keep the first  count.
+function cellsUpTo(line, count) {
+    const first = line.split(',', count);
+    for (let k = 0; k < first.length; k++) {
+        if (first[k].indexOf('"') !== -1) return splitIntoCells(line).slice(0, count);
+    }
+    return first;
+}
+```
+
+> **`split(',', count)`?** "Cut at the commas, but stop after `count` pieces." The browser really stops there: a 10,000-cell row, cut to 2 cells, takes 0.1 µs instead of 300 µs.
+
+**2.** `tableSource`, all of it (replace the old one). The columns get their kinds when first asked (`Object.defineProperty ... get`); each row is cut only as far as the last column used; and a WHERE (`pre`) is tested first:
+
+```js
+function tableSource(table, alias) {
+
+    const names = columnNames(table);
+    //  Each column's kind and look are read the first time they're needed  (readyQuery already worked out the ones the
+    //  question names:  a question about 2 columns of a 10,000-column file never looks at the other 9,998).
+    const cols  = names.map(function (n, j) {
+        const c = newCol(n, alias, null);
+        Object.defineProperty(c, 'ty',   { get: function () { return kindAt(table, j); }, enumerable: true });
+        Object.defineProperty(c, 'look', { get: function () { return lookAt(table, j); }, enumerable: true });
+        return c;
+    });
+    const width = cols.length;
+
+    return {
+        cols: cols,
+        canTestFirst: true,             //  it can test a WHERE itself,  before cutting the whole row  (see  pre  below)
+
+        //  pre  (from compileCore,  when there's a WHERE):   { test,  cols }   the WHERE,  and the columns it reads.
+        //  Then each row is cut only as far as the WHERE needs,  and tested:  only a row that PASSES gets the rest of its
+        //  cells cut.   (SELECT * ... WHERE id = 7  on a 10,000-column file:  1 cell a row,  not 10,000.)
+        scan: function* (env, sink, pre) {
+
+            //  Only the columns the query USES get turned into values  (a query about 2 columns of 40 is much quicker).
+            const used = [];
+            for (let j = 0; j < width; j++) if (cols[j].used) used.push(j);
+            const numeric = used.map(function (j) { const k = kindAt(table, j); return k === 'int' || k === 'real' || k === 'num'; });
+            const looked  = used.map(function (j) { return lookAt(table, j) !== null; });     //  money:  $116,450.00  ->  116450
+            const isNull = table.isNull || null;
+            const emptyIsNull = table.emptyIsNull !== false;
+            const n = table.rowCount;
+            const emptyRow = new Array(width).fill(null);
+            //  Cut each row only as far as the LAST column used   (column 3 of 10,000:  3 cells,  not 10,000).
+            const upTo = used.length === 0 ? 0 : used[used.length - 1] + 1;
+
+            const cutAll = table.rowUpTo && upTo < width;                  //  cut only part of each row?
+
+            //  An empty cell:  NULL,  or really empty words  ('')   (a SQL dump says which;  a CSV can't,  so it's NULL)
+            function empty(i, j) { return (isNull !== null && isNull(i, j)) || (isNull === null && emptyIsNull) ? null : ''; }
+            //  Money:  $116,450.00  ->  116450   (a cell that doesn't fit stays as words)
+            function money(s) { const L = lookOf(s); return L === null ? s : L.n; }
+
+            //  The WHERE's own columns,  and the rest
+            let preU = null, restU = null, preUpTo = 0;
+            if (pre) {
+                const inPre = new Set(pre.cols);
+                preU = []; restU = [];
+                for (let u = 0; u < used.length; u++) (inPre.has(used[u]) ? preU : restU).push(u);
+                preUpTo = preU.length === 0 ? 0 : used[preU[preU.length - 1]] + 1;
+            }
+            const nPre = pre ? preU.length : 0, nRest = pre ? restU.length : 0;
+            //  Cut in TWO steps  (the WHERE's part,  then the rest only for rows that pass)  only when that saves real work:
+            //  more than 16 cells past the WHERE's.   Otherwise ONE cut is enough for both:  on a 6-column file,  most rows
+            //  pass,  and cutting them twice made a big  SELECT * ... WHERE  10% slower.
+            const testTo = pre && table.rowUpTo && upTo - preUpTo > 16 ? preUpTo : upTo;
+            const cutPre = pre && table.rowUpTo && testTo < width;
+            const preCovers = cutPre ? testTo : width;                      //  how far the test's cutting goes
+            const scratch = pre ? new Array(width).fill(null) : null;     //  (the test row:  reused,  only the WHERE's cells filled in)
+            const nUsed = used.length;
+
+            let work = 0;                   //  cells cut since the last breath
+
+            for (let i = 0; i < n; i++) {
+
+                work += pre ? (preUpTo > 0 ? preUpTo : 1) : nUsed === 0 ? 1 : upTo;
+                if ((i & 1023) === 1023 || work >= BITE_CELLS) { work = 0; yield i / n; }
+
+                //  (The cell -> value lines below are written out in each loop,  not in a little function:
+                //   this runs for every cell of a million rows,  and the calls cost about 10%.)
+                if (pre) {
+                    let cells = null;
+                    if (nPre > 0) {
+                        cells = cutPre ? table.rowUpTo(i, testTo) : table.row(i);
+                        for (let k = 0; k < nPre; k++) {
+                            const u = preU[k], j = used[u], s = cells[j];
+                            scratch[j] = s === undefined ? null : s === '' ? empty(i, j) : numeric[u] && CELL_REAL.test(s) ? Number(s) : looked[u] ? money(s) : s;
+                        }
+                    }
+                    if (!truthy(pre.test(scratch, env))) continue;                 //  doesn't pass:  the rest is never cut
+                    if (nUsed === 0) { if (!sink(emptyRow)) return; continue; }
+                    const row = new Array(width);
+                    for (let k = 0; k < nPre; k++) { const j = used[preU[k]]; row[j] = scratch[j]; }
+                    if (nRest > 0) {
+                        if (cells === null || upTo > preCovers) cells = cutAll ? table.rowUpTo(i, upTo) : table.row(i);
+                        work += upTo;
+                        for (let k = 0; k < nRest; k++) {
+                            const u = restU[k], j = used[u], s = cells[j];
+                            row[j] = s === undefined ? null : s === '' ? empty(i, j) : numeric[u] && CELL_REAL.test(s) ? Number(s) : looked[u] ? money(s) : s;
+                        }
+                    }
+                    if (!sink(row)) return;
+                    continue;
+                }
+
+                //  (No columns used at all,  like COUNT(*)?   Then every row can be the same empty one.)
+                const row = nUsed === 0 ? emptyRow : new Array(width);
+                if (nUsed > 0) {
+                    const cells = cutAll ? table.rowUpTo(i, upTo) : table.row(i);
+                    for (let u = 0; u < nUsed; u++) {
+                        const j = used[u], s = cells[j];
+                        row[j] = s === undefined ? null : s === '' ? empty(i, j) : numeric[u] && CELL_REAL.test(s) ? Number(s) : looked[u] ? money(s) : s;
+                    }
+                }
+                if (!sink(row)) return;
+            }
+        },
+    };
+}
+```
+
+| Code | Baby words |
+|---|---|
+| `get: function () { return kindAt(table, j); }` | The column's kind, worked out the first time anything asks. A question about 2 columns never asks for the other 9,998. |
+| `testTo` | Cut in TWO steps only when that saves real work (more than 16 cells past the WHERE's). On a 6-column file most rows pass anyway, and cutting them twice was 10% SLOWER (measured). |
+| `scratch` | The test row: ONE list, reused for every row. Only the WHERE's cells are filled in. |
+| The value lines, written out 3 times | They run for every cell of a million rows: in a little function, the calls cost ~10% (measured). |
+
+**3.** In `compileCore`, right after `const where = ...`: one table? It tests the WHERE itself. (Right there, the "used" columns are exactly the WHERE's: nothing else is compiled yet.)
+
+```js
+    const pushed = where !== null && src.canTestFirst === true;
+    const pre = pushed ? { test: where, cols: src.cols.map(function (col, j) { return col.used ? j : -1; }).filter(function (j) { return j !== -1; }) } : null;
+```
+
+...and the 3 `src.scan(...)` calls in `compileCore`'s `run` pass it along, and don't test the WHERE again when the table already did (`!pushed`). The plain one:
+
+```js
+            if (!grouped && windows.length === 0) {
+                yield* src.scan(env, function (row) {
+                    if (!pushed && where !== null && !truthy(where(row, env))) return true;
+                    return emit(row);
+                }, pre);
+                return out;
+            }
+```
+
+(The grouped one: `if (!pushed && where !== null ...)` and `}, pre);` the same way. The windows one: `if (pushed || where === null || ...) level.push(row);` and `}, pre);`.)
+
+**4.** The sort (`sortByKeys`): row numbers in a typed list, and breaths:
+
+```js
+        const list = new Int32Array(n);
+        for (let r = 0; r < n; r++) list[r] = r;
+        order = yield* sortRows(list, compare);
+```
+
+```js
+    let from = rows, to = ArrayBuffer.isView(rows) ? new Int32Array(n) : new Array(n);     //  (row numbers:  typed,  like the list)
+```
+
+...and after a sort, the extra columns come off IN PLACE (a copy of each of a million rows was the last ~70 ms freeze):
+
+```js
+            //  The sort's extra columns  (ORDER BY something not shown)  come off.   In place:  these rows were made just for
+            //  this answer,  and a copy of each of a million rows cost ~70 ms  (plus the cleaning up after).
+            for (let k = 0; k < rows.length; k++) {
+                if (rows[k].length > width) rows[k].length = width;
+                if ((k & 65535) === 65535) yield;
+            }
+```
+
+**5.** The query menu's long lists (`pickList`): a list with more than 200 choices (a file with thousands of columns) only makes them when you open it:
+
+```js
+//  A little drop-down list.   options  =  [[value, words]]
+//  A LONG one  (a file with thousands of columns)?  Its options are only made when you OPEN it.
+//  (5 lists x 10,000 columns = 50,000 options,  made on every load AND on every pick:  ~0.1 s each time.)
+//  Until then it holds just the one that's picked,  and the longest one  (so it's already as wide as it'll be).
+const LAZY_LIST = 200;
+
+function pickList(options, chosen, label, onPick) {
+    const list = document.createElement('select');
+    list.setAttribute('aria-label', label);
+    function fillWith(some) {
+        const box = document.createDocumentFragment();
+        some.forEach(function (o) {
+            const option = document.createElement('option');
+            option.value = o[0];
+            option.textContent = o[1];
+            if (o[0] === chosen) option.selected = true;
+            box.appendChild(option);
+        });
+        list.appendChild(box);
+    }
+    if (options.length <= LAZY_LIST) fillWith(options);
+    else {
+        const picked = options.find(function (o) { return o[0] === chosen; }) || options[0];
+        const longest = options.reduce(function (a, o) { return o[1].length > a[1].length ? o : a; }, picked);
+        fillWith(longest === picked ? [picked] : [picked, longest]);
+        let full = false;
+        const fill = function () { if (full) return; full = true; list.textContent = ''; fillWith(options); };
+        ['mousedown', 'focus', 'keydown', 'touchstart'].forEach(function (e) { list.addEventListener(e, fill, { passive: true }); });
+    }
+    list.addEventListener('change', function () { onPick(list.value); });
+    return list;
+}
+```
+
+> **Why also the LONGEST name?** A list is as wide as its widest choice. With the longest one already in, the list doesn't jump wider when it fills.
+
+**6.** The answer's lines are glued together bite by bite (`pieces`), not all at the end (in `showAnswer`):
+
+```js
+            pieces.push(parts.join(''));
+            parts.length = 0;
+```
+
+```js
+    pieces.push(parts.join(''));
+```
+
+> **Measuring tip:** the speed tests in Node (`tools/query-test/speed.js`) used to load the engine in a "sandbox". In there, every `Math.` and `Number.` was ~200 times slower: `SUM` looked 400 times slower than it really is. Always measure the way it really runs.
+
+<br>
+
 ### ✅ Test it
 
 The test tables are in `Castle Claude/small-files/query/`.
@@ -15635,6 +15926,9 @@ The test tables are in `Castle Claude/small-files/query/`.
 | **A different color for the ticked checkbox** | `.query-option input:checked` -> `background:` and `border-color:` (it's `var(--sql)`, SQL blue). |
 | **Read another money sign as money** (like ₹ or ₩) | Add it to `[$€£¥]` in `CELL_LOOK` (`queryI.js`). |
 | **Show averages of money with more (or fewer) cents** | In `answerLooks`: `Math.max(L.places, 2)`. |
+| **Look at more (or fewer) cells when guessing a WIDE file's column types** | `SAMPLE_CELLS` in `queryI.js` (4,000,000). More = surer, slower: 10,000 columns x 20,000 rows took 7 s. |
+| **Make the query menu's lists fill only when opened at a different size** | `LAZY_LIST` in `scriptI.js` (200 choices). |
+| **Cut in two steps sooner (or later)** | In `tableSource`: `upTo - preUpTo > 16`. |
 | **Change the button colors** | `#viewBtn` → `background` (`#185c37`, the green) and `#viewBtn.to-csv` → `background` (`#020202`, the black). |
 | **Build more/fewer extra rows** | Change `EXTRA_ROWS`. More = safer for super-fast scrolling, but a little more work per scroll. |
 | **Make the glow stronger** | In `.cell:hover`, raise `14px 2px` to something like `20px 6px` |
@@ -15741,6 +16035,11 @@ The test tables are in `Castle Claude/small-files/query/`.
 | `salary LIKE '$116%'` finds nothing | `like` isn't using the column's `look` (it's matching `116450.0`). |
 | `7.9 % 3` gives `1.9` | `%` has to `Math.trunc` both sides first, like SQLite (Step 11.9). |
 | `select * from all` gives "Expected the query to end here" | Rule 3 in `flexFix` adds the table in front of `ALL` instead of swapping `ALL` for it. Only the next PART (`WHERE`, `GROUP` ...) gets the table in front. |
+| A question about ONE column of a wide file still takes seconds | The brain's table is missing `rowUpTo` (`engineTable`), or `readyQuery` works out every column's kind (`lookAtKinds(table, only)`: check `only`). |
+| A query gives a column the wrong kind (a number column read as words) | A column read before `readyQuery` worked it out uses `kindAt`: check `tableSource`'s `get: function () { return kindAt(table, j); }`. |
+| `SELECT * ... WHERE x = 1` gives rows that DON'T match | `compileCore` tests the WHERE twice wrong: with `pushed`, the scan already tested it (`!pushed && ...`). Without the table's test (`canTestFirst`), compileCore has to test it itself. |
+| The page stops for a moment at the END of a huge sort | `sortByKeys` makes plain lists (`new Array(n)`) instead of `Int32Array`, or the "extra columns come off" loop copies rows (`slice`) instead of `rows[k].length = width`. |
+| A drop-down list in the query menu is empty when you open it | `pickList`'s `fill` isn't listening for `mousedown` / `focus` / `keydown` / `touchstart`. |
 | Picking ANY file crashes with `Cannot set properties of null (setting 'hidden')` | The `<div id="fileBadge" hidden></div>` is missing from the skeleton (Step 5.1). |
 | An Excel file shows garbage letters (`PK...`) | The first-bytes check (Step 5.10 #5) is missing, so it got read as text. |
 | Excel dates show as numbers like `43586` | The date style wasn't found: check `styles` in `readXlsx` (it reads `<cellXfs>`), and that `formatKind` returns a kind for the format. |
@@ -15863,6 +16162,7 @@ The test tables are in `Castle Claude/small-files/query/`.
 - **Money columns have to be ONE look.** A column with `$` in some cells and `€` in others, or a cell like `N/A` in between, stays words (which is it? it doesn't guess). Europe's `1.234,56` stays words too (is `12,34` twelve, or 1234?). `12%` counts as **12** (what you see), not 0.12.
 - **An answer keeps the money look only for the column itself** (and its `SUM`, `MIN`, `MAX`, `AVG`, `TOTAL`). Math on it (`salary * 2`), or a UNION, gives a plain number.
 - **`LIKE` ignores big and small letters for EVERY letter** (`'%Ñ%'` finds `Núñez`). Real SQLite only does it for A to Z: this is one place it's kinder on purpose.
+- **A WIDE file's column types are a smaller guess.** It looks at up to 4 million cells (`SAMPLE_CELLS`): a 10,000-column file, 400 rows spread through it. `SELECT *` on it still has to guess every column (about 0.7 s for 10,000).
 
 - **It expects a header.** The first line is always treated as the column names.
 - **A quote that never closes still changes its OWN row.** The brain catches a stray `"` and keeps every other row safe, but in that one row, everything after the `"` lands in one cell. (`Bob,5'10",tall` → `[Bob] [5'10,tall]`.) The real fix is in the file.
