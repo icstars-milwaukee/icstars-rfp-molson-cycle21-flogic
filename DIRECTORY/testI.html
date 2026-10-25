@@ -186,12 +186,12 @@
         </div>
 
         <!--  THE QUERY MENU,  when you press "Ask".  It unfolds out of the button.   3 ways to ask,  always in step:
-                1.  YOUR OWN WORDS   ("average score for each grade level"),  and  TRY:  ready questions about THIS file
-                    (one press:  the answer).
-                2.  THE SENTENCE   (the builder):   Show [every column]  where [Score] [is over] [90]  sorted by ...
-                    Each blue word is a pick.   The parts you don't use wait on one line  ("+ where ...").
+                1.  TRY:  ready questions about THIS file   (one press:  the answer).
+                2.  THE SENTENCE   (the builder):   Show [every column]   where [Score] [contains] [90]  sorted by ...
+                    Show and where are always there,  glowing a little  (that's where you start).
+                    The parts you don't use wait on one line  ("+ for each ...").
                     Under it:  how many rows you'd get,  and the question in plain words  (before you ask).
-                3.  THE SQL it writes for you.   WRITE IT MYSELF  =  type your own  (the sentence waits while you do).
+                3.  THE SQL it writes for you.   WRITE IT MYSELF  =  type your own  (SQL,  or plain words:  the sentence waits).
               Then "Show answer":  the ANSWER takes the window's place  ("← Back to file" brings the file back).
               FIX MY TYPOS  (on at the start)  =  small SQL mistakes get fixed,  and you're told what changed
               (in amber if a fix left a condition out:  that answer has rows you meant to keep out).
@@ -201,9 +201,6 @@
             <div class="query-head">
                 <span id="queryTitle">Ask</span>
                 <button id="queryClose" type="button" aria-label="Close">×</button>
-            </div>
-            <div class="query-words-line">
-                <input type="text" id="queryWords" autocomplete="off" aria-label="Ask in your own words" placeholder="Ask in your own words, then press Enter">
             </div>
             <div id="queryTry" role="group" aria-label="Ready questions about this file"></div>
             <div id="queryBuilder" role="group" aria-label="Pick your question"></div>

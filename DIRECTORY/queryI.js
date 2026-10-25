@@ -4951,7 +4951,7 @@ function wordsExamples(catalog) {
 
 // ----------------------------------------------------------
 //
-//    PLAIN WORDS  ->  SQL   (the words box at the top of the query menu,  and plain words typed in the SQL box)
+//    PLAIN WORDS  ->  SQL   (plain words typed in the SQL box,  with "Fix my typos" on)
 //
 //        how many for each grade level             ->   SELECT "Grade Level", COUNT(*) FROM class_data GROUP BY "Grade Level"
 //        average score per grade level             ->   SELECT "Grade Level", AVG(Score) FROM class_data GROUP BY "Grade Level"

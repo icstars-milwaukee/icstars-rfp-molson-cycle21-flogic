@@ -3505,7 +3505,6 @@ const queryBtn     = document.getElementById('queryBtn');       //  "Ask"  (the 
 const queryMenu    = document.getElementById('queryMenu');      //  the menu it unfolds into
 const queryTitle   = document.getElementById('queryTitle');     //  its  "Ask  ·  sales  ·  1,204 rows"
 const queryClose   = document.getElementById('queryClose');     //  its  ×
-const queryWords   = document.getElementById('queryWords');     //  "Ask in your own words"
 const queryTry     = document.getElementById('queryTry');       //  "Try:  (How many for each Region) ..."   (the brain fills it in)
 const queryBuilder = document.getElementById('queryBuilder');   //  the sentence  (the brain fills it in)
 const queryMeaning = document.getElementById('queryMeaning');   //  "→ 4 rows  ·  Every row of sales where ..."
@@ -3533,7 +3532,6 @@ let queryFold   = null;     //  the "hide it once it's done folding" timer
 let limitOpen   = false;    //  "at most ... rows" shown,  but no number in it yet   (you pressed "+ at most")
 let previewId   = 0;        //  counts every "→ 4 rows" look-ahead  (a newer pick?  The old count stops)
 let previewWait = null;     //  ...and the little wait before it starts  (picking 3 things fast = one count)
-let wordsId     = 0;        //  counts every "Ask in your own words"  (asked again?  The old reading stops)
 
 //  What you picked in the builder.
 let build = newBuild();
@@ -3713,8 +3711,6 @@ function queryFileChanged() {
     limitOpen = false;
     setTypeMode(false);
     showFixes([], []);
-    queryWords.value = '';
-    queryWords.placeholder = 'Ask in your own words, then press Enter';
     queryTry.textContent = '';                          //  (the "Try:" questions come when the menu opens:  they need a look at the file)
 
     queryTitle.textContent = 'Ask  ·  ' + name + '  ·  ' + fileTable.table.count.toLocaleString() + ' row' + (fileTable.table.count === 1 ? '' : 's');
@@ -3862,13 +3858,14 @@ function totalNames(of) {
 //  Draw the sentence  (all of it,  every time something is picked:  it's small).
 //
 //      Show       [Student Name ×]  [+ column ▾]  [+ count or total ▾]
-//      where      [Score ▾] [is over ▾] [90] ×    [or ▾] [Letter Grade ▾] [is ▾] [A] ×    [+ and ▾]
+//      where      [Name ▾] [contains ▾] [jo] ×    [or ▾] [Letter Grade ▾] [is ▾] [A] ×    [+ and ▾]
 //      for each   [Grade Level ×]  [+ and ▾]
 //      sorted by  [Score ▾] [highest first ▾] ×    [+ then by ▾]
 //      at most    [ 10 ] rows ×
-//                 [+ where ▾]  [+ for each ▾]  [+ sorted by ▾]  [+ at most]      <- the parts not used yet,  on ONE line
+//                 [+ for each ▾]  [+ sorted by ▾]  [+ at most]      <- the parts not used yet,  on ONE line
 //
-//  Only the parts you use get a line:  a new file's sentence is just  "Show every column",  and that one line of more.
+//  Show and where are ALWAYS there  (a new file:  "Show every column",  "where [+ pick a column to search]"):
+//  that's where people start,  so they glow a little.   The other parts only get a line once you use them.
 //  Each line has a NAME that never changes  (data-part:  show,  where,  group,  sort,  limit,  more),  and so does each
 //  "+" list  (data-add:  what it adds).   The words can change;  the names don't  (tests and screen readers go by them).
 //  (focusNext:  which pick gets the keyboard after the redraw.   Add a condition  ->  you're typing its value right away.)
@@ -3951,7 +3948,12 @@ function drawBuilder() {
         }
         if (build.group.length > 0) hint(box, 'each different ' + build.group.join(' + '));
         else {
-            if (build.show.length === 0) hint(box, 'every column');
+            if (build.show.length === 0) {                  //  (a pill,  not faint words:  it IS what you'll get)
+                const all = document.createElement('span');
+                all.className = 'query-all';
+                all.textContent = 'every column';
+                box.appendChild(all);
+            }
             build.show.forEach(function (c, k) {
                 box.appendChild(key(chip(c, function () { build.show.splice(k, 1); changed(); }), 'show:' + k));
             });
@@ -3962,12 +3964,19 @@ function drawBuilder() {
     });
 
     //  WHERE:   [column] [how] [value] ×,  each one after the first starts with  [and ▾] / [or ▾]
+    //  Always there  (a new file too):  "find the rows with this word in them" is the first thing most people want.
+    //  A new condition starts as CONTAINS,  not "is":  people type the word they EXPECT to see,  and "contains"
+    //  (any capitals,  anywhere in the cell)  finds it.   "is" wants the whole cell,  exactly:  pick it when you mean that.
     function addCondition(v) {
-        build.filters.push({ col: v, op: '=', value: '' });
+        build.filters.push({ col: v, op: 'contains', value: '' });
         focusNext = 'where:' + (build.filters.length - 1) + ':value';
         changed();
     }
-    if (build.filters.length > 0) part('where', 'where', function (box) {
+    part('where', 'where', function (box) {
+        if (build.filters.length === 0) {
+            box.appendChild(adder('where', '+ pick a column to search ...', colOptions, 'Keep only the rows where a column has a word', addCondition));
+            return;
+        }
         build.filters.forEach(function (f, k) {
             const line = document.createElement('span');
             line.className = 'query-line';
@@ -4049,7 +4058,6 @@ function drawBuilder() {
 
     //  THE PARTS NOT USED YET,  on one line   (pick one:  its line shows up,  and the keyboard is already in it)
     const more = [];
-    if (build.filters.length === 0) more.push(adder('where', '+ where ...', colOptions, 'Keep only the rows where ...', addCondition));
     if (build.group.length === 0) more.push(adder('group', '+ for each ...', colOptions, 'One row for each ...', function (v) {
         build.group.push(v);
         if (build.totals.length === 0) build.totals.push({ fn: 'rows', col: null });     //  "for each Region"  ->  how many in each   (× it,  for just the different ones)
@@ -4253,40 +4261,6 @@ function askSql(sql) {
 }
 
 
-//  ---- IN YOUR OWN WORDS   (the box at the top:  queryI.js reads it,  readWords) ----
-//      every word understood   ->   asked,  right away   (the sentence shows how it was read)
-//      a word left over        ->   "Did you mean ...?   (I didn't use:  ...)"   [Ask that]  [Keep writing]
-//      nothing in it           ->   examples,  with THIS file's columns
-//  (SELECT ... typed here?   That's SQL:  it goes in the SQL box.)
-async function askInWords() {
-    const text = queryWords.value.trim();
-    if (text === '' || fileTable === null) return;
-    if (/^(select|with)\s/i.test(text)) { setTypeMode(true); querySql.value = text; runTheQuery(); return; }
-
-    const myWords = ++wordsId, myLoad = loadId;
-    function isCurrent() { return myWords === wordsId && myLoad === loadId; }
-    const catalog = queryCatalog(isCurrent);
-    setQueryStatus('Reading your words ...', false);
-    let words;
-    try { words = await readWords(text, catalog, isCurrent); }
-    catch (problem) { if (problem === QUERY_STALE) return; throw problem; }
-    if (!isCurrent()) return;
-    setQueryStatus('', false);
-
-    if (words === null) {
-        setQueryStatus('I couldn\'t find a question in that.   Try words like:   ' + wordsExamples(catalog).join('   ·   '), true);
-        return;
-    }
-    if (words.sql === null) {
-        setQueryStatus('I couldn\'t make a question of that:   ' + words.unused.join('   ·   ') + '.', true);
-        return;
-    }
-    if (words.unused.length === 0) { askSql(words.sql); return; }
-    askFirst('Did you mean:   ' + words.meaning + '?   (I didn\'t use:  ' + words.unused.join(',  ') + ')', 'Ask that',
-             function () { askSql(words.sql); }, 'Keep writing', queryWords);
-}
-
-
 //  ---- TRY:   up to 4 ready questions about THIS file   (queryI.js:  tableStarters,  from the file's profile) ----
 //  Worked out the first time the menu opens for a file  (one look at its rows,  in bites),  then kept.
 async function showStarters() {
@@ -4311,7 +4285,6 @@ async function showStarters() {
         b.addEventListener('click', function () { askSql(s.sql); });
         queryTry.appendChild(b);
     });
-    queryWords.placeholder = 'Ask in your own words, like:  ' + wordsExamples(queryCatalog(isCurrent))[0];
 }
 
 
@@ -4700,9 +4673,6 @@ function isAskEnter(e) {
 }
 querySql.addEventListener('keydown', function (e) {
     if (isAskEnter(e)) { e.preventDefault(); runTheQuery(); }
-});
-queryWords.addEventListener('keydown', function (e) {
-    if (isAskEnter(e)) { e.preventDefault(); askInWords(); }
 });
 queryBuilder.addEventListener('keydown', function (e) {             //  (Enter in a value box,  or in "at most")
     if (isAskEnter(e) && e.target.tagName === 'INPUT') { e.preventDefault(); runTheQuery(); }

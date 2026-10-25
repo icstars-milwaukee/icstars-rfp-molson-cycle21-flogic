@@ -80,6 +80,10 @@
     --warn:         #8a4b00;                        /*  amber:  a fix LEFT OUT a condition  (not red:  there IS an answer,  just a bigger one)  */
     --warn-dark:    #7a4500;                        /*  ...the answer's badge,  when it says so  */
 
+    --menu-bg:      #f4f5f7;                        /*  an OPEN drop-down list:  solid  (glass behind a list is hard to read)  */
+    --menu-text:    #1f2228;
+    color-scheme:   light;                          /*  ...and the browser's own parts  (lists,  scrollbars)  drawn light  */
+
     --check-box:    #ffffff;                        /*  a checkbox:  a white box  (ticked:  solid SQL blue,  a white ✓)  */
     --tag-bg:       #020202;                        /*  the "expand?" tag:  OLED-off black  (like the "CSV View" button)  */
     --tag-glow:     rgba(255, 255, 255, 0.35);      /*  ...and its soft white glow  */
@@ -139,6 +143,10 @@
 
     --warn:         #e8a33d;                        /*  amber,  bright enough for black  */
     --warn-dark:    #7a4500;
+
+    --menu-bg:      #24262a;                        /*  an open drop-down list:  dark,  light words  */
+    --menu-text:    #e3e5e9;
+    color-scheme:   dark;
 
     --check-box:    #ffffff;                        /*  still a white box:  it reads as "a box to tick",  even on black  */
     --tag-bg:       #020202;                        /*  blacker than the page  (#18191c),  so it still stands out  */
@@ -793,33 +801,6 @@ h1 {
 }
 
 
-/*  1.  IN YOUR OWN WORDS:  a big light square to type in   (the search bar's look:  "type here")  */
-.query-words-line {
-    padding: 10px 10px 0;
-}
-
-#queryWords {
-    display: block;
-    box-sizing: border-box;
-    width: 100%;
-    padding: 0 12px;
-    line-height: 34px;
-    font: inherit;
-    font-size: 15px;
-    color: var(--text);
-    background: var(--square-light);
-    border: 1px solid var(--glass-edge);
-    border-radius: 10px;
-    box-shadow: inset 0 0 12px var(--inner-glow, rgba(255, 255, 255, 0.8));
-}
-
-#queryWords:focus {
-    outline: none;
-    box-shadow:
-        inset 0 0 0 1px var(--glow-edge, rgba(255, 255, 255, 0.95)),
-        0 0 14px 2px var(--glow, rgba(255, 255, 255, 0.9));
-}
-
 /*  TRY:  ready questions about this file,  one press each.
     SQL-blue outlines:  "press me",  but quieter than the solid "Show answer".  */
 #queryTry {
@@ -889,6 +870,41 @@ h1 {
     box-shadow: inset 0 0 12px var(--inner-glow, rgba(255, 255, 255, 0.8));
 }
 
+/*  SHOW and WHERE:  where everybody starts.   A faint SQL-blue glow,  so the eye lands there first
+    ("this shows every column",  "I can look for a word").  */
+.query-row[data-part="show"] .query-pick,
+.query-row[data-part="where"] .query-pick {
+    box-shadow:
+        inset 0 0 12px var(--inner-glow, rgba(255, 255, 255, 0.8)),
+        inset 0 0 16px color-mix(in srgb, var(--sql-glow) 55%, transparent);
+}
+
+.query-row[data-part="show"] .query-label,
+.query-row[data-part="where"] .query-label {
+    color: var(--sql);
+}
+
+/*  "every column":  a solid pill,  not faint words  (it IS what you'll get)  */
+.query-all {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 10px;
+    font-weight: 600;
+    color: #fff;
+    background: var(--sql-dark);
+    border-radius: 7px;
+    box-shadow: 0 0 8px var(--sql-glow);
+}
+
+/*  "+ pick a column to search ...":  an invitation,  not a quiet extra  (solid SQL-blue edge,  a soft glow)  */
+#queryMenu .query-row[data-part="where"] select.query-add {
+    font-weight: 600;
+    color: var(--sql);
+    border: 1px solid var(--sql);
+    box-shadow: 0 0 8px var(--sql-glow);
+}
+
 /*  TYPE MODE  (you're writing your own SQL):  the builder fades,  and can't be clicked  (untick "Type mode" to bring it back).  */
 #queryBuilder.paused {
     opacity: 0.45;
@@ -925,6 +941,50 @@ h1 {
 
 .query-value  { width: 120px; }
 .query-limit  { width: 80px; }
+
+/*  THE OPEN LIST  (what drops down when you press a pick):  the theme's colors,  never the computer's own.
+    (Before:  on some computers it came up white,  and in Neo-Dark its words were white too:  white on white.)
+    1.  Every browser:  each choice gets the theme's solid colors  (--menu-bg,  --menu-text),
+        and  color-scheme  (in each theme block)  tells the browser to draw the list itself light or dark.  */
+#queryMenu option,
+#queryMenu optgroup {
+    color: var(--menu-text);
+    background: var(--menu-bg);
+}
+
+/*  2.  A browser that lets a page dress its lists  (appearance: base-select:  Edge / Chrome 135 and later):
+        the open list is a glass panel like the menu,  and the choice under the mouse is SQL blue.  */
+@supports (appearance: base-select) {
+    #queryMenu select,
+    #queryMenu select::picker(select) {
+        appearance: base-select;
+    }
+    #queryMenu select::picker(select) {
+        max-height: 320px;
+        padding: 4px;
+        color: var(--menu-text);
+        background: var(--menu-bg);
+        border: 1px solid var(--glass-edge);
+        border-radius: 10px;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+    }
+    #queryMenu option {
+        padding: 3px 10px;
+        border-radius: 6px;
+    }
+    #queryMenu option:hover,
+    #queryMenu option:focus-visible {
+        outline: none;
+        color: #fff;
+        background: var(--sql-dark);
+    }
+    #queryMenu option:checked {
+        font-weight: 600;
+    }
+    #queryMenu option::checkmark {
+        display: none;
+    }
+}
 
 /*  "+ column ▾",  "+ condition ▾" ...:  the lists that ADD something.  Quieter,  with a dashed edge.  */
 #queryMenu select.query-add {

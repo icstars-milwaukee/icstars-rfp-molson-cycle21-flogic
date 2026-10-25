@@ -15924,18 +15924,17 @@ This part adds 5 things to the engine (`queryI.js`), and then a new menu that us
 ```text
    ┌───────────────────────────────────────────────────────────────────┐
    │ Ask  ·  class_data  ·  10 rows                                  × │
-   │ [ Ask in your own words, like:  how many for each Grade Level   ] │   <- type a question, Enter
-   │ Try:  (How many for each Grade Level) (Top 5 by Score) ...        │   <- or press one: the answer
+   │ Try:  (How many for each Grade Level) (Top 5 by Score) ...        │   <- press one: the answer
    │ Show      [every column]  [+ column ▾]  [+ count or total ▾]      │   <- or pick: a SENTENCE
-   │ where     [Score ▾] [is over ▾] [90] ×    [+ and ▾]               │      (only the parts you use)
-   │           [+ for each ▾]  [+ sorted by ▾]  [+ at most]            │
-   │ → 4 rows  ·  Every row of class_data where Score is over 90       │   <- what you'd get, BEFORE you ask
-   │ SQL  [✓] Fix my typos  [ ] Write it myself                        │   <- the SQL it writes (or yours)
-   │ [Show answer ▶]  [Copy SQL]  [Save as CSV]                        │
+   │ where     [Name ▾] [contains ▾] [jo] ×    [+ and ▾]               │      (Show + where always there,
+   │           [+ for each ▾]  [+ sorted by ▾]  [+ at most]            │       glowing a little)
+   │ → 2 rows  ·  Every row of class_data where Student Name contains  │   <- what you'd get, BEFORE you ask
+   │ SQL  [✓] Fix my typos  [ ] Write it myself                        │   <- the SQL it writes (or yours:
+   │ [Show answer ▶]  [Copy SQL]  [Save as CSV]                        │      SQL, or plain words)
    └───────────────────────────────────────────────────────────────────┘
 ```
 
-All 3 ways stay in step: words → the sentence → the SQL. Whichever you use, the other two show what it means.
+All 3 ways stay in step: a Try question → the sentence → the SQL. Whichever you use, the other two show what it means. (Plain words go in the SQL box: Fix my typos reads them. One box for writing, not two.)
 
 > **No AI here.** Nothing is sent anywhere, nothing is guessed by a model. The same words always give the same SQL, and every rule is in this file. That's on purpose: a tool people trust with their data has to be one you can check.
 
@@ -16406,7 +16405,7 @@ function wordsExamples(catalog) {
 **1.** The words it knows. Each one means ONE part of a question:
 
 ```js
-//    PLAIN WORDS  ->  SQL   (the words box at the top of the query menu,  and plain words typed in the SQL box)
+//    PLAIN WORDS  ->  SQL   (plain words typed in the SQL box,  with "Fix my typos" on)
 //
 //        how many for each grade level             ->   SELECT "Grade Level", COUNT(*) FROM class_data GROUP BY "Grade Level"
 //        average score per grade level             ->   SELECT "Grade Level", AVG(Score) FROM class_data GROUP BY "Grade Level"
@@ -17353,12 +17352,12 @@ function kindOfExpr(e, c, catalog) {
 
 ```html
         <!--  THE QUERY MENU,  when you press "Ask".  It unfolds out of the button.   3 ways to ask,  always in step:
-                1.  YOUR OWN WORDS   ("average score for each grade level"),  and  TRY:  ready questions about THIS file
-                    (one press:  the answer).
-                2.  THE SENTENCE   (the builder):   Show [every column]  where [Score] [is over] [90]  sorted by ...
-                    Each blue word is a pick.   The parts you don't use wait on one line  ("+ where ...").
+                1.  TRY:  ready questions about THIS file   (one press:  the answer).
+                2.  THE SENTENCE   (the builder):   Show [every column]   where [Score] [contains] [90]  sorted by ...
+                    Show and where are always there,  glowing a little  (that's where you start).
+                    The parts you don't use wait on one line  ("+ for each ...").
                     Under it:  how many rows you'd get,  and the question in plain words  (before you ask).
-                3.  THE SQL it writes for you.   WRITE IT MYSELF  =  type your own  (the sentence waits while you do).
+                3.  THE SQL it writes for you.   WRITE IT MYSELF  =  type your own  (SQL,  or plain words:  the sentence waits).
               Then "Show answer":  the ANSWER takes the window's place  ("← Back to file" brings the file back).
               FIX MY TYPOS  (on at the start)  =  small SQL mistakes get fixed,  and you're told what changed
               (in amber if a fix left a condition out:  that answer has rows you meant to keep out).
@@ -17368,9 +17367,6 @@ function kindOfExpr(e, c, catalog) {
             <div class="query-head">
                 <span id="queryTitle">Ask</span>
                 <button id="queryClose" type="button" aria-label="Close">×</button>
-            </div>
-            <div class="query-words-line">
-                <input type="text" id="queryWords" autocomplete="off" aria-label="Ask in your own words" placeholder="Ask in your own words, then press Enter">
             </div>
             <div id="queryTry" role="group" aria-label="Ready questions about this file"></div>
             <div id="queryBuilder" role="group" aria-label="Pick your question"></div>
@@ -17406,7 +17402,6 @@ function kindOfExpr(e, c, catalog) {
 
 | Piece | Baby words |
 |---|---|
-| `#queryWords` | The box at the top: a question in your own words. Enter asks it. |
 | `#queryTry` | "Try:" + up to 4 ready questions about THIS file (the brain fills it in). |
 | `#queryMeaning` | Under the sentence: "→ 4 rows · Every row of ... where ...". |
 | "Fix my typos" / "Write it myself" | The SAME two checkboxes as Part 11 (same `id`s), in plainer words. |
@@ -17419,14 +17414,13 @@ function kindOfExpr(e, c, catalog) {
 
 ### Step 12.9: The brain's new handles
 
-In the brain's QUERY section, replace the list of handles (it grew 3: the words box, the Try line, the meaning line):
+In the brain's QUERY section, replace the list of handles (it grew 2: the Try line, and the meaning line):
 
 ```js
 const queryBtn     = document.getElementById('queryBtn');       //  "Ask"  (the end of the file bar)
 const queryMenu    = document.getElementById('queryMenu');      //  the menu it unfolds into
 const queryTitle   = document.getElementById('queryTitle');     //  its  "Ask  ·  sales  ·  1,204 rows"
 const queryClose   = document.getElementById('queryClose');     //  its  ×
-const queryWords   = document.getElementById('queryWords');     //  "Ask in your own words"
 const queryTry     = document.getElementById('queryTry');       //  "Try:  (How many for each Region) ..."   (the brain fills it in)
 const queryBuilder = document.getElementById('queryBuilder');   //  the sentence  (the brain fills it in)
 const queryMeaning = document.getElementById('queryMeaning');   //  "→ 4 rows  ·  Every row of sales where ..."
@@ -17454,8 +17448,9 @@ let queryFold   = null;     //  the "hide it once it's done folding" timer
 let limitOpen   = false;    //  "at most ... rows" shown,  but no number in it yet   (you pressed "+ at most")
 let previewId   = 0;        //  counts every "→ 4 rows" look-ahead  (a newer pick?  The old count stops)
 let previewWait = null;     //  ...and the little wait before it starts  (picking 3 things fast = one count)
-let wordsId     = 0;        //  counts every "Ask in your own words"  (asked again?  The old reading stops)
 ```
+
+> **Why no box for "your own words"?** A first version had one, on top. But that's 2 boxes to type in, and people don't know which one is for what. Plain words go in the SQL box: Fix my typos reads them (Step 12.6), and the sentence shows how. One box for writing; the sentence for picking.
 
 <br>
 
@@ -17534,26 +17529,28 @@ function totalFits(fn, kind) {
 
 ### Step 12.11: The sentence
 
-Part 10's builder showed all 6 rows all the time: Show, Keep rows, Group by, Totals, Sort by, At most. For somebody who doesn't know SQL, that's 6 strange words before they've done anything. Now it's a SENTENCE, and only the parts you use are there:
+Part 10's builder showed all 6 rows all the time: Show, Keep rows, Group by, Totals, Sort by, At most. For somebody who doesn't know SQL, that's 6 strange words before they've done anything. Now it's a SENTENCE. Show and where are always there (that's where everybody starts), glowing a little; the other parts only get a line once you use them:
 
 ```text
-   Show      every column   [+ column ▾]  [+ count or total ▾]
-             [+ where ▾]  [+ for each ▾]  [+ sorted by ▾]  [+ at most]        <- a new file:  just this
+   Show      [every column]   [+ column ▾]  [+ count or total ▾]
+   where     [+ pick a column to search ... ▾]
+             [+ for each ▾]  [+ sorted by ▾]  [+ at most]        <- a new file:  just this
 ```
 
-Pick "+ where ... Score": a `where` line shows up, and the keyboard is already in its value box. Replace `drawBuilder`:
+Pick a column to search: its condition starts as **contains**, and the keyboard is already in its value box. Type `jo`: José AND Carter **Jo**nes. Replace `drawBuilder`:
 
 ```js
 //  Draw the sentence  (all of it,  every time something is picked:  it's small).
 //
 //      Show       [Student Name ×]  [+ column ▾]  [+ count or total ▾]
-//      where      [Score ▾] [is over ▾] [90] ×    [or ▾] [Letter Grade ▾] [is ▾] [A] ×    [+ and ▾]
+//      where      [Name ▾] [contains ▾] [jo] ×    [or ▾] [Letter Grade ▾] [is ▾] [A] ×    [+ and ▾]
 //      for each   [Grade Level ×]  [+ and ▾]
 //      sorted by  [Score ▾] [highest first ▾] ×    [+ then by ▾]
 //      at most    [ 10 ] rows ×
-//                 [+ where ▾]  [+ for each ▾]  [+ sorted by ▾]  [+ at most]      <- the parts not used yet,  on ONE line
+//                 [+ for each ▾]  [+ sorted by ▾]  [+ at most]      <- the parts not used yet,  on ONE line
 //
-//  Only the parts you use get a line:  a new file's sentence is just  "Show every column",  and that one line of more.
+//  Show and where are ALWAYS there  (a new file:  "Show every column",  "where [+ pick a column to search]"):
+//  that's where people start,  so they glow a little.   The other parts only get a line once you use them.
 //  Each line has a NAME that never changes  (data-part:  show,  where,  group,  sort,  limit,  more),  and so does each
 //  "+" list  (data-add:  what it adds).   The words can change;  the names don't  (tests and screen readers go by them).
 //  (focusNext:  which pick gets the keyboard after the redraw.   Add a condition  ->  you're typing its value right away.)
@@ -17636,7 +17633,12 @@ function drawBuilder() {
         }
         if (build.group.length > 0) hint(box, 'each different ' + build.group.join(' + '));
         else {
-            if (build.show.length === 0) hint(box, 'every column');
+            if (build.show.length === 0) {                  //  (a pill,  not faint words:  it IS what you'll get)
+                const all = document.createElement('span');
+                all.className = 'query-all';
+                all.textContent = 'every column';
+                box.appendChild(all);
+            }
             build.show.forEach(function (c, k) {
                 box.appendChild(key(chip(c, function () { build.show.splice(k, 1); changed(); }), 'show:' + k));
             });
@@ -17647,12 +17649,19 @@ function drawBuilder() {
     });
 
     //  WHERE:   [column] [how] [value] ×,  each one after the first starts with  [and ▾] / [or ▾]
+    //  Always there  (a new file too):  "find the rows with this word in them" is the first thing most people want.
+    //  A new condition starts as CONTAINS,  not "is":  people type the word they EXPECT to see,  and "contains"
+    //  (any capitals,  anywhere in the cell)  finds it.   "is" wants the whole cell,  exactly:  pick it when you mean that.
     function addCondition(v) {
-        build.filters.push({ col: v, op: '=', value: '' });
+        build.filters.push({ col: v, op: 'contains', value: '' });
         focusNext = 'where:' + (build.filters.length - 1) + ':value';
         changed();
     }
-    if (build.filters.length > 0) part('where', 'where', function (box) {
+    part('where', 'where', function (box) {
+        if (build.filters.length === 0) {
+            box.appendChild(adder('where', '+ pick a column to search ...', colOptions, 'Keep only the rows where a column has a word', addCondition));
+            return;
+        }
         build.filters.forEach(function (f, k) {
             const line = document.createElement('span');
             line.className = 'query-line';
@@ -17734,7 +17743,6 @@ function drawBuilder() {
 
     //  THE PARTS NOT USED YET,  on one line   (pick one:  its line shows up,  and the keyboard is already in it)
     const more = [];
-    if (build.filters.length === 0) more.push(adder('where', '+ where ...', colOptions, 'Keep only the rows where ...', addCondition));
     if (build.group.length === 0) more.push(adder('group', '+ for each ...', colOptions, 'One row for each ...', function (v) {
         build.group.push(v);
         if (build.totals.length === 0) build.totals.push({ fn: 'rows', col: null });     //  "for each Region"  ->  how many in each   (× it,  for just the different ones)
@@ -17768,6 +17776,8 @@ function drawBuilder() {
 | `key(element, name)` | Every pick has a name too (`where:1:op`). After a redraw, the keyboard goes back to the pick with the same name. |
 | `focusNext` | Where the keyboard goes after THIS pick: a new condition → its value box, a new sort → which way. |
 | the `[and ▾]` on line 2 and on | The old "Keep rows that pass all of these / any of these" list, as a word in the sentence. They all join the same way: pick "or" once, and they all say "or". |
+| `op: 'contains'` in `addCondition` | The WIDE search: people type the word they expect to see, and "contains" finds it anywhere in the cell, any capitals. "is" wants the whole cell, exactly: it's still on the list, for when you mean that. |
+| "every column" is a pill (`.query-all`) | Faint grey words looked like a hint, not like "this is what you'll get". |
 | "+ for each" adds "how many rows" | "for each Grade Level" alone means "each different Grade Level". People almost always mean "how many in each". × it to get just the different ones. |
 
 > **Keyboard people:** every pick is a real `<select>` or `<button>` (Tab, arrows, Enter all work), and nothing gets lost in a redraw.
@@ -17870,9 +17880,9 @@ function meaningLine(n, words, fixed) {
 
 <br>
 
-### Step 12.13: Ask it: your own words, and "Try:"
+### Step 12.13: Ask it, and "Try:"
 
-**1.** One way in for every whole question (a Try button, plain words, "Did you mean"): into the sentence, then asked. A part the sentence can't show (a JOIN)? It goes in the SQL box instead.
+**1.** One way in for every whole question (a Try button, "Did you mean"): into the sentence, then asked. A part the sentence can't show (a JOIN)? It goes in the SQL box instead.
 
 ```js
 //  ---- ASK IT   (a whole question in SQL:  a "Try:" button,  plain words,  or "Did you mean")  ----
@@ -17896,44 +17906,7 @@ function askSql(sql) {
 }
 ```
 
-**2.** The words box (the engine does the reading: Step 12.6):
-
-```js
-//  ---- IN YOUR OWN WORDS   (the box at the top:  queryI.js reads it,  readWords) ----
-//      every word understood   ->   asked,  right away   (the sentence shows how it was read)
-//      a word left over        ->   "Did you mean ...?   (I didn't use:  ...)"   [Ask that]  [Keep writing]
-//      nothing in it           ->   examples,  with THIS file's columns
-//  (SELECT ... typed here?   That's SQL:  it goes in the SQL box.)
-async function askInWords() {
-    const text = queryWords.value.trim();
-    if (text === '' || fileTable === null) return;
-    if (/^(select|with)\s/i.test(text)) { setTypeMode(true); querySql.value = text; runTheQuery(); return; }
-
-    const myWords = ++wordsId, myLoad = loadId;
-    function isCurrent() { return myWords === wordsId && myLoad === loadId; }
-    const catalog = queryCatalog(isCurrent);
-    setQueryStatus('Reading your words ...', false);
-    let words;
-    try { words = await readWords(text, catalog, isCurrent); }
-    catch (problem) { if (problem === QUERY_STALE) return; throw problem; }
-    if (!isCurrent()) return;
-    setQueryStatus('', false);
-
-    if (words === null) {
-        setQueryStatus('I couldn\'t find a question in that.   Try words like:   ' + wordsExamples(catalog).join('   ·   '), true);
-        return;
-    }
-    if (words.sql === null) {
-        setQueryStatus('I couldn\'t make a question of that:   ' + words.unused.join('   ·   ') + '.', true);
-        return;
-    }
-    if (words.unused.length === 0) { askSql(words.sql); return; }
-    askFirst('Did you mean:   ' + words.meaning + '?   (I didn\'t use:  ' + words.unused.join(',  ') + ')', 'Ask that',
-             function () { askSql(words.sql); }, 'Keep writing', queryWords);
-}
-```
-
-**3.** "Try:", from the file's profile (Step 12.5). The first time the menu opens for a file:
+**2.** "Try:", from the file's profile (Step 12.5). The first time the menu opens for a file:
 
 ```js
 //  ---- TRY:   up to 4 ready questions about THIS file   (queryI.js:  tableStarters,  from the file's profile) ----
@@ -17960,7 +17933,6 @@ async function showStarters() {
         b.addEventListener('click', function () { askSql(s.sql); });
         queryTry.appendChild(b);
     });
-    queryWords.placeholder = 'Ask in your own words, like:  ' + wordsExamples(queryCatalog(isCurrent))[0];
 }
 ```
 
@@ -17981,11 +17953,176 @@ function isAskEnter(e) {
 querySql.addEventListener('keydown', function (e) {
     if (isAskEnter(e)) { e.preventDefault(); runTheQuery(); }
 });
-queryWords.addEventListener('keydown', function (e) {
-    if (isAskEnter(e)) { e.preventDefault(); askInWords(); }
-});
 queryBuilder.addEventListener('keydown', function (e) {             //  (Enter in a value box,  or in "at most")
     if (isAskEnter(e) && e.target.tagName === 'INPUT') { e.preventDefault(); runTheQuery(); }
+});
+
+function setQueryStatus(words, bad) {
+    queryStatus.textContent = words;
+    queryStatus.classList.toggle('bad', bad);
+}
+
+
+//  ---- RUN IT ----
+
+function runTheQuery() {
+
+    if (fileTable === null) return;
+
+    const text   = querySql.value;
+    const myRun  = ++queryId;
+    const myLoad = loadId;
+    function isCurrent() { return myRun === queryId && myLoad === loadId; }
+
+    setQueryStatus('Asking ...', false);
+    startLoading('Working out the answer...');
+    const started = performance.now();
+
+    askFirst(null);
+    clearTimeout(previewWait);                          //  (the "→ 4 rows" look-ahead:  not now.   queryId changed,  so it stops anyway)
+    runQuery(text, queryCatalog(isCurrent), isCurrent, function (done) {
+        setProgress(0.9 * done);
+        setLoadingLabel('Working out the answer...  ' + Math.floor(100 * done) + '%');
+    }, queryFlex.checked).then(function (result) {
+
+        if (!isCurrent()) return;
+        afterFlex(result.sql, result.fixes, result.warnings);       //  (fixed?  Show what really ran,  and what a fix left out.)
+        return showAnswer(result, result.sql, performance.now() - started, isCurrent);
+
+    }).then(function () {
+
+        if (!isCurrent()) return;
+        finishLoading();
+
+    }, function (problem) {
+
+        if (!isCurrent() || problem === QUERY_STALE || problem === XLSX_STALE || problem === SQL_STALE) return;
+        finishLoading();
+        if (problem && problem.fixes && problem.fixes.length > 0) afterFlex(problem.sql, problem.fixes, problem.warnings);    //  (how far the fixing got)
+        //  Plain words with a word left over:  not an error,  a QUESTION back   ("Did you mean ...?"  [Ask that])
+        if (problem instanceof QueryError && problem.why && problem.why.kind === 'words' && problem.why.sql !== null) {
+            const sql = problem.why.sql;
+            setQueryStatus('', false);
+            askFirst(problem.message.replace(/^That reads like plain words\.\s+/, ''), 'Ask that', function () { askSql(sql); }, 'Keep writing', querySql);
+            return;
+        }
+        setQueryStatus(queryProblem(problem), true);
+    });
+}
+
+queryRun.addEventListener('click', runTheQuery);
+
+
+//  Turn the answer into a table  (the same kind the brain keeps for a file),  and put it on screen.
+//  It's written straight into one long string,  and where each row starts is written down as it goes:
+//  so it never has to be cut up again.   (In bites:  a million-row answer never freezes the page.)
+//
+//  Careful with memory:  a 10,000-column answer is 100 million cells.
+//    -  Each line is glued with  join,  never  line += cell.   (+= keeps every little piece alive until the very end:
+//       about 60 bytes a cell,  so a 500 MB answer needed 5+ GB,  and the tab crashed.   join makes ONE flat string.)
+//    -  Each of the engine's rows is let go once it's written,  so the rows and the text are never both whole.
+async function showAnswer(result, text, ms, isCurrent) {
+
+    setLoadingLabel('Laying out the answer...');
+
+    const cols    = result.columns;
+    const rows    = result.rows;
+    const types   = cols.map(function (c) { return c.type; });
+    const looks   = cols.map(function (c) { return c.look || null; });     //  money keeps its look:   $116,450.00
+    const header  = cols.map(function (c) { return c.name; });
+    const longest = header.map(function (n) { return n.length; });
+    const starts  = new Uint32Array(rows.length + 1);
+    const nullRows = [], nullCols = [];
+    const parts = [];
+    const pieces = [];                                  //  each bite's lines,  glued into ONE piece at the end of that bite
+    const cells = new Array(cols.length);
+    let at = 0;
+    let work = 0;                                       //  cells written since the clock was last checked
+    let stopAt = performance.now() + CHUNK_TIME;
+
+    for (let r = 0; r < rows.length; r++) {
+
+        work += cols.length;
+        if (((r & 1023) === 1023 || work >= BITE_CELLS) && performance.now() >= stopAt) {
+            setProgress(0.9 + 0.1 * r / rows.length);
+            //  (Gluing as it goes:  270,000 lines glued in ONE go at the end held the page still for ~50 ms.)
+            pieces.push(parts.join(''));
+            parts.length = 0;
+            await new Promise(function (go) { nextBite(go); });
+            if (!isCurrent()) throw QUERY_STALE;
+            stopAt = performance.now() + CHUNK_TIME;
+        }
+        if (work >= BITE_CELLS) work = 0;
+
+        starts[r] = at;
+        const row = rows[r];
+        rows[r] = null;                                 //  (written down now:  the engine's copy can go)
+        for (let c = 0; c < cols.length; c++) {
+            const v = row[c];
+            if (v === null) { nullRows.push(r + 1); nullCols.push(c); }
+            const cell = queryCellText(v, types[c], looks[c]);
+            if (cell.length > longest[c]) longest[c] = cell.length;
+            cells[c] = /[",\r\n]/.test(cell) ? '"' + cell.split('"').join('""') + '"' : cell;
+        }
+        const line = cells.join(',') + '\n';
+        parts.push(line);
+        at += line.length;
+    }
+    starts[rows.length] = at;
+
+    //  The SQL notes,  so the TABLE LOOK can show the answer's column types and its NULLs  (like a SQL dump's table).
+    const info = {
+        file: null, dialect: '', sheetName: 'Result', sheetNumber: 1, sheetCount: 1, sheets: [],
+        columns: cols.map(function (c) { return { name: c.name, type: queryTypeName(c.type), pk: false }; }),
+        rows: rows.length,
+        nullCount: nullRows.length,
+        nullRows: Uint32Array.from(nullRows),
+        nullCols: Uint16Array.from(nullCols),
+        result: { sql: text, ms: ms, rows: rows.length, from: mainTableName(), fixes: result.fixes || [],
+                  warnings: result.warnings || [], skipped: result.skipped || [], meaning: queryInWords(text, queryCatalog(isCurrent)) },
+    };
+
+    pieces.push(parts.join(''));
+    const table = {
+        header: header, text: pieces.length === 1 ? pieces[0] : pieces.join(''), starts: starts, count: rows.length, longest: longest,
+        excel: null, sql: info, name: fileTable.file.name,
+        note: result.count > 1 ? '  ·  ran the last of ' + result.count + ' queries' : '',
+    };
+
+    if (!showingAnswer()) fileLook = excelLook;         //  (remember the file's look,  for "← Back to file")
+    swapIn(table, true);
+    answer = { table: table };
+    queryExport.disabled = false;
+    setQueryStatus(rows.length.toLocaleString() + ' row' + (rows.length === 1 ? '' : 's') + '  ·  ' + formatTime(ms), false);
+    closeQueryMenu();                                   //  out of the way,  so you can see the answer
+}
+
+
+//  ← BACK TO FILE:  the file was only put aside.   Put it back.
+function backToFile() {
+    if (fileTable === null || !showingAnswer()) return;
+    queryId++;                                          //  (a query still running?  It stops.)
+    swapIn(fileTable.table, fileLook);
+    answer = null;                                      //  let the answer go  (a big one is as big as a file)
+    queryExport.disabled = true;
+    setQueryStatus('', false);
+}
+
+backBtn.addEventListener('click', backToFile);
+
+
+//  COPY SQL   (the browser's clipboard.   An older browser?  The old way:  select it,  and "copy".)
+queryCopy.addEventListener('click', function () {
+    const done = function () { setQueryStatus('SQL copied', false); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(querySql.value).then(done, copyTheOldWay);
+    } else copyTheOldWay();
+
+    function copyTheOldWay() {
+        querySql.select();
+        try { document.execCommand('copy'); done(); }
+        catch (e) { setQueryStatus('Couldn\'t copy:  select the SQL and press Ctrl + C', true); }
+    }
 });
 ```
 
@@ -18137,43 +18274,24 @@ function runTheQuery() {
 ```css
     --warn:         #8a4b00;                        /*  amber:  a fix LEFT OUT a condition  (not red:  there IS an answer,  just a bigger one)  */
     --warn-dark:    #7a4500;                        /*  ...the answer's badge,  when it says so  */
+
+    --menu-bg:      #f4f5f7;                        /*  an OPEN drop-down list:  solid  (glass behind a list is hard to read)  */
+    --menu-text:    #1f2228;
+    color-scheme:   light;                          /*  ...and the browser's own parts  (lists,  scrollbars)  drawn light  */
 ```
 
 ```css
     --warn:         #e8a33d;                        /*  amber,  bright enough for black  */
     --warn-dark:    #7a4500;
+
+    --menu-bg:      #24262a;                        /*  an open drop-down list:  dark,  light words  */
+    --menu-text:    #e3e5e9;
+    color-scheme:   dark;
 ```
 
-The words box and "Try:", right after `#queryClose`:
+"Try:", right after `#queryClose`:
 
 ```css
-/*  1.  IN YOUR OWN WORDS:  a big light square to type in   (the search bar's look:  "type here")  */
-.query-words-line {
-    padding: 10px 10px 0;
-}
-
-#queryWords {
-    display: block;
-    box-sizing: border-box;
-    width: 100%;
-    padding: 0 12px;
-    line-height: 34px;
-    font: inherit;
-    font-size: 15px;
-    color: var(--text);
-    background: var(--square-light);
-    border: 1px solid var(--glass-edge);
-    border-radius: 10px;
-    box-shadow: inset 0 0 12px var(--inner-glow, rgba(255, 255, 255, 0.8));
-}
-
-#queryWords:focus {
-    outline: none;
-    box-shadow:
-        inset 0 0 0 1px var(--glow-edge, rgba(255, 255, 255, 0.95)),
-        0 0 14px 2px var(--glow, rgba(255, 255, 255, 0.9));
-}
-
 /*  TRY:  ready questions about this file,  one press each.
     SQL-blue outlines:  "press me",  but quieter than the solid "Show answer".  */
 #queryTry {
@@ -18211,6 +18329,93 @@ The words box and "Try:", right after `#queryClose`:
     color: #fff;
     background: var(--sql-dark);
     box-shadow: 0 0 10px var(--sql-glow);
+}
+```
+
+The glow on Show and where, the "every column" pill, and the inviting "+ pick a column to search" list, right after `.query-pick`:
+
+```css
+/*  SHOW and WHERE:  where everybody starts.   A faint SQL-blue glow,  so the eye lands there first
+    ("this shows every column",  "I can look for a word").  */
+.query-row[data-part="show"] .query-pick,
+.query-row[data-part="where"] .query-pick {
+    box-shadow:
+        inset 0 0 12px var(--inner-glow, rgba(255, 255, 255, 0.8)),
+        inset 0 0 16px color-mix(in srgb, var(--sql-glow) 55%, transparent);
+}
+
+.query-row[data-part="show"] .query-label,
+.query-row[data-part="where"] .query-label {
+    color: var(--sql);
+}
+
+/*  "every column":  a solid pill,  not faint words  (it IS what you'll get)  */
+.query-all {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 10px;
+    font-weight: 600;
+    color: #fff;
+    background: var(--sql-dark);
+    border-radius: 7px;
+    box-shadow: 0 0 8px var(--sql-glow);
+}
+
+/*  "+ pick a column to search ...":  an invitation,  not a quiet extra  (solid SQL-blue edge,  a soft glow)  */
+#queryMenu .query-row[data-part="where"] select.query-add {
+    font-weight: 600;
+    color: var(--sql);
+    border: 1px solid var(--sql);
+    box-shadow: 0 0 8px var(--sql-glow);
+}
+```
+
+The OPEN drop-down lists, right after `.query-limit`. Before, on some computers they came up white, and in Neo-Dark with white words: white on white.
+
+```css
+/*  THE OPEN LIST  (what drops down when you press a pick):  the theme's colors,  never the computer's own.
+    (Before:  on some computers it came up white,  and in Neo-Dark its words were white too:  white on white.)
+    1.  Every browser:  each choice gets the theme's solid colors  (--menu-bg,  --menu-text),
+        and  color-scheme  (in each theme block)  tells the browser to draw the list itself light or dark.  */
+#queryMenu option,
+#queryMenu optgroup {
+    color: var(--menu-text);
+    background: var(--menu-bg);
+}
+
+/*  2.  A browser that lets a page dress its lists  (appearance: base-select:  Edge / Chrome 135 and later):
+        the open list is a glass panel like the menu,  and the choice under the mouse is SQL blue.  */
+@supports (appearance: base-select) {
+    #queryMenu select,
+    #queryMenu select::picker(select) {
+        appearance: base-select;
+    }
+    #queryMenu select::picker(select) {
+        max-height: 320px;
+        padding: 4px;
+        color: var(--menu-text);
+        background: var(--menu-bg);
+        border: 1px solid var(--glass-edge);
+        border-radius: 10px;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+    }
+    #queryMenu option {
+        padding: 3px 10px;
+        border-radius: 6px;
+    }
+    #queryMenu option:hover,
+    #queryMenu option:focus-visible {
+        outline: none;
+        color: #fff;
+        background: var(--sql-dark);
+    }
+    #queryMenu option:checked {
+        font-weight: 600;
+    }
+    #queryMenu option::checkmark {
+        display: none;
+    }
 }
 ```
 
@@ -18301,6 +18506,8 @@ And the badge, right after `#fileBadge`:
 |---|---|
 | `--warn` amber, not red | Red = it didn't work. Amber = it worked, but read this. |
 | `white-space: pre-wrap` on the amber badge | The badge normally cuts long words off with "...". A warning has to be READ. |
+| `color-scheme` + `--menu-bg` / `--menu-text` | Every browser: the list's choices get the theme's solid colors, and the browser draws its own parts (the list, scrollbars) light or dark to match. |
+| `appearance: base-select` | Newer Edge / Chrome let a page dress the open list itself: a panel like the menu, the choice under the mouse in SQL blue. Older ones skip it (`@supports`) and still get the colors. |
 | `field-sizing: content` | A pick is as wide as its words ("is", not a box as wide as "is or comes before"), so the line reads like a sentence. A browser without it keeps them as wide as their longest choice. |
 
 <br>
@@ -18310,12 +18517,12 @@ And the badge, right after `#fileBadge`:
 The test tables: `small-files/beginner/class_data.csv` (a class gradebook) and `small-files/query/`.
 
 1. **Node:** `node tools/query-test/beginner.js` → **135 passed, 0 failed** (typed fixes, warnings, more than one question, safety, 44 plain-word questions, the words back, the starter questions, hostile column names, and the words back on all 3,236 questions in `cases.sql` + the fuzzer's file without ever throwing). `run.js --flex` and `fuzz.js --flex`: exactly the same as before this part (a correct query is never changed). `sloppy.js`: 67 passed.
-2. **The page:** `sh tools/run-tests.sh realfile-ask` → **51 passed** (everything below, by itself). `realfile-query`, `realfile-flex`, `realfile-lazylist`, `realfile-money` still pass, on the new menu.
-3. Open `class_data.csv`. The button says **Ask**. Press it: **Show every column**, one line of "+" lists, and "→ 10 rows · Every row of class_data".
+2. **The page:** `sh tools/run-tests.sh realfile-ask` → **58 passed** (everything below, by itself, in both themes). `realfile-query`, `realfile-flex`, `realfile-lazylist`, `realfile-money`, `realfile-theme` still pass, on the new menu.
+3. Open `class_data.csv`. The button says **Ask**. Press it: **Show [every column]**, **where [+ pick a column to search]** (both glowing a little), one line of "+" lists, and "→ 10 rows · Every row of class_data".
 4. A moment later, **Try:** How many for each Grade Level · Average Score for each Grade Level · Top 5 by Score · Rows where Grade Level is 10. Press **Top 5 by Score**: 5 rows. Hover the badge: the question in words.
-5. Pick **+ where ... Score**: you're typing in its value box. Pick **is over**, type `90`: "→ 4 rows". Press **Enter**: 4 rows.
-6. **+ sorted by ... Letter Grade**: the way says **A to Z / Z to A**. Switch it to Score: **lowest first / highest first**.
-7. Type `show me the A students` in the words box, Enter: 2 rows, and the sentence says **where Letter Grade is A**.
+5. Pick a column to search: **Student Name**. It says **contains**, and you're typing in its value box. Type `jo`: "→ 2 rows" (José, Carter Jones). Switch to **Score**, **is over**, `90`: "→ 4 rows". Press **Enter**: 4 rows.
+6. **+ sorted by ... Letter Grade**: the way says **A to Z / Z to A**. Switch it to Score: **lowest first / highest first**. Open any list: it looks like the menu (in Neo-Dark too: light words on dark, never white on white).
+7. In the SQL box, type `show me the A students`, Enter: 2 rows, and the box shows the SQL it was read as.
 8. `how many of us failed`: **Did you mean: How many rows in class_data? (I didn't use: failed) [Ask that] [Keep writing]**. Nothing runs until you press Ask that.
 9. In the SQL box: `select * from class_data where score >`, Enter. All 10 rows, and the badge says, in amber: **⚠ NOT filtered by where score >**.
 10. `select * from class_data where score between 90-100`: 4 rows. `... "student name" = 'Liam O'Brien'`: 1 row. `DROP TABLE class_data`: refused, exactly as before.
