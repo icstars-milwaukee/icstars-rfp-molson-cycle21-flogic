@@ -905,10 +905,44 @@ h1 {
     box-shadow: 0 0 8px var(--sql-glow);
 }
 
-/*  TYPE MODE  (you're writing your own SQL):  the builder fades,  and can't be clicked  (untick "Type mode" to bring it back).  */
+/*  WRITE IT MYSELF  (you're writing your own SQL):  the sentence's picks fade and can't be clicked,
+    and the sentence ITSELF is the button back   ("Click to go back to the sentence",  in the middle).  */
 #queryBuilder.paused {
-    opacity: 0.45;
+    position: relative;
+    cursor: pointer;
+    border-radius: 10px;
+}
+
+#queryBuilder.paused > .query-row {
+    opacity: 0.4;
     pointer-events: none;
+}
+
+#queryBuilder.paused::after {
+    content: "↩  Click to go back to the sentence";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    padding: 6px 14px;
+    max-width: 90%;
+    font-weight: 600;
+    text-align: center;
+    color: #fff;
+    background: var(--sql-dark);
+    border-radius: 8px;
+    box-shadow: 0 0 10px var(--sql-glow);
+    pointer-events: none;
+}
+
+#queryBuilder.paused:hover::after,
+#queryBuilder.paused:focus-visible::after {
+    background: var(--sql);
+}
+
+#queryBuilder.paused:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 1px var(--glow-edge, rgba(255, 255, 255, 0.95)), 0 0 10px 1px var(--glow, rgba(255, 255, 255, 0.9));
 }
 
 /*  One condition  (or total,  or sort):   [city ▾] [is ▾] [Chicago] ×  */

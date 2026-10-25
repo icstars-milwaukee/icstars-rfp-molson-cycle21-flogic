@@ -3485,7 +3485,7 @@ measureFold();
 //        It's asked.   A word left over?   "Did you mean ...?"  first.   TRY:  ready questions about THIS file.
 //    2.  The SENTENCE  (the builder):  pick things,  and it writes the SQL for you  (so you can learn it,  too).
 //        Its words follow each column's KIND:  numbers  "is over / highest first",  words  "A to Z",  dates  "newest first".
-//    3.  Or WRITE IT MYSELF:  type your own SQL in the box  (click in,  and it turns on:  the sentence waits).
+//    3.  Or WRITE IT MYSELF:  type your own SQL in the box  (type,  and it turns on:  the sentence waits.   Click the sentence to go back to it.)
 //        Untick it  ->  your SQL snaps back into the sentence.   (A part it can't show?  It asks first.)
 //        FIX MY TYPOS  (Query Flexibility,  on at the start):  small mistakes get fixed,  and you're told what changed.
 //    Enter  =  show the answer  (Shift + Enter  =  a new line in the SQL box).
@@ -3539,7 +3539,7 @@ let build = newBuild();
 function newBuild() {
     return {
         show:    [],        //  which columns  ([]  =  all of them)
-        filters: [],        //  [{ col, op, value }]
+        filters: [],        //  [{ col, op, value }]     (col  ANY_COLUMN  =  "any column":  the word in ANY cell of the row)
         any:     false,     //  false  =  keep rows that pass ALL the conditions.   true  =  ANY of them.
         group:   [],        //  group by these columns
         totals:  [],        //  [{ fn, col }]
@@ -3735,12 +3735,23 @@ function kindWordsOf(col) {
 const FILTER_WORDS = {
     number: [['=', 'is'], ['<>', 'is not'], ['>', 'is over'], ['>=', 'is at least'], ['<', 'is under'], ['<=', 'is at most'],
              ['contains', 'contains'], ['starts', 'starts with'], ['ends', 'ends with'], ['empty', 'is empty'], ['filled', 'is not empty']],
-    words:  [['=', 'is'], ['<>', 'is not'], ['contains', 'contains'], ['starts', 'starts with'], ['ends', 'ends with'],
+    words:  [['=', 'is'], ['anycase', 'is (any capitals)'], ['<>', 'is not'], ['contains', 'contains'], ['starts', 'starts with'], ['ends', 'ends with'],
              ['empty', 'is empty'], ['filled', 'is not empty'],
              ['<', 'comes before (A to Z)'], ['<=', 'is or comes before'], ['>', 'comes after (A to Z)'], ['>=', 'is or comes after']],
     date:   [['=', 'is'], ['<>', 'is not'], ['>', 'is after'], ['>=', 'is on or after'], ['<', 'is before'], ['<=', 'is on or before'],
              ['empty', 'is empty'], ['filled', 'is not empty'], ['contains', 'contains'], ['starts', 'starts with'], ['ends', 'ends with']],
 };
+//  ('anycase'  =  LIKE with no  %:   City LIKE 'chicago'   ("is",  but any capitals:  the same as "is" for numbers and dates)
+
+//  "ANY COLUMN":  find a word wherever it is in the row   (you don't have to know which column it's in).
+//  Its SQL is one test per column,  joined by OR:   (Name LIKE '%jo%' OR City LIKE '%jo%' OR ...)
+//  So it only makes sense for a word:  contains,  starts with,  ends with,  or is  (any capitals).
+//  Offered up to ANY_COLUMN_MAX columns  (a 10,000-column file would write 10,000 lines of SQL,  and check them all on every row).
+//  The two picks below aren't columns,  so their values start with a character no column name can have  (a NUL).
+const ANY_COLUMN     = String.fromCharCode(0) + 'any column';
+const EVERY_COLUMN   = String.fromCharCode(0) + 'every column';
+const ANY_COLUMN_MAX = 100;
+FILTER_WORDS.any = [['contains', 'contains'], ['starts', 'starts with'], ['ends', 'ends with'], ['anycase', 'is (any capitals)']];
 
 //  Which way a sort goes,  in plain words   ("highest first" would be a fib for letters:  F comes after A)
 const SORT_WORDS = {
@@ -3873,7 +3884,7 @@ let focusNext = null;
 
 function drawBuilder() {
 
-    const before = document.activeElement && queryBuilder.contains(document.activeElement) ? document.activeElement.dataset.key : null;
+    const before = document.activeElement && queryBuilder.contains(document.activeElement) ? document.activeElement.dataset.key || null : null;
     queryBuilder.textContent = '';
     if (fileTable === null) return;
 
@@ -3921,6 +3932,7 @@ function drawBuilder() {
         line.appendChild(key(pickList(TOTAL_FNS.map(function (f) { return [f[0], totalWords(f[0], kind)]; }), t.fn, 'Count or total', function (v) {
             t.fn = v;
             t.name = null;                              //  (a nickname you typed was for the OLD total)
+            t.auto = false;                             //  (you picked it now:  it stays,  even without "for each")
             if (v === 'rows') t.col = null;
             else if (t.col === null || !totalFits(v, kindWordsOf(t.col))) {
                 const fit = columns.find(function (c) { return totalFits(v, kindWordsOf(c)); });
@@ -3940,26 +3952,41 @@ function drawBuilder() {
     }
 
     //  SHOW:  the columns,  or the totals   ("Show how many rows,  the average of Score")
+    //  Whatever it shows,  "every column" is ALWAYS one pick away   (the first choice of its "+" list):
+    //  picked 3 columns,  or counted for each Region,  and want the whole rows back?   No × by ×,  no typing SQL.
+    const EVERY = [[EVERY_COLUMN, '↺ every column']];
+    function everyColumn() {
+        build.show = [];
+        build.totals = [];
+        build.group = [];                               //  (every column  =  every ROW too:  "for each" would squash them)
+        changed();
+    }
+    function addTotalOrEvery(v) { if (v === EVERY_COLUMN) everyColumn(); else addTotal(v); }
     part('show', 'Show', function (box) {
         if (build.totals.length > 0) {
             build.totals.forEach(function (t, k) { box.appendChild(totalLine(t, k)); });
-            box.appendChild(adder('totals', '+ and ...', TOTAL_ADD, 'Count or total something else', addTotal));
+            box.appendChild(adder('totals', '+ and ...', EVERY.concat(TOTAL_ADD), 'Count or total something else  (or back to every column)', addTotalOrEvery));
             return;
         }
-        if (build.group.length > 0) hint(box, 'each different ' + build.group.join(' + '));
-        else {
-            if (build.show.length === 0) {                  //  (a pill,  not faint words:  it IS what you'll get)
-                const all = document.createElement('span');
-                all.className = 'query-all';
-                all.textContent = 'every column';
-                box.appendChild(all);
-            }
-            build.show.forEach(function (c, k) {
-                box.appendChild(key(chip(c, function () { build.show.splice(k, 1); changed(); }), 'show:' + k));
-            });
-            const left = colOptions.filter(function (o) { return build.show.indexOf(o[0]) === -1; });
-            if (left.length > 0) box.appendChild(adder('show', '+ column', left, 'Show just some columns', function (v) { build.show.push(v); changed(); }));
+        if (build.group.length > 0) {
+            hint(box, 'each different ' + build.group.join(' + '));
+            box.appendChild(adder('totals', '+ count or total', EVERY.concat(TOTAL_ADD), 'Count or total something  (or back to every column)', addTotalOrEvery));
+            return;
         }
+        if (build.show.length === 0) {                      //  (a pill,  not faint words:  it IS what you'll get)
+            const all = document.createElement('span');
+            all.className = 'query-all';
+            all.textContent = 'every column';
+            box.appendChild(all);
+        }
+        build.show.forEach(function (c, k) {
+            box.appendChild(key(chip(c, function () { build.show.splice(k, 1); changed(); }), 'show:' + k));
+        });
+        const left = colOptions.filter(function (o) { return build.show.indexOf(o[0]) === -1; });
+        const choices = build.show.length > 0 ? EVERY.concat(left) : left;
+        if (choices.length > 0) box.appendChild(adder('show', '+ column', choices, 'Show just some columns  (or back to every column)', function (v) {
+            if (v === EVERY_COLUMN) everyColumn(); else { build.show.push(v); changed(); }
+        }));
         box.appendChild(adder('totals', '+ count or total', TOTAL_ADD, 'Count or total something', addTotal));
     });
 
@@ -3967,14 +3994,16 @@ function drawBuilder() {
     //  Always there  (a new file too):  "find the rows with this word in them" is the first thing most people want.
     //  A new condition starts as CONTAINS,  not "is":  people type the word they EXPECT to see,  and "contains"
     //  (any capitals,  anywhere in the cell)  finds it.   "is" wants the whole cell,  exactly:  pick it when you mean that.
+    //  "any column"  comes first in the list:  the word could be anywhere in the row.
     function addCondition(v) {
         build.filters.push({ col: v, op: 'contains', value: '' });
         focusNext = 'where:' + (build.filters.length - 1) + ':value';
         changed();
     }
+    const whereOptions = columns.length >= 2 && columns.length <= ANY_COLUMN_MAX ? [[ANY_COLUMN, 'any column']].concat(colOptions) : colOptions;
     part('where', 'where', function (box) {
         if (build.filters.length === 0) {
-            box.appendChild(adder('where', '+ pick a column to search ...', colOptions, 'Keep only the rows where a column has a word', addCondition));
+            box.appendChild(adder('where', '+ pick a column to search ...', whereOptions, 'Keep only the rows where a column has a word', addCondition));
             return;
         }
         build.filters.forEach(function (f, k) {
@@ -3985,17 +4014,21 @@ function drawBuilder() {
                 join.classList.add('query-join');
                 line.appendChild(join);
             }
-            line.appendChild(key(pickList(colOptions, f.col, 'Column', function (v) { f.col = v; changed(); }), 'where:' + k + ':col'));
-            const kind = kindWordsOf(f.col);
+            line.appendChild(key(pickList(whereOptions, f.col, 'Column', function (v) {
+                f.col = v;
+                if (v === ANY_COLUMN && !FILTER_WORDS.any.some(function (o) { return o[0] === f.op; })) f.op = 'contains';     //  (any column:  word tests only)
+                changed();
+            }), 'where:' + k + ':col'));
+            const kind = f.col === ANY_COLUMN ? 'any' : kindWordsOf(f.col);
             let ops = FILTER_WORDS[kind];
-            if (!ops.some(function (o) { return o[0] === f.op; })) ops = ops.concat(FILTER_WORDS.number.filter(function (o) { return o[0] === f.op; }));
+            if (!ops.some(function (o) { return o[0] === f.op; })) ops = ops.concat(FILTER_WORDS.number.concat(FILTER_WORDS.words).filter(function (o) { return o[0] === f.op; }).slice(0, 1));
             line.appendChild(key(pickList(ops, f.op, 'Condition', function (v) { f.op = v; if (v !== 'empty' && v !== 'filled') focusNext = 'where:' + k + ':value'; changed(); }), 'where:' + k + ':op'));
             if (f.op !== 'empty' && f.op !== 'filled') {
                 const value = document.createElement('input');
                 value.type = 'text';
                 value.className = 'query-value';
                 value.value = f.value;
-                value.placeholder = kind === 'number' ? 'a number' : kind === 'date' ? 'YYYY-MM-DD' : 'words';
+                value.placeholder = kind === 'number' ? 'a number' : kind === 'date' ? 'YYYY-MM-DD' : kind === 'any' ? 'a word' : 'words';
                 value.setAttribute('aria-label', 'Value');
                 value.addEventListener('input', function () { f.value = value.value; writeSql(); });
                 line.appendChild(key(value, 'where:' + k + ':value'));
@@ -4003,13 +4036,19 @@ function drawBuilder() {
             line.appendChild(key(smallButton('×', 'Remove this condition', function () { build.filters.splice(k, 1); changed(); }), 'where:' + k + ':x'));
             box.appendChild(line);
         });
-        box.appendChild(adder('where', '+ and ...', colOptions, 'Add another condition', addCondition));
+        box.appendChild(adder('where', '+ and ...', whereOptions, 'Add another condition', addCondition));
     });
 
     //  FOR EACH   (group by)
+    //  × the last one?   The "how many rows" that "+ for each" put in by itself goes with it   (auto),
+    //  so you're back to the rows,  not stuck on ONE row that counts them all.   (A total YOU picked stays.)
     if (build.group.length > 0) part('group', 'for each', function (box) {
         build.group.forEach(function (c, k) {
-            box.appendChild(key(chip(c, function () { build.group.splice(k, 1); changed(); }), 'group:' + k));
+            box.appendChild(key(chip(c, function () {
+                build.group.splice(k, 1);
+                if (build.group.length === 0) build.totals = build.totals.filter(function (t) { return !t.auto; });
+                changed();
+            }), 'group:' + k));
         });
         const left = colOptions.filter(function (o) { return build.group.indexOf(o[0]) === -1; });
         if (left.length > 0) box.appendChild(adder('group', '+ and ...', left, 'For each of another column too', function (v) { build.group.push(v); changed(); }));
@@ -4060,7 +4099,7 @@ function drawBuilder() {
     const more = [];
     if (build.group.length === 0) more.push(adder('group', '+ for each ...', colOptions, 'One row for each ...', function (v) {
         build.group.push(v);
-        if (build.totals.length === 0) build.totals.push({ fn: 'rows', col: null });     //  "for each Region"  ->  how many in each   (× it,  for just the different ones)
+        if (build.totals.length === 0) build.totals.push({ fn: 'rows', col: null, auto: true });     //  "for each Region"  ->  how many in each   (× it,  for just the different ones)
         changed();
     }));
     if (build.sort.length === 0 && sortOptions.length > 0) more.push(adder('sort', '+ sorted by ...', sortOptions, 'Sort by ...', addSort));
@@ -4072,7 +4111,7 @@ function drawBuilder() {
     }
     if (more.length > 0) part('more', '', function (box) { more.forEach(function (m) { box.appendChild(m); }); });
 
-    queryBuilder.classList.toggle('paused', typeMode);
+    pauseSentence(typeMode);
 
     //  The keyboard goes back where it was  (or where the pick said:  the new condition's value box)
     const want = focusNext !== null ? focusNext : before;
@@ -4145,8 +4184,14 @@ function builderSql(forCount) {
     //  FROM
     lines.push('FROM ' + sqlName(fileTable.engine.name));
 
-    //  WHERE
-    const tests = build.filters.map(function (f) {
+    //  WHERE   (a condition with nothing typed in it yet is left out:  it's not finished.
+    //           "contains ''" would quietly drop every row with an EMPTY cell there,  before you've typed a letter.)
+    const tests = build.filters.filter(function (f) { return f.op === 'empty' || f.op === 'filled' || f.value !== ''; }).map(function (f) {
+        if (f.col === ANY_COLUMN) {                                 //  any column:  one test per column,  OR'd,  in ( )
+            const like = f.op === 'starts' ? likeOf(f.value, '', '%') : f.op === 'ends' ? likeOf(f.value, '%', '')
+                       : f.op === 'anycase' ? likeOf(f.value, '', '') : likeOf(f.value, '%', '%');
+            return '(' + columns.map(function (col) { return sqlName(col) + ' ' + like; }).join('\n      OR ') + ')';
+        }
         const c = sqlName(f.col);
         switch (f.op) {
             case 'empty':    return c + ' IS NULL';
@@ -4154,6 +4199,7 @@ function builderSql(forCount) {
             case 'contains': return c + ' ' + likeOf(f.value, '%', '%');
             case 'starts':   return c + ' ' + likeOf(f.value, '', '%');
             case 'ends':     return c + ' ' + likeOf(f.value, '%', '');
+            case 'anycase':  return c + ' ' + likeOf(f.value, '', '');
             default:         return c + ' ' + f.op + ' ' + sqlValueOf(f.value, kindOf(f.col));
         }
     });
@@ -4408,11 +4454,11 @@ function buildFromSql(text) {
 
 
     //  WHERE:  conditions joined by AND only  (or by OR only),  each one  [column] [how] [value]
+    function flat(node, kind, out) {
+        if (node.t === kind) { flat(node.a, kind, out); flat(node.b, kind, out); } else out.push(node);
+        return out;
+    }
     if (c.where !== null) {
-        const flat = function (node, kind, out) {
-            if (node.t === kind) { flat(node.a, kind, out); flat(node.b, kind, out); } else out.push(node);
-            return out;
-        };
         const any = c.where.t === 'or';
         let parts = flat(c.where, any ? 'or' : 'and', []);
         const oneIn = parts.length === 1 && parts[0].t === 'in' && !parts[0].not;           //  status IN ('a', 'b')   =   status is 'a'  OR  'b'
@@ -4421,10 +4467,55 @@ function buildFromSql(text) {
             if (found === null) left.push('the condition  ' + sqlWordsFor(p));
             else found.forEach(function (f) { b.filters.push(f); });
         });
+        if (any) b.filters = anyColumnRuns(b.filters);              //  (all OR:  its ( ) are gone,  so find "any column" by its run of tests)
+        b.filters.forEach(function (f) { delete f.like; });
         b.any = (any || oneIn) && b.filters.length > 1;
     }
 
+    //  "Any column",  read back:   (Name LIKE '%jo%' OR City LIKE '%jo%' OR ...)   ->   [any column] [contains] [jo]
+    //  Only when it's EVERY column,  in order,  the same LIKE each time   (so it says exactly what the builder would write).
+    function anyColumnRuns(list) {
+        const out = [];
+        const n = columns.length;
+        for (let i = 0; i < list.length; i++) {
+            const run = n >= 2 && n <= ANY_COLUMN_MAX ? list.slice(i, i + n) : [];
+            const same = run.length === n && run.every(function (f, k) {
+                return f.like && f.col === columns[k] && f.op === run[0].op && f.value === run[0].value;
+            });
+            if (same) { out.push({ col: ANY_COLUMN, op: run[0].op, value: run[0].value }); i += n - 1; }
+            else out.push(list[i]);
+        }
+        return out;
+    }
+
+    //  A LIKE  ->  contains / starts with / ends with / is   (only a  %  at the start and/or the end can be shown)
+    function likeFilter(p) {
+        const col = columnOf(p.e), pattern = valueOf(p.pat);
+        const escape = p.esc === null ? null : valueOf(p.esc);
+        if (col === null || pattern === null) return null;
+        let word = '', first = false, last = false;
+        for (let k = 0; k < pattern.length; k++) {
+            const ch = pattern[k];
+            if (escape !== null && ch === escape && k + 1 < pattern.length) { word += pattern[++k]; continue; }
+            if (ch === '_') return null;
+            if (ch === '%') {
+                if (k === 0) first = true;
+                else if (k === pattern.length - 1) last = true;
+                else return null;
+                continue;
+            }
+            word += ch;
+        }
+        const op = first && last ? 'contains' : last ? 'starts' : first ? 'ends' : 'anycase';
+        return { col: col, op: op, value: word, like: true };
+    }
+
     function filtersOf(p, anyMode) {
+        if (p.t === 'or' && !anyMode) {                             //  ( ... OR ... )  inside AND:  "any column"?
+            const found = anyColumnRuns(flat(p, 'or', []).map(function (x) { return x.t === 'like' && !x.not ? likeFilter(x) : null; })
+                                                           .map(function (f) { return f || {}; }));
+            return found.length === 1 && found[0].col === ANY_COLUMN ? found : null;
+        }
         if (p.t === 'cmp' && FLIP_OP[p.op]) {
             let col = columnOf(p.a), value = valueOf(p.b), op = p.op;
             if (col === null) { col = columnOf(p.b); value = valueOf(p.a); op = FLIP_OP[p.op]; }
@@ -4441,25 +4532,8 @@ function buildFromSql(text) {
             return value !== null ? [{ col: col, op: p.not ? '=' : '<>', value: value }] : null;
         }
         if (p.t === 'like' && !p.not) {
-            const col = columnOf(p.e), pattern = valueOf(p.pat);
-            const escape = p.esc === null ? null : valueOf(p.esc);
-            if (col === null || pattern === null) return null;
-            //  Read the pattern:  only a  %  at the start and/or the end can be shown   (contains / starts with / ends with)
-            let word = '', first = false, last = false;
-            for (let k = 0; k < pattern.length; k++) {
-                const ch = pattern[k];
-                if (escape !== null && ch === escape && k + 1 < pattern.length) { word += pattern[++k]; continue; }
-                if (ch === '_') return null;
-                if (ch === '%') {
-                    if (k === 0) first = true;
-                    else if (k === pattern.length - 1) last = true;
-                    else return null;
-                    continue;
-                }
-                word += ch;
-            }
-            const op = first && last ? 'contains' : last ? 'starts' : first ? 'ends' : '=';
-            return [{ col: col, op: op, value: word }];
+            const f = likeFilter(p);
+            return f === null ? null : [f];
         }
         if (p.t === 'between' && !p.not && !anyMode) {
             const col = columnOf(p.e), lo = valueOf(p.lo), hi = valueOf(p.hi);
@@ -4544,14 +4618,43 @@ function sqlWordsFor(e) {
 function setTypeMode(on) {
     typeMode = on;
     queryType.checked = on;
-    queryBuilder.classList.toggle('paused', on);
-    queryNote.textContent = on ? 'you\'re writing it  ·  the sentence waits' : 'writes itself as you pick';
+    pauseSentence(on);
+    queryNote.textContent = on ? 'you\'re writing it  ·  click the sentence to go back to it' : 'writes itself as you pick';
     askFirst(null);
     showMeaning();
 }
 
-//  Click in the box  (or type in it)  ->  "Write it myself" turns on.
-querySql.addEventListener('pointerdown', function () { if (!typeMode) setTypeMode(true); });
+//  While you write:  the sentence FADES,  and the whole of it is ONE button  ("Click to go back to the sentence").
+//  Its picks can't be clicked or tabbed to  (inert:  a pick changed now would be thrown away when your SQL is read back).
+//  Click it  (or Tab to it + Enter)  ->  your SQL snaps back into it,  like unticking "Write it myself".
+//  (It was a dead end:  ONE click in the SQL box,  just to look,  froze every pick,
+//   and the only way out was the little tick box.   Now looking doesn't freeze anything,  and the way back is the sentence itself.)
+function pauseSentence(on) {
+    queryBuilder.classList.toggle('paused', on);
+    Array.from(queryBuilder.children).forEach(function (row) { row.inert = on; });
+    if (on) {
+        queryBuilder.tabIndex = 0;
+        queryBuilder.setAttribute('role', 'button');
+        queryBuilder.setAttribute('aria-label', 'Go back to the sentence  (your SQL is read back into it)');
+        queryBuilder.title = 'Click to go back to the sentence';
+    } else {
+        queryBuilder.removeAttribute('tabindex');
+        queryBuilder.removeAttribute('role');
+        queryBuilder.removeAttribute('aria-label');
+        queryBuilder.removeAttribute('title');
+    }
+}
+queryBuilder.addEventListener('click', function () { if (typeMode) leaveTypeMode(); });
+queryBuilder.addEventListener('keydown', function (e) {
+    if (typeMode && e.target === queryBuilder && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        focusNext = 'add:where';                        //  (the keyboard lands IN the sentence,  not nowhere)
+        leaveTypeMode();
+        if (typeMode) focusNext = null;                 //  (it asked first:  the keyboard is on its question)
+    }
+});
+
+//  TYPE in the box  ->  "Write it myself" turns on.   (Just clicking in it,  to look or to copy,  changes nothing.)
 querySql.addEventListener('input', function () {
     if (!typeMode) setTypeMode(true);
     showFixes([], []);                                  //  (the fixes were for the SQL before you changed it)

@@ -5552,11 +5552,17 @@ function wordsOfSort(o, core, catalog) {
 
 function wordsOfCond(e, c, catalog) {
     const side = function (x) { return x.t === 'col' ? x.name : wordsOfValue(x); };
-    const inner = function (x, outer) { const w = wordsOfCond(x, c, catalog); return (x.t === 'or' || x.t === 'and') && x.t !== outer ? '(' + w + ')' : w; };
+    const inner = function (x, outer) {
+        const w = wordsOfCond(x, c, catalog);
+        return (x.t === 'or' || x.t === 'and') && x.t !== outer && anyColumnWords(x, c, catalog) === null ? '(' + w + ')' : w;
+    };
     switch (e.t) {
         case 'and':
-        case 'or':
+        case 'or': {
+            const any = anyColumnWords(e, c, catalog);
+            if (any !== null) return any;
             return inner(e.a, e.t) + ' ' + e.t + ' ' + inner(e.b, e.t);
+        }
         case 'not':
             return 'NOT (' + wordsOfCond(e.e, c, catalog) + ')';
         case 'cmp': {
@@ -5582,18 +5588,44 @@ function wordsOfCond(e, c, catalog) {
         case 'insub':   return side(e.e) + (e.not ? ' is not in ' : ' is in ') + 'the answer to another question';
         case 'exists':  return 'another question has an answer';
         case 'like': {
-            const p = e.pat.t === 'lit' && typeof e.pat.v === 'string' && e.esc === null ? e.pat.v : null;
-            const plain = p === null ? null : p.replace(/^%/, '').replace(/%$/, '');
-            const how = p === null || /[%_]/.test(plain) ? 'matches the pattern ' + side(e.pat)
-                : p.length > 1 && p[0] === '%' && p[p.length - 1] === '%' ? 'contains ' + flexWords(plain)
-                : p[p.length - 1] === '%' ? 'starts with ' + flexWords(plain)
-                : p[0] === '%' ? 'ends with ' + flexWords(plain)
-                : 'is ' + flexWords(plain) + '  (any capitals)';
+            const how = likeHow(e);
             return side(e.e) + (e.not ? ' does not ' + how.replace(/^(contains|starts|ends|matches|is)/, function (w) { return { contains: 'contain', starts: 'start', ends: 'end', matches: 'match', is: 'equal' }[w]; }) : ' ' + how);
         }
         default:
             return exprText(e);
     }
+}
+
+//  A LIKE's pattern,  in words:   '%jo%'  ->  "contains 'jo'"     'jo%'  ->  "starts with 'jo'"     'jo'  ->  "is 'jo'  (any capitals)"
+function likeHow(e) {
+    const p = e.pat.t === 'lit' && typeof e.pat.v === 'string' && e.esc === null ? e.pat.v : null;
+    const plain = p === null ? null : p.replace(/^%/, '').replace(/%$/, '');
+    return p === null || /[%_]/.test(plain) ? 'matches the pattern ' + (e.pat.t === 'col' ? e.pat.name : wordsOfValue(e.pat))
+        : p.length > 1 && p[0] === '%' && p[p.length - 1] === '%' ? 'contains ' + flexWords(plain)
+        : p[p.length - 1] === '%' ? 'starts with ' + flexWords(plain)
+        : p[0] === '%' ? 'ends with ' + flexWords(plain)
+        : 'is ' + flexWords(plain) + '  (any capitals)';
+}
+
+//  The builder's "any column":   (Name LIKE '%jo%' OR City LIKE '%jo%' OR ...)   ->   "any column contains 'jo'"
+//  Only when it's EVERY column of the table,  each once,  with the same LIKE   (else it's said test by test,  as written).
+function anyColumnWords(e, c, catalog) {
+    if (e.t !== 'or' || c === null || c.from === null || c.from.t !== 'table') return null;
+    const table = catalog.find(c.from.name);
+    if (table === null) return null;
+    const tests = [];
+    (function flat(x) { if (x.t === 'or') { flat(x.a); flat(x.b); } else tests.push(x); })(e);
+    const names = columnNames(table).map(function (n) { return n.toLowerCase(); });
+    if (tests.length < 2 || tests.length !== names.length) return null;
+    const sameAs = function (x) { return x.t === 'like' && !x.not && x.e.t === 'col' && exprText(x.pat) === exprText(tests[0].pat) && (x.esc === null) === (tests[0].esc === null) && (x.esc === null || exprText(x.esc) === exprText(tests[0].esc)); };
+    const seen = new Set();
+    for (const x of tests) {
+        if (!sameAs(x)) return null;
+        const n = String(x.e.name).toLowerCase();
+        if (names.indexOf(n) === -1 || seen.has(n)) return null;
+        seen.add(n);
+    }
+    return 'any column ' + likeHow(tests[0]);
 }
 
 const FLIP_WORDS = { '=': '=', '<>': '<>', '<': '>', '<=': '>=', '>': '<', '>=': '<=' };
