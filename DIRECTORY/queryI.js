@@ -46,6 +46,9 @@
         windows:    ROW_NUMBER()  RANK()  LAG()  SUM(...) OVER (PARTITION BY ... ORDER BY ...) ...
         and lots of functions for words,  numbers,  and dates.
 
+    Not SQL at all?   PLAIN WORDS work too:   "average score for each grade level"   (see PLAIN WORDS,  near the end).
+    And any question can be read BACK in plain words   ("In words:  every row of sales where ...":  queryInWords).
+
     When two databases disagree on a detail,  it does what SQLITE does
     (the tests check every answer against the real SQLite).
 
@@ -3700,7 +3703,8 @@ function* sortRows(rows, compare) {
 
 async function runQuery(text, catalog, isCurrent, progress, flexible) {
 
-    const flex = { fixes: [], grouped: false };         //  what Query Flexibility changed  (and did it add a GROUP BY?)
+    //  What Query Flexibility changed,  what that LEFT OUT  (amber on the page),  and did it add a GROUP BY?
+    const flex = { fixes: [], warnings: [], grouped: false };
     let sql = flexible ? flexTraps(text, catalog, flex) : text;
     let ready = null;
 
@@ -3709,36 +3713,53 @@ async function runQuery(text, catalog, isCurrent, progress, flexible) {
         try {
             ready = await readyQuery(sql, catalog, isCurrent);
         } catch (problem) {
-            if (!flexible || !(problem instanceof QueryError)) throw problem;
-            const better = round < FLEX_ROUNDS ? flexFix(sql, problem, catalog, flex) : null;
-            if (better === null || better === sql) {
-                problem.sql = sql;                      //  (what it got to,  so the brain can show where it's stuck)
-                problem.fixes = flex.fixes;
-                throw problem;
+            if (!(problem instanceof QueryError)) throw problem;
+            const better = flexible && round < FLEX_ROUNDS ? flexFix(sql, problem, catalog, flex) : null;
+            if (better !== null && better !== sql) { sql = better; continue; }
+
+            //  Stuck.   Was it PLAIN WORDS,  not SQL?   ("average score for each grade level")   Read it as words.
+            //  EVERY word understood?  That's the question:  run it.   Some not?  Ask first  ("Did you mean ...?",  see flexStuck).
+            //  (Never for DROP,  DELETE ...:  those stay refused.)
+            const words = flexible && !(problem.why && problem.why.kind === 'write') && flexLooksLikeWords(text, catalog)
+                ? await readWords(text, catalog, isCurrent) : null;
+            if (words !== null && words.unused.length === 0) {
+                flex.fixes = ['read your words as:   ' + words.sql];
+                flex.warnings = [];
+                sql = words.sql;
+                ready = await readyQuery(sql, catalog, isCurrent);
+                break;
             }
-            sql = better;
+            throw flexStuck(problem, text, sql, flex, words, catalog, flexible);
         }
     }
 
     let answer = await runPlan(ready, isCurrent, progress);
 
-    //  SNAP TO RESULT:  no rows,  but a word you compared to is in the file spelled a little differently?
-    if (flexible && answer.rows.length === 0) {
-        const snapped = await flexSnap(sql, ready.picked, catalog, isCurrent);
-        if (snapped !== null) {
-            const again = await runPlan(await readyQuery(snapped.sql, catalog, isCurrent), isCurrent, progress);
-            if (again.rows.length > 0) {
-                sql = snapped.sql;
-                answer = again;
-                flex.fixes.push.apply(flex.fixes, snapped.fixes);
-            }
+    //  SNAP TO RESULT:  nothing in the answer,  but the question asked for something the FILE writes another way?
+    //      status = 'Shipped'   ->   'shipped'   (how the file spells it)
+    //      notes = ''           ->   notes IS NULL   (in a CSV an empty cell is NULL,  never '')
+    //  ("Nothing" = no rows,  or one row of totals of nothing:  COUNT = 0,  SUM = NULL.)
+    if (flexible && answerIsEmpty(answer, ready.picked)) {
+        for (const snap of [flexEmptyWords, flexSnap]) {
+            const snapped = await snap(sql, ready.picked, catalog, isCurrent);
+            if (snapped === null) continue;
+            const again = await readyQuery(snapped.sql, catalog, isCurrent);
+            const other = await runPlan(again, isCurrent, progress);
+            if (answerIsEmpty(other, again.picked)) continue;
+            sql = snapped.sql;
+            ready = again;
+            answer = other;
+            flex.fixes.push.apply(flex.fixes, snapped.fixes);
+            break;
         }
     }
 
     answer.ran = ready.statements.length;
     answer.count = ready.statements.length;
+    answer.skipped = ready.statements.filter(function (s) { return s.t === 'write'; }).map(function (s) { return s.verb; });     //  DROP ... before the question:  never run
     answer.sql = sql;
     answer.fixes = flex.fixes;
+    answer.warnings = flex.warnings;
     const looks = answerLooks(ready.picked, ready.plan, catalog);
     answer.columns.forEach(function (c, k) { c.look = looks[k]; });
     return answer;
@@ -3795,7 +3816,7 @@ async function readyQuery(text, catalog, isCurrent) {
 
     if (picked.t === 'write') {
         queryFail(picked.verb + '  would change the data,  so it can\'t run here:  this tool only READS  (your file is never changed).  ' +
-                  'Try a SELECT,  like:   SELECT * FROM ' + (catalog.names()[0] || 'your_table') + ' LIMIT 10');
+                  'Try a SELECT,  like:   SELECT * FROM ' + (catalog.names()[0] || 'your_table') + ' LIMIT 10', { kind: 'write', verb: picked.verb });
     }
 
     //  Which tables does it use?   Get them ready first  (another sheet of the file has to be read).
@@ -3894,7 +3915,7 @@ function queryProblem(problem) {
 
 // ----------------------------------------------------------
 //
-//    FLEXIBILITY   ("Query Flexibility":  the checkbox in the query menu,  on at the start)
+//    FLEXIBILITY   ("Query Flexibility":  the  "Fix my typos"  checkbox in the query menu,  on at the start)
 //
 //    The SQL people type FIRST is hardly ever perfect:
 //
@@ -3906,18 +3927,28 @@ function queryProblem(problem) {
 //        ... where statuss = 'shipped'          ->   ... where status = 'shipped'
 //        ... where status contains 'ship'       ->   ... where status LIKE '%ship%'
 //        select status, count(*) from orders    ->   ... GROUP BY status
-//        ... where qty >                        ->   (the unfinished end is left out)
+//        ... where name = 'Liam O'Brien'        ->   ... 'Liam O''Brien'          (an  '  inside words is written twice)
+//        ... where score = 92%                  ->   ... score = '92%'            (% alone means "the remainder")
+//        ... where score between 90-100         ->   ... between 90 AND 100       (also  90 TO 100)
+//        ... where score > 90 and < 100         ->   ... and score < 100          (the column,  said again)
+//        ... where qty >                        ->   (the unfinished end is left out,  and that's a WARNING:  see below)
 //
 //    THE RULE:  your SQL runs EXACTLY as you wrote it,  if it can.   Only when it CAN'T  (a mistake),
 //    that one mistake gets fixed,  and it tries again  (up to FLEX_ROUNDS times).
 //    Every fix is written down in words  (flex.fixes),  so the page can tell you what changed.
+//    A fix that LEFT OUT a condition  (where qty >)  is also a WARNING  (flex.warnings):  that answer has rows
+//    the question meant to keep out,  so the page says it in amber,  right on the answer.
 //
-//    Two traps are fixed even though they'd run,  because they'd QUIETLY give the wrong answer:
-//        ordered > 2024-05-01      that's MATH  (2024 - 5 - 1 = 2018),  not a date     ->   '2024-05-01'
-//        select status qty ...     that's  status  nicknamed "qty".   But qty is a column:  a comma is missing.
+//    Three traps are fixed even though they'd run,  because they'd QUIETLY give the wrong answer:
+//        ordered > 2024-05-01           that's MATH  (2024 - 5 - 1 = 2018),  not a date     ->   '2024-05-01'
+//        select status qty ...          that's  status  nicknamed "qty".   But qty is a column:  a comma is missing.
+//        between 90-100 and grade = 'A' that's  BETWEEN -10 AND grade:  the AND was the next condition's   ->   90 AND 100
 //
-//    And one after it runs:  SNAP TO RESULT.   No rows,  because you asked for  status = 'Shipped'
-//    and the file only ever says  'shipped'?   It snaps to how the file spells it,  and runs again.
+//    And after it runs:  SNAP TO RESULT.   Nothing in the answer,  because you asked for  status = 'Shipped'
+//    and the file only ever says  'shipped'?   (Or  notes = ''  in a CSV,  where an empty cell is NULL?)
+//    It snaps to how the FILE writes it,  and runs again.
+//
+//    Stuck,  and it reads like PLAIN WORDS  ("average score for each grade level")?   See PLAIN WORDS,  below.
 //
 // ----------------------------------------------------------
 
@@ -3933,7 +3964,12 @@ const FLEX_SELECT = new Set(['SHOW', 'GET', 'FIND', 'LIST', 'DISPLAY', 'PICK']);
 const FLEX_ENDINGS = /\.(csv|tsv|txt|xlsx|xlsm|xls|sql|json|db)$/i;
 
 //  Where an unfinished end gets cut off   (... WHERE qty >   ->   cut from WHERE)
-const FLEX_CUT_AT = new Set(['WHERE', 'AND', 'OR', 'HAVING', 'LIMIT', 'OFFSET', 'ON', 'BY']);
+//  (Not ON:  a JOIN with its ON left out pairs EVERY row with every row.   An unfinished ON stays a mistake.)
+const FLEX_CUT_AT = new Set(['WHERE', 'AND', 'OR', 'HAVING', 'LIMIT', 'OFFSET', 'BY']);
+
+//  Cutting from one of these leaves out a CONDITION:  the answer then has rows the question meant to keep out.
+//  That's more than a typo fixed,  so it's said as a WARNING  (flex.warnings),  and the page shows it in amber.
+const FLEX_WIDENS = new Set(['WHERE', 'AND', 'OR', 'HAVING']);
 
 //  The parts that come after FROM  /  after GROUP BY   (a new FROM  /  GROUP BY  goes in front of the first one there is)
 const FLEX_AFTER_FROM  = new Set(['WHERE', 'GROUP', 'HAVING', 'ORDER', 'LIMIT', 'OFFSET', 'FETCH', 'UNION', 'INTERSECT', 'EXCEPT']);
@@ -4076,6 +4112,22 @@ function flexTraps(sql, catalog, flex) {
         }
     }
 
+    //  3.  A range written with a dash,  then another condition:   score BETWEEN 90-100 AND grade = 'A'
+    //      It RUNS,  but  90-100  is math  (-10),  and BETWEEN takes the AND that was meant for the next condition.
+    for (let j = 0; j + 6 < tk.length; j++) {
+        if (!flexIsWord(tk[j], 'BETWEEN')) continue;
+        const lo = tk[j + 1], dash = tk[j + 2], hi = tk[j + 3], next = tk[j + 5], how = tk[j + 6];
+        if (lo.k !== 'num' || !flexIsOp(dash, '-') || hi.k !== 'num' || lo.to !== dash.at || dash.to !== hi.at) continue;    //  90-100,  as ONE thing
+        if (!flexIsWord(tk[j + 4], 'AND') || !flexIsName(next)) continue;
+        const condition = (how.k === 'op' && COMPARE_SYMBOLS.has(how.v)) || flexIsWord(how, 'IS') || flexIsWord(how, 'LIKE') ||
+                          flexIsWord(how, 'ILIKE') || flexIsWord(how, 'IN') || flexIsWord(how, 'BETWEEN') || flexIsWord(how, 'NOT');
+        if (!condition) continue;                                       //  (BETWEEN 100-5 AND 200:  that one IS math,  and fine)
+        edits.push([lo.to, hi.at, ' AND ']);
+        flex.fixes.push(sql.slice(lo.at, hi.to) + '  ->  ' + sql.slice(lo.at, lo.to) + ' AND ' + sql.slice(hi.at, hi.to) +
+                        '   (a range:  written with a dash it\'s math,  ' + sql.slice(lo.at, hi.to) + ' = ' + numberText(lo.v - hi.v) + ')');
+        j += 4;
+    }
+
     edits.sort(function (x, y) { return y[0] - x[0]; });                 //  (from the end backward,  so the spots don't move)
     edits.forEach(function (e) { sql = sql.slice(0, e[0]) + e[2] + sql.slice(e[1]); });
     return sql;
@@ -4087,6 +4139,16 @@ function flexFix(sql, problem, catalog, flex) {
 
     const why = problem.why;
     if (!why) return null;
+
+    //  An  '  INSIDE words  ('Liam O'Brien',  'don't'):  it ended the words too soon.   SQL writes it twice:   'O''Brien'
+    if ((why.kind === 'unclosed' && why.close === "'") || why.kind === 'parse') {
+        const doubled = flexApostrophes(sql);
+        if (doubled !== null) {
+            flex.fixes.push(doubled.words.join(',  ') + '  ->  ' + doubled.words.map(function (w) { return w.split("'").join("''"); }).join(',  ') +
+                            '   (an  \'  inside words is written twice in SQL)');
+            return doubled.sql;
+        }
+    }
 
     //  A quote that never ends:  end it  (at the very end,  before a last  ;).
     if (why.kind === 'unclosed') {
@@ -4214,6 +4276,49 @@ function flexFix(sql, problem, catalog, flex) {
             return sql.slice(0, prev.to) + ')' + sql.slice(prev.to);
         }
 
+        //  5b.  A percent:   score = 92%    (% on its own means "the remainder",  and nothing comes after it)   ->   '92%'
+        //       (In quotes it's a number with a look,  like the file's  92%  cells:  next to a number column it's 92.)
+        const num = tk[i - 2];
+        if (flexIsOp(prev, '%') && num !== undefined && num.k === 'num' && num.to === prev.at &&
+            (atEnd || flexIsOp(t, ')') || flexIsOp(t, ',') || (t.k === 'id' && SQL_RESERVED.has(t.u)))) {
+            const quoted = flexWords(sql.slice(num.at, prev.to));
+            say(sql.slice(num.at, prev.to) + '  ->  ' + quoted + '   (a percent:  % on its own means "the remainder")');
+            return sql.slice(0, num.at) + quoted + sql.slice(prev.to);
+        }
+
+        //  5c.  A range with a dash  (BETWEEN 90-100)  or with TO  (BETWEEN 90 TO 100):   BETWEEN 90 AND 100
+        if (problem.message.indexOf('Expected  AND') === 0) {
+            let b = -1;
+            for (let j = i - 1; j >= s && b === -1; j--) if (depth[j] === depth[i] && flexIsWord(tk[j], 'BETWEEN')) b = j;
+            if (b !== -1 && flexIsWord(t, 'TO')) {
+                say(sql.slice(t.at, t.to) + '  ->  AND   (BETWEEN puts AND between its two ends)');
+                return swap(t, t, 'AND');
+            }
+            const lo = tk[b + 1], dash = tk[b + 2], hi = tk[b + 3];
+            if (b !== -1 && i === b + 4 && lo.k === 'num' && flexIsOp(dash, '-') && hi.k === 'num' && lo.to === dash.at && dash.to === hi.at) {
+                say(sql.slice(lo.at, hi.to) + '  ->  ' + sql.slice(lo.at, lo.to) + ' AND ' + sql.slice(hi.at, hi.to) + '   (a range:  BETWEEN puts AND between its two ends)');
+                return sql.slice(0, lo.to) + ' AND ' + sql.slice(hi.at);
+            }
+        }
+
+        //  5d.  The column left out after AND / OR:   score > 90 AND < 100   ->   score > 90 AND score < 100
+        if (t.k === 'op' && COMPARE_SYMBOLS.has(t.v) && (flexIsWord(prev, 'AND') || flexIsWord(prev, 'OR'))) {
+            let c = -1;                                     //  the comparison before it  (in the same part,  in the same  ( )
+            for (let j = i - 2; j > s && c === -1; j--) {
+                if (depth[j] < depth[i]) break;
+                if (depth[j] !== depth[i]) continue;
+                if (tk[j].k === 'id' && (tk[j].u === 'WHERE' || tk[j].u === 'HAVING' || tk[j].u === 'ON' || tk[j].u === 'WHEN' || tk[j].u === 'SELECT')) break;
+                if (tk[j].k === 'op' && COMPARE_SYMBOLS.has(tk[j].v)) c = j;
+            }
+            if (c !== -1 && flexIsName(tk[c - 1])) {
+                let from = c - 1;                           //  (people.score:  the whole name)
+                while (flexIsOp(tk[from - 1], '.') && tk[from - 2] !== undefined && (tk[from - 2].k === 'id' || tk[from - 2].k === 'qid')) from -= 2;
+                const left = sql.slice(tk[from].at, tk[c - 1].to);
+                say(sql.slice(prev.at, t.to) + '  ->  ' + sql.slice(prev.at, prev.to) + ' ' + left + ' ' + sql.slice(t.at, t.to) + '   (said which column again)');
+                return flexInsert(sql, t.at, left);
+            }
+        }
+
         //  6.  It stopped at the END:  the end is unfinished.   Leave it out   (... WHERE qty >   ...  LIMIT   select status,)
         if (atEnd) {
             let cut = -1;
@@ -4223,6 +4328,10 @@ function flexFix(sql, problem, catalog, flex) {
             if (cut === -1) return null;
             if (flexIsWord(tk[cut], 'BY') && (flexIsWord(tk[cut - 1], 'ORDER') || flexIsWord(tk[cut - 1], 'GROUP'))) cut--;
             say('left out the unfinished  ' + words(cut, i - 1));
+            //  A condition left out  (or a WHERE with nothing in it)?   The answer has rows the question meant to keep out:  say so LOUDLY.
+            if (tk[cut].k === 'id' && FLEX_WIDENS.has(tk[cut].u) && (i - 1 > cut || tk[cut].u === 'WHERE' || tk[cut].u === 'HAVING')) {
+                flex.warnings.push('NOT filtered by  ' + words(cut, i - 1) + '   (it wasn\'t finished,  so it was left out)');
+            }
             return sql.slice(0, tk[cut].at).replace(/\s+$/, '') + sql.slice(prev.to);
         }
 
@@ -4410,10 +4519,10 @@ function flexFix(sql, problem, catalog, flex) {
 
 
 //  Fix a question WITHOUT running it   (for the builder:  your SQL,  snapped into its buttons).
-//      ->  { sql,  fixes }     (still wrong at the end?  sql is as far as the fixing got)
+//      ->  { sql,  fixes,  warnings }     (still wrong at the end?  sql is as far as the fixing got)
 //  (Right away,  not in bites:  it only reads and compiles.   Another sheet that isn't read yet stays as it is.)
 function flexSync(text, catalog) {
-    const flex = { fixes: [], grouped: false };
+    const flex = { fixes: [], warnings: [], grouped: false };
     let sql = flexTraps(text, catalog, flex);
     for (let round = 0; round < FLEX_ROUNDS; round++) {
         try {
@@ -4429,7 +4538,7 @@ function flexSync(text, catalog) {
             sql = better;
         }
     }
-    return { sql: sql, fixes: flex.fixes };
+    return { sql: sql, fixes: flex.fixes, warnings: flex.warnings };
 }
 
 
@@ -4500,4 +4609,1057 @@ async function flexSpelling(ask, isCurrent) {
         else if (found !== v) return null;              //  two different spellings:  which one?  Don't guess.
     }
     return found;
+}
+
+
+//  The  '  marks INSIDE words   ('Liam O'Brien':  the one between O and B)   ->   { sql  (each one written twice),  words }
+//  null  =  there are none,  or the quotes STILL don't add up with them doubled  (then the mistake was something else).
+//  (Only ever after a mistake:   x='a'OR y=1   is fine SQL,  and a question that runs is never changed.)
+function flexApostrophes(sql) {
+    const letter = function (c) { return c !== undefined && c.toLowerCase() !== c.toUpperCase(); };
+    const digit  = function (c) { return c !== undefined && c >= '0' && c <= '9'; };
+    const inside = [];
+    let state = '';                                     //  ''  =  outside,   "'"  =  in words,   '"'  '`'  ']'  =  in a name
+    for (let i = 0; i < sql.length; i++) {
+        const c = sql[i];
+        if (state === '') {
+            if (c === "'") state = "'";
+            else if (c === '"' || c === '`') state = c;
+            else if (c === '[') state = ']';
+            else if (c === '-' && sql[i + 1] === '-') { while (i < sql.length && sql.charCodeAt(i) !== 10) i++; }
+            else if (c === '/' && sql[i + 1] === '*') { const end = sql.indexOf('*/', i + 2); if (end === -1) return null; i = end + 1; }
+            continue;
+        }
+        if (state !== "'") {                            //  in a name:  only its own closing mark counts   ("" = a real ")
+            if (c === state) { if (state !== ']' && sql[i + 1] === state) i++; else state = ''; }
+            continue;
+        }
+        if (c !== "'") continue;
+        if (sql[i + 1] === "'") { i++; continue; }      //  ''  =  already written twice
+        if ((letter(sql[i - 1]) || digit(sql[i - 1])) && letter(sql[i + 1])) { inside.push(i); continue; }     //  O'Brien:  inside the words
+        state = '';
+    }
+    if (state !== '' || inside.length === 0) return null;
+    let out = sql;
+    for (let k = inside.length - 1; k >= 0; k--) out = out.slice(0, inside[k]) + "'" + out.slice(inside[k]);
+    try { sqlTokens(out); } catch (problem) { if (problem instanceof QueryError) return null; throw problem; }
+    const marks = new Set(inside), words = [];
+    inside.forEach(function (at) {                      //  the words each one was in   (for the fix's note:   O'Brien  ->  O''Brien)
+        let a = at, b = at + 1;
+        while (a > 0 && (letter(sql[a - 1]) || digit(sql[a - 1]) || marks.has(a - 1))) a--;
+        while (b < sql.length && (letter(sql[b]) || digit(sql[b]) || marks.has(b))) b++;
+        const w = sql.slice(a, b);
+        if (words.indexOf(w) === -1) words.push(w);
+    });
+    return { sql: out, words: words };
+}
+
+
+//  An answer with NOTHING in it:  no rows,  or one row of totals of nothing  (COUNT = 0,  SUM = NULL ...).
+//  (Snap to result only looks again after an answer like that.)
+function answerIsEmpty(answer, picked) {
+    if (answer.rows.length === 0) return true;
+    if (answer.rows.length > 1 || picked.t !== 'query' || picked.body.t !== 'core' || picked.body.group !== null) return false;
+    if (!picked.body.items.every(function (it) { return !it.star && isTotal(it.e); })) return false;
+    return answer.rows[0].every(function (v) { return v === null || v === 0; });
+}
+
+
+//  column = ''   where an EMPTY cell means NULL  (a CSV,  an Excel sheet):  no row there is ever  ''   ->   column IS NULL
+//  (Only after an empty answer,  like the spelling snap.   A SQL dump keeps  ''  and NULL apart:  it's left alone there.)
+function flexEmptyWords(sql, picked, catalog) {
+    let tk;
+    try { tk = sqlTokens(sql); } catch (problem) { if (problem instanceof QueryError) return null; throw problem; }
+    const columns = new Set();
+    walkQuery(picked, function (item) {
+        const table = catalog.find(item.name);
+        if (table !== null && table.emptyIsNull) columnNames(table).forEach(function (c) { columns.add(c.toLowerCase()); });
+    });
+    const edits = [], fixes = [];
+    for (let j = 2; j < tk.length; j++) {
+        const empty = tk[j], is = tk[j - 1], col = tk[j - 2];
+        if (empty.k !== 'str' || empty.v !== '' || !(flexIsOp(is, '=') || flexIsOp(is, '=='))) continue;
+        if (!(col.k === 'id' || col.k === 'qid') || !columns.has(String(col.v).toLowerCase()) || flexIsOp(tk[j + 1], '||')) continue;
+        edits.push([is.at, empty.to, 'IS NULL']);
+        fixes.push(sql.slice(col.at, empty.to) + '  ->  ' + sql.slice(col.at, col.to) + ' IS NULL   (an empty cell is NULL here,  not \'\')');
+    }
+    if (edits.length === 0) return null;
+    let out = sql;
+    for (let k = edits.length - 1; k >= 0; k--) out = out.slice(0, edits[k][0]) + edits[k][2] + out.slice(edits[k][1]);
+    return { sql: out, fixes: fixes };
+}
+
+
+//  STUCK:  even fixed,  the question can't run.   Put what's known on the problem,  in words for you  (and for the code).
+function flexStuck(problem, text, sql, flex, words, catalog, flexible) {
+
+    const write = problem.why && problem.why.kind === 'write';
+
+    //  Plain words,  only partly understood:   "Did you mean ...?"   (The page offers to ask it:  YOU decide.)
+    //  (No question at all,  but it knows WHY a word didn't fit?   "average Letter Grade":  it's words,  not numbers.   Say that.)
+    if (words !== null) {
+        const asked = new QueryError(words.sql === null
+            ? 'That reads like plain words,  and I couldn\'t make a question of it:   ' + words.unused.join('   ·   ') + '.   Try words like:   ' +
+              wordsExamples(catalog).join('   ·   ')
+            : 'That reads like plain words.   Did you mean:   ' + words.meaning + '?' + '   (I didn\'t use:  ' + words.unused.join(',  ') + ')');
+        asked.why = { kind: 'words', sql: words.sql, unused: words.unused, meaning: words.meaning };
+        asked.sql = text;
+        asked.fixes = [];
+        asked.warnings = [];
+        return asked;
+    }
+
+    problem.sql = sql;                                  //  (how far the fixing got,  so the brain can show where it's stuck)
+    problem.fixes = flex.fixes;
+    problem.warnings = flex.warnings;
+
+    //  Plain words,  but no question in them at all   ("please help me"):   instead of SQL's words,  examples with YOUR columns.
+    if (flexible && !write && flexLooksLikeWords(text, catalog)) {
+        const plain = new QueryError('That reads like plain words,  and I couldn\'t find a question in them.   Try words like:   ' +
+                                     wordsExamples(catalog).join('   ·   ') + '   (or SQL:  it starts with SELECT)');
+        plain.why = { kind: 'words', sql: null, unused: [], meaning: null };
+        plain.sql = text;
+        plain.fixes = [];
+        plain.warnings = [];
+        return plain;
+    }
+
+    //  More than one question  (split by  ;):   only the LAST one runs.   Say so,  and whether the one before it was fine.
+    if (flexStatementCount(text) > 1) {
+        problem.message = 'The LAST question  (after the last  ;)  has a problem:   ' + problem.message +
+            (flexEarlierIsFine(text, catalog)
+                ? '   (Only the last question in the box runs.   The one before it is fine on its own:  delete what comes after its  ;  to run it.)'
+                : '   (Only the last question in the box runs.)');
+    }
+
+    //  Fixing is OFF,  and those are plain words?   Say how to ask in words.
+    if (!flexible && !write && flexLooksLikeWords(text, catalog)) {
+        problem.message += '   (Those look like plain words:  tick  "Fix my typos"  to ask in your own words.)';
+    }
+    return problem;
+}
+
+//  Where each question in the text starts and stops  (split by the  ;  marks that aren't inside  ( )):   [[first token, end token] ...]
+function flexStatementRanges(tk) {
+    const out = [];
+    let start = 0, depth = 0;
+    for (let j = 0; j < tk.length; j++) {
+        const t = tk[j];
+        if (t.k === 'op' && t.v === '(') depth++;
+        else if (t.k === 'op' && t.v === ')') depth = Math.max(0, depth - 1);
+        if (t.k === 'end' || (t.k === 'op' && t.v === ';' && depth === 0)) {
+            if (j > start) out.push([start, j]);
+            start = j + 1;
+        }
+    }
+    return out;
+}
+
+function flexStatementCount(text) {
+    try { return flexStatementRanges(sqlTokens(text)).length; }
+    catch (problem) { if (problem instanceof QueryError) return 1; throw problem; }
+}
+
+//  The question BEFORE the last one:  a whole,  good question on its own?   (Then only what came after it is wrong.)
+function flexEarlierIsFine(text, catalog) {
+    try {
+        const tk = sqlTokens(text);
+        const ranges = flexStatementRanges(tk);
+        if (ranges.length < 2) return false;
+        const statements = parseSql(text.slice(0, tk[ranges[ranges.length - 1][0]].at));
+        const picked = statements[statements.length - 1];
+        if (picked.t !== 'query') return false;
+        compileQuery(picked, null, { catalog: catalog, ctes: new Map(), owner: null });
+        return true;
+    } catch (problem) {
+        if (problem instanceof QueryError) return false;
+        throw problem;
+    }
+}
+
+//  The SHAPE of a command that changes data,  anywhere in the text   (DROP TABLE,  DELETE FROM,  INSERT INTO,  UPDATE x SET ...)
+const FLEX_WRITE_SHAPE = /\b(DROP|TRUNCATE|ALTER)\s+(TABLE|DATABASE|INDEX|VIEW|SCHEMA)\b|\bDELETE\s+FROM\b|\bINSERT\s+(OR\s+\w+\s+)?INTO\b|\bUPDATE\s+\S+\s+SET\b|\b(GRANT|REVOKE)\s+\w+/i;
+
+//  Does this read like PLAIN WORDS,  not SQL?
+//      show me the A students                    ->  yes   (it doesn't start the way SQL does)
+//      select the kids who passed                ->  yes   (most of its words are no SQL word,  no column,  no table)
+//      SELECT * FROM orders WHERE Name = Bob     ->  no    (SQL,  with a mistake in it:  SQL's own words say what's wrong)
+function flexLooksLikeWords(text, catalog) {
+    let first;
+    try {
+        const tk = sqlTokens(text).filter(function (t) { return !(t.k === 'op' && t.v === ';'); });     //  (only comments and  ;  ?   No question at all)
+        first = tk[0].k === 'id' ? tk[0].u : tk[0].k === 'op' ? tk[0].v : tk[0].k;
+    } catch (problem) {
+        if (!(problem instanceof QueryError)) throw problem;
+        const word = wordPieces(text).find(function (p) { return p.k === 'word'; });      //  (it can't even be cut into SQL:   show me Liam O'Brien)
+        first = word === undefined ? 'end' : word.v.toUpperCase();
+    }
+    if (first === 'end' || WRITE_COMMANDS.has(first)) return false;
+    if (FLEX_WRITE_SHAPE.test(wordsWithoutComments(text))) return false;           //  '; DROP TABLE x; --   is SQL that writes,  not a sentence
+    if (flexStatementCount(text) > 1) return false;                                 //  (people don't put  ;  between the parts of a sentence:  SQL does)
+    if (first !== 'SELECT' && first !== 'WITH' && first !== '(') return true;
+    const known = new Set();
+    catalog.names().forEach(function (n) {
+        known.add(flexKey(n));
+        const table = catalog.find(n);
+        if (table !== null) columnNames(table).forEach(function (c) { known.add(flexKey(c)); });
+    });
+    const plain = wordPieces(wordsWithoutComments(text)).filter(function (p) { return p.k === 'word'; });
+    const unknown = plain.filter(function (p) {
+        const u = p.v.toUpperCase();
+        return !SQL_RESERVED.has(u) && findFunction(u) === undefined && findTotal(u) === undefined && !known.has(flexKey(p.v));
+    });
+    return unknown.length >= 2 && unknown.length >= 0.4 * plain.length;
+}
+
+
+
+// ----------------------------------------------------------
+//
+//    A TABLE'S PROFILE   (what's IN each column:  for plain words,  and the menu's "Try:" questions)
+//
+//    One look at up to PROFILE_ROWS rows,  spread through the whole file  (in bites),  then kept on the table.
+//    For each of the first PROFILE_COLUMNS columns:
+//        { name,  kind,
+//          values,   Map:  the words written loosely  ->  the file's own spelling     ('shipped'  ->  'Shipped')
+//                    null  =  more than PROFILE_VALUES different ones  (names,  notes ...:  not a "pick one" column)
+//          count,    Map:  the file's spelling  ->  how many of the rows looked at have it
+//          filled }  how many of those rows have something in this column
+//
+// ----------------------------------------------------------
+
+const PROFILE_ROWS    = 20000;
+const PROFILE_COLUMNS = 60;
+const PROFILE_VALUES  = 500;
+
+async function tableProfile(table, isCurrent) {
+
+    if (table.profile) return table.profile;
+
+    const names = columnNames(table);
+    const width = Math.min(names.length, PROFILE_COLUMNS);
+    let stopAt = performance.now() + CHUNK_TIME;
+    async function breathe() {
+        if (performance.now() < stopAt) return;
+        await new Promise(function (go) { nextBite(go); });
+        if (!isCurrent()) throw QUERY_STALE;
+        stopAt = performance.now() + CHUNK_TIME;
+    }
+
+    //  Their kinds first  (in bites too:  a wide file's are a lot of looking)
+    const only = [];
+    for (let j = 0; j < width; j++) only.push(j);
+    const looking = lookAtKinds(table, only);
+    while (!looking.next().done) await breathe();
+
+    const cols = [];
+    for (let j = 0; j < width; j++) cols.push({ name: names[j], kind: table.kinds[j], values: new Map(), count: new Map(), filled: 0 });
+
+    const n = table.rowCount;
+    const sample = Math.min(n, PROFILE_ROWS);
+    const step = n / Math.max(sample, 1);
+    let work = 0;
+    for (let s = 0; s < sample; s++) {
+        work += width;
+        if (work >= BITE_CELLS || (s & 511) === 511) { work = 0; await breathe(); }
+        const r = Math.floor(s * step);
+        const cells = table.rowUpTo ? table.rowUpTo(r, width) : table.row(r);
+        for (let j = 0; j < width; j++) {
+            const v = cells[j];
+            if (v === undefined || v === '' || (table.isNull !== null && table.isNull(r, j))) continue;
+            const col = cols[j];
+            col.filled++;
+            if (col.values === null) continue;
+            const key = flexLoose(v);
+            if (!col.values.has(key)) {
+                if (col.values.size >= PROFILE_VALUES) { col.values = null; col.count = null; continue; }
+                col.values.set(key, v);
+            }
+            const spelled = col.values.get(key);
+            col.count.set(spelled, (col.count.get(spelled) || 0) + 1);
+        }
+    }
+
+    table.profile = { rows: sample, columns: cols };
+    return table.profile;
+}
+
+function isNumberKind(kind) {
+    return kind === 'int' || kind === 'real' || kind === 'num';
+}
+
+//  What each column is FOR   (from its profile):
+//      groups     2 to 12 different values  (and fewer than half the rows):   Region,  Status,  Grade Level   ->  "for each ..."
+//      measures   numbers that change  (not a group,  not an ID)                                             ->  "average ...",  "top 5 by ..."
+//      dates      dates                                                                                      ->  "newest first"
+const ID_LIKE = /(^|[^A-Za-z])(id|ID|Id)$/;
+
+function profileRoles(profile) {
+    const groups = [], measures = [], dates = [];
+    profile.columns.forEach(function (c) {
+        if (c.filled === 0) return;
+        const size = c.values === null ? Infinity : c.values.size;
+        const group = size >= 2 && size <= 12 && size <= Math.max(2, c.filled / 2);
+        if (group) groups.push(c);
+        //  (a number with only a few values is a code:  Grade Level 9 / 10.   With more  (qty 1 ... 10),  it's ALSO a measure)
+        if (isNumberKind(c.kind) && size > (group ? 5 : 1) && !ID_LIKE.test(c.name)) measures.push(c);
+        if (c.kind === 'date' || c.kind === 'timestamp') dates.push(c);
+    });
+    //  Words make the best groups  (Status,  Region),  then the fewest values   (the order is always the same:  a sort that keeps ties)
+    const size = function (c) { return c.values === null ? Infinity : c.values.size; };
+    groups.sort(function (a, b) { return (isNumberKind(a.kind) - isNumberKind(b.kind)) || size(a) - size(b); });
+    return { groups: groups, measures: measures.filter(function (c) { return groups[0] !== c; }), dates: dates };
+}
+
+//  A value,  as SQL,  for a column of this kind:   a number stays a number  (for a number column),  anything else is words.
+function profileValue(v, kind) {
+    return isNumberKind(kind) && NUMBER_WORDS.test(v) ? String(v).trim() : flexWords(v);
+}
+
+//  The menu's "Try:" questions:  up to 4 REAL questions about this table,  each in plain words,  with its SQL.
+//  (Built only from its columns' profile:  the same table always gets the same ones.)
+function tableStarters(profile, tableName) {
+    const roles = profileRoles(profile);
+    const from = ' FROM ' + flexName(tableName);
+    const g = roles.groups[0], m = roles.measures[0], d = roles.dates[0];
+    const out = [];
+    if (g) out.push({ words: 'How many for each ' + g.name,
+                      sql: 'SELECT ' + flexName(g.name) + ', COUNT(*)' + from + ' GROUP BY ' + flexName(g.name) + ' ORDER BY COUNT(*) DESC' });
+    if (g && m) out.push({ words: 'Average ' + m.name + ' for each ' + g.name,
+                           sql: 'SELECT ' + flexName(g.name) + ', AVG(' + flexName(m.name) + ')' + from + ' GROUP BY ' + flexName(g.name) +
+                                ' ORDER BY AVG(' + flexName(m.name) + ') DESC' });
+    if (m) out.push({ words: 'Top 5 by ' + m.name, sql: 'SELECT *' + from + ' ORDER BY ' + flexName(m.name) + ' DESC LIMIT 5' });
+    if (d && out.length < 4) out.push({ words: 'Newest 10 by ' + d.name, sql: 'SELECT *' + from + ' ORDER BY ' + flexName(d.name) + ' DESC LIMIT 10' });
+    if (g && out.length < 4) {
+        let common = null, most = 0;
+        g.count.forEach(function (n, v) { if (n > most) { most = n; common = v; } });
+        out.push({ words: 'Rows where ' + g.name + ' is ' + common, sql: 'SELECT *' + from + ' WHERE ' + flexName(g.name) + ' = ' + profileValue(common, g.kind) });
+    }
+    if (out.length === 0) out.push({ words: 'The first 10 rows', sql: 'SELECT *' + from + ' LIMIT 10' });
+    return out.slice(0, 4);
+}
+
+//  2 or 3 plain-word questions with this table's OWN column names   (for "Try words like ...")
+function wordsExamples(catalog) {
+    const name = catalog.names()[0];
+    const table = name === undefined ? null : catalog.find(name);
+    if (table === null || !table.profile) return ['how many rows', 'the first 10 rows'];
+    return tableStarters(table.profile, name).map(function (s) { return s.words.charAt(0).toLowerCase() + s.words.slice(1); }).slice(0, 3);
+}
+
+
+
+// ----------------------------------------------------------
+//
+//    PLAIN WORDS  ->  SQL   (the words box at the top of the query menu,  and plain words typed in the SQL box)
+//
+//        how many for each grade level             ->   SELECT "Grade Level", COUNT(*) FROM class_data GROUP BY "Grade Level"
+//        average score per grade level             ->   SELECT "Grade Level", AVG(Score) FROM class_data GROUP BY "Grade Level"
+//        who has the highest score                 ->   SELECT * FROM class_data ORDER BY Score DESC LIMIT 1
+//        names and scores where score is over 90   ->   SELECT "Student Name", Score FROM class_data WHERE Score > 90
+//        show me the A students                    ->   SELECT * FROM class_data WHERE "Letter Grade" = 'A'
+//
+//    NOT a mind reader,  on purpose.   It knows:
+//        -  the open table's COLUMN names   (any capitals,  spaces or _,  one word of a longer name,  a plural,  a small typo)
+//        -  its VALUES   ("A",  "shipped":  read from the file  (its profile),  so they're spelled the file's way)
+//        -  numbers,  'words in quotes',  dates  (2024-05-01)
+//        -  the plain words for the parts of a question  (WORDS_KNOWN),  and the little words of a sentence  (WORDS_FILLER)
+//    Any OTHER word is handed back as UNUSED.   A question with an unused word never runs by itself:
+//    the page asks "Did you mean ...?" first.   So it can't quietly answer a different question.
+//
+//    ->  { sql,  unused  (words),  meaning  (the question back in words) }     or null  (nothing in it to use)
+//
+// ----------------------------------------------------------
+
+const WORDS_KNOWN = new Map([
+    //  totals
+    ['how many', 'count'], ['number of', 'count'], ['count of', 'count'], ['count', 'count'], ['total number of', 'count'],
+    ['how many different', 'distinct'], ['number of different', 'distinct'], ['different', 'distinct'], ['distinct', 'distinct'], ['unique', 'distinct'],
+    ['average', 'avg'], ['average of', 'avg'], ['avg', 'avg'], ['mean', 'avg'],
+    ['total', 'sum'], ['total of', 'sum'], ['sum', 'sum'], ['sum of', 'sum'], ['add up', 'sum'],
+    ['median', 'median'], ['middle value of', 'median'],
+    ['highest', 'high'], ['biggest', 'high'], ['largest', 'high'], ['greatest', 'high'], ['maximum', 'high'], ['max', 'high'], ['most', 'high'],
+    ['latest', 'high'], ['newest', 'high'], ['most recent', 'high'],
+    ['lowest', 'low'], ['smallest', 'low'], ['least', 'low'], ['minimum', 'low'], ['min', 'low'], ['fewest', 'low'], ['earliest', 'low'], ['oldest', 'low'],
+    //  groups
+    ['for each', 'each'], ['for every', 'each'], ['in each', 'each'], ['per', 'each'], ['each', 'each'], ['grouped by', 'each'], ['group by', 'each'],
+    ['broken down by', 'each'], ['by', 'by'],
+    //  sorting,  and how many rows
+    ['sorted by', 'sort'], ['sort by', 'sort'], ['order by', 'sort'], ['ordered by', 'sort'], ['ranked by', 'sort'], ['sorted', 'sort'], ['sort', 'sort'],
+    ['highest first', 'desc'], ['biggest first', 'desc'], ['largest first', 'desc'], ['most first', 'desc'], ['high to low', 'desc'], ['descending', 'desc'],
+    ['desc', 'desc'], ['z to a', 'desc'], ['z-a', 'desc'], ['newest first', 'desc'], ['latest first', 'desc'],
+    ['lowest first', 'asc'], ['smallest first', 'asc'], ['least first', 'asc'], ['low to high', 'asc'], ['ascending', 'asc'], ['asc', 'asc'],
+    ['a to z', 'asc'], ['a-z', 'asc'], ['alphabetical', 'asc'], ['alphabetically', 'asc'], ['oldest first', 'asc'], ['earliest first', 'asc'],
+    ['top', 'top'], ['bottom', 'bottom'], ['first', 'first'], ['limit', 'first'],
+    //  conditions
+    ['more than', '>'], ['greater than', '>'], ['higher than', '>'], ['bigger than', '>'], ['larger than', '>'], ['over', '>'], ['above', '>'],
+    ['after', '>'], ['later than', '>'], ['>', '>'],
+    ['at least', '>='], ['no less than', '>='], ['>=', '>='],
+    ['or more', '>=after'], ['or higher', '>=after'], ['or above', '>=after'], ['and up', '>=after'], ['or later', '>=after'],
+    ['less than', '<'], ['fewer than', '<'], ['lower than', '<'], ['smaller than', '<'], ['under', '<'], ['below', '<'],
+    ['before', '<'], ['earlier than', '<'], ['<', '<'],
+    ['at most', '<='], ['no more than', '<='], ['<=', '<='],
+    ['or less', '<=after'], ['or fewer', '<=after'], ['or lower', '<=after'], ['or below', '<=after'], ['or earlier', '<=after'],
+    ['is not', '<>'], ['isn\'t', '<>'], ['isnt', '<>'], ['are not', '<>'], ['aren\'t', '<>'], ['not', '<>'], ['except', '<>'], ['other than', '<>'],
+    ['!=', '<>'], ['<>', '<>'],
+    ['is', '='], ['are', '='], ['was', '='], ['were', '='], ['equals', '='], ['equal to', '='], ['is equal to', '='], ['=', '='], ['==', '='],
+    ['between', 'between'], ['from', 'from'], ['to', 'to'], ['through', 'to'], ['-', 'to'], ['and', 'and'], ['or', 'or'],
+    ['contains', 'contains'], ['containing', 'contains'], ['contain', 'contains'], ['including', 'contains'], ['includes', 'contains'],
+    ['starts with', 'starts'], ['starting with', 'starts'], ['start with', 'starts'], ['begins with', 'starts'], ['beginning with', 'starts'],
+    ['ends with', 'ends'], ['ending with', 'ends'], ['end with', 'ends'],
+    ['is empty', 'empty'], ['is blank', 'empty'], ['is missing', 'empty'], ['are empty', 'empty'], ['are blank', 'empty'], ['are missing', 'empty'],
+    ['empty', 'empty'], ['blank', 'empty'], ['missing', 'empty'], ['no', 'no'], ['without', 'no'], ['without a', 'no'], ['without any', 'no'],
+    ['is not empty', 'filled'], ['isn\'t empty', 'filled'], ['not empty', 'filled'], ['not blank', 'filled'], ['filled in', 'filled'], ['filled', 'filled'],
+    ['with', 'with'], ['has', 'with'], ['have', 'with'], ['having', 'with'], ['has a', 'with'], ['have a', 'with'],
+]);
+
+//  The little words of a sentence:  left out,  no harm done   ("please show me ALL the rows",  "who got the highest ...").
+const WORDS_FILLER = new Set(('a an the of me my us our we i you your please can could would will do does did just only all every any some ' +
+    'there here be been being show list give get find display tell see want need let lets what whats which who whos whose where when how ' +
+    'in on at for so also too really very thanks thank ok okay hi hello hey now then table file sheet spreadsheet csv data info information ' +
+    'result results answer whole entire got gets getting made earned received took ' +
+    'rows row records record entries entry everything everyone everybody people person persons students student kids kid ' +
+    'employees employee customers customer users user members member staff workers clients patients tickets incidents ' +
+    'requests cases transactions accounts items ones').split(' '));
+
+//  Words for "the rows",  as a person says it   (then  "highest"  means the top row,  not a total)
+const WORDS_ROWS = new Set('rows row records record entries entry everyone everybody people person persons students student kids kid employees employee customers customer users user members member staff workers clients patients tickets incidents requests cases transactions accounts items ones who whos which'.split(' '));
+
+//  Words about an EARLIER question  ("sort THAT by name"):  it doesn't remember one,  so they're never quietly dropped.
+const WORDS_CONTEXT = new Set('that those these them it its previous again same last above'.split(' '));
+
+//  The words of a text,  with SQL's comments taken out  (-- like this,  /* and this */):  a comment is never read as a question.
+//  (Cut the SQL way,  so a  --  inside 'quotes' stays.   Can't be cut that way  (show me Liam O'Brien)?   As it is.)
+function wordsWithoutComments(text) {
+    let tk;
+    try { tk = sqlTokens(text); } catch (problem) { if (problem instanceof QueryError) return text; throw problem; }
+    let out = '', at = 0;
+    tk.forEach(function (t) {                           //  (between 2 pieces there's only space and comments:  85%  and  1,200  stay whole)
+        const gap = text.slice(at, t.at);
+        out += /--|\/\*/.test(gap) ? ' ' : gap;
+        if (t.k !== 'end') { out += text.slice(t.at, t.to); at = t.to; }
+    });
+    return out;
+}
+
+//  Plain words  ->  pieces:   { k: 'word' | 'num' | 'str' | 'date' | 'sym',  v: as written,  low: in small letters }
+const WORDS_PIECE = /'([^']*)'|"([^"]*)"|(\d{4}[-\/]\d{1,2}[-\/]\d{1,2})|([$€£¥]?\d[\d,]*(?:\.\d+)?%?|\.\d+%?)|(>=|<=|<>|!=|==|[<>=])|([A-Za-z0-9_À-￿](?:[A-Za-z0-9_À-￿'’-]*[A-Za-z0-9_À-￿])?)|(\S)/g;
+
+function wordPieces(text) {
+    const out = [];
+    let m;
+    WORDS_PIECE.lastIndex = 0;
+    while ((m = WORDS_PIECE.exec(text)) !== null) {
+        if (m[1] !== undefined || m[2] !== undefined) out.push({ k: 'str', v: m[1] !== undefined ? m[1] : m[2] });
+        else if (m[3] !== undefined) out.push({ k: 'date', v: m[3] });
+        else if (m[4] !== undefined) out.push({ k: 'num', v: m[4] });
+        else if (m[5] !== undefined) out.push({ k: 'sym', v: m[5] });
+        else if (m[6] !== undefined) out.push({ k: 'word', v: m[6].replace(/’/g, "'") });
+        else out.push({ k: 'sym', v: m[7] });
+    }
+    out.forEach(function (p) { p.low = p.v.toLowerCase(); });
+    return out;
+}
+
+//  A word,  and the shorter words it could be   (scores  ->  score,   scored  ->  score,   names  ->  name)
+function wordStems(w) {
+    const out = [w];
+    if (w.length > 3 && /s$/.test(w)) out.push(w.slice(0, -1));
+    if (w.length > 4 && /es$/.test(w)) out.push(w.slice(0, -2));
+    if (w.length > 4 && /d$/.test(w)) out.push(w.slice(0, -1));
+    if (w.length > 4 && /ed$/.test(w)) out.push(w.slice(0, -2));
+    return out;
+}
+
+async function readWords(text, catalog, isCurrent) {
+
+    const tableName = catalog.names()[0];
+    const table = tableName === undefined ? null : catalog.find(tableName);
+    if (table === null) return null;
+    const profile = await tableProfile(table, isCurrent);
+    const cols = columnNames(table);
+    const keys = cols.map(flexKey);
+    const parts = cols.map(function (c) { return c.toLowerCase().split(/[^a-z0-9À-￿]+/).filter(function (w) { return w !== ''; }); });
+    const kindOf = function (j) { return j < profile.columns.length ? profile.columns[j].kind : kindAt(table, j); };
+    const pieces = wordPieces(wordsWithoutComments(text));
+    const span = function (i, n) { return pieces.slice(i, i + n).map(function (p) { return p.v; }).join(' '); };
+
+
+    //  ---- 1.  WHAT EACH PIECE IS:   a column  ·  a known word  ·  a value from the file  ·  a little word  ·  unknown ----
+
+    //  A column's name,  at piece i   (the longest one that fits):   { col,  len }     (2 columns have that word?   { cols,  len })
+    function columnAt(i) {
+        for (let len = Math.min(5, pieces.length - i); len >= 1; len--) {
+            const run = pieces.slice(i, i + len);
+            if (!run.every(function (p) { return p.k === 'word' || p.k === 'num' || (p.k === 'sym' && (p.v === '%' || p.v === '#' || p.v === '&')); })) continue;
+            const key = flexKey(span(i, len));
+            const hits = [];
+            keys.forEach(function (k, j) { if (k === key || k === key + 's' || k === key + 'es' || k + 's' === key || k + 'es' === key) hits.push(j); });
+            if (hits.length === 1) return { col: hits[0], len: len };
+        }
+        const p = pieces[i];
+        if (p.k !== 'word' || p.low.length < 3 || WORDS_FILLER.has(p.low) || WORDS_KNOWN.has(p.low)) return null;
+        const stems = wordStems(p.low);
+        const hits = [];                                //  one word of a longer name   (name  ->  Student Name,   homework  ->  Makeup Homework)
+        parts.forEach(function (ws, j) { if (ws.some(function (w) { return stems.indexOf(w) !== -1; })) hits.push(j); });
+        if (hits.length === 1) return { col: hits[0], len: 1 };
+        if (hits.length > 1) return { cols: hits, len: 1 };
+        if (p.low.length >= 5) {                        //  a small typo of a whole name   (atendance  ->  Attendance %)
+            const near = flexClosest(p.v, cols);
+            if (near !== null) return { col: cols.indexOf(near), len: 1 };
+        }
+        return null;
+    }
+
+    //  The longest known plain words at piece i:   { m,  len }
+    function knownAt(i) {
+        for (let len = Math.min(4, pieces.length - i); len >= 1; len--) {
+            const run = pieces.slice(i, i + len);
+            if (!run.every(function (p) { return p.k === 'word' || p.k === 'sym'; })) continue;
+            const m = WORDS_KNOWN.get(run.map(function (p) { return p.low; }).join(' '));
+            if (m !== undefined) return { m: m, len: len };
+        }
+        return null;
+    }
+
+    //  The file's own words at piece i   ("A",  "New York"):   { col,  spelled,  len }     (in 2 columns?   { cols,  len })
+    function valueAt(i) {
+        for (let len = Math.min(4, pieces.length - i); len >= 1; len--) {
+            const run = pieces.slice(i, i + len);
+            if (!run.every(function (p) { return p.k === 'word' || p.k === 'num' || p.k === 'str' || (p.k === 'sym' && (p.v === '&' || p.v === '/')); })) continue;
+            const key = flexLoose(span(i, len));
+            const hits = [];
+            profile.columns.forEach(function (c, j) { if (c.values !== null && c.values.has(key)) hits.push(j); });
+            if (hits.length === 1) return { col: hits[0], spelled: profile.columns[hits[0]].values.get(key), len: len };
+            if (hits.length > 1) return { cols: hits, len: len };
+        }
+        return null;
+    }
+
+    const items = [];
+    for (let i = 0; i < pieces.length; ) {
+        const p = pieces[i];
+        if (p.k === 'sym' && !WORDS_KNOWN.has(p.v)) { i++; continue; }            //  ?  !  ,  .   (nothing here)
+        if (p.k === 'str' || p.k === 'date') {
+            const v = valueAt(i);
+            items.push({ t: 'value', k: p.k, v: v !== null && v.col !== undefined ? v.spelled : p.v, col: v !== null && v.col !== undefined ? v.col : null, words: p.v });
+            i++;
+            continue;
+        }
+        let C = columnAt(i);
+        const K = knownAt(i), V = valueAt(i);
+        //  A word that's in 2 columns' names  ("grade":  Grade Level?  Letter Grade?),  right before a value only ONE of them has
+        //  ("grade 10":  only Grade Level has a 10)   ->   that one.
+        if (C !== null && C.cols !== undefined) {
+            const after = i + 1 < pieces.length ? valueAt(i + 1) : null;
+            if (after !== null && after.col !== undefined && C.cols.indexOf(after.col) !== -1) C = { col: after.col, len: 1 };
+        }
+        const cl = C ? C.len : 0, kl = K ? K.len : 0, vl = V ? V.len : 0;
+        //  A capital letter or word that's in the file beats a little word:   "the A students"   ("a list"  stays a little word)
+        const capital = V !== null && V.col !== undefined && V.len === 1 && p.k === 'word' && p.v !== p.low && p.low !== 'i' && i > 0;
+        if (cl > 0 && cl >= kl && cl >= vl && !capital) {
+            items.push(C.col !== undefined ? { t: 'col', col: C.col, words: span(i, cl) }
+                                           : { t: 'unknown', words: span(i, cl) + '  (' + C.cols.map(function (j) { return cols[j]; }).join(' or ') + '?)' });
+            i += cl;
+            continue;
+        }
+        if (vl > 0 && (capital || vl > kl) && V.col !== undefined) {
+            const number = vl === 1 && p.k === 'num';       //  (a number that's also in the file,  like a 3 in "Lunch Period":  still a number:  "top 3")
+            items.push({ t: 'value', k: number ? 'num' : 'word', v: number ? p.v : V.spelled, col: V.col, words: span(i, vl) });
+            i += vl;
+            continue;
+        }
+        if (kl > 0) { items.push({ t: 'known', m: K.m, words: span(i, kl) }); i += kl; continue; }
+        if (p.k === 'num') { items.push({ t: 'value', k: 'num', v: p.v, col: V !== null && V.col !== undefined ? V.col : null, words: p.v }); i++; continue; }
+        if (p.k === 'word' && (WORDS_FILLER.has(p.low) || flexKey(p.v) === flexKey(tableName))) { items.push({ t: 'filler', w: p.low, words: p.v }); i++; continue; }
+        items.push({ t: 'unknown', raw: p.v, words: vl > 0 ? span(i, vl) + '  (in more than one column)'
+                                                    : WORDS_CONTEXT.has(p.low) ? p.v + '  (it doesn\'t remember an earlier question)' : p.v });
+        i += Math.max(vl, 1);
+    }
+
+
+    //  ---- 2.  READ THEM INTO A QUESTION   (left to right) ----
+
+    const q = { show: [], totals: [], group: [], filters: [], sort: [], limit: null };
+    const unused = [];
+    const joins = [];               //  the  and / or  between each 2 conditions
+    const highLow = [];             //  highest / lowest + a column:  a total  (MAX)  or the top row  (decided at the end)
+    let lastCol = null;             //  a column just named and not used yet:  a condition's left side,  or a column to show
+    let lastList = null;            //  which list the last column went in   ("for each A and B":  B goes there too)
+    let wait = null;                //  a word waiting for its column:   { m,  words }
+    let cond = null;                //  a condition waiting for its value:   { col,  op,  words }
+    let range = null;               //  a range waiting for its ends:   { col,  lo,  words }
+    let top = null;                 //  top 5  /  bottom 3  /  first 10:   { n,  desc  (null = no order),  col,  words }
+    let pendingDir = null;          //  "A to Z" said before its column
+    let join = null;                //  an  and / or  said since the last condition
+
+    const asksTotal = items.some(function (it) { return it.t === 'filler' && (it.w === 'what' || it.w === 'whats'); });
+    const asksRows  = items.some(function (it) { return it.t === 'filler' && WORDS_ROWS.has(it.w); });
+    const anyTotal  = items.some(function (it) { return it.t === 'known' && ['count', 'distinct', 'avg', 'sum', 'median'].indexOf(it.m) !== -1; });
+    const showsAll  = items.some(function (it) { return it.t === 'filler' && /^(show|list|display|everything|all|everyone|everybody)$/.test(it.w); });
+    const OPS = new Set(['>', '>=', '<', '<=', '=', '<>', 'contains', 'starts', 'ends']);
+    const NOT_OP = { '>': '<=', '>=': '<', '<': '>=', '<=': '>' };
+
+    function condition(col, op, value) {
+        if (q.filters.length > 0) joins.push(join || 'and');
+        join = null;
+        q.filters.push({ col: col, op: op, value: value });
+    }
+    function giveUp(words) { if (words) unused.push(words); cond = null; range = null; }
+    function nextItem(k) { let j = k + 1; while (j < items.length && items[j].t === 'filler') j++; return j < items.length ? items[j] : null; }
+
+    for (let k = 0; k < items.length; k++) {
+        const it = items[k];
+
+        if (it.t === 'filler') continue;
+        if (it.t === 'unknown') {
+            //  Any word,  right after  contains / starts with / is ... :   that's the words to look for   ("name contains jo")
+            if (cond !== null && it.raw !== undefined && ['contains', 'starts', 'ends', '=', '<>'].indexOf(cond.op) !== -1) {
+                const words = { t: 'value', k: 'word', v: it.raw, col: null, words: it.raw };
+                const col = cond.col;
+                const op = cond.op;
+                cond = null;
+                if (col === null) { unused.push(op + ' ' + it.raw); continue; }
+                condition(col, op, words);
+                continue;
+            }
+            unused.push(it.words);
+            continue;
+        }
+
+        //  ---- A COLUMN ----
+        if (it.t === 'col') {
+            const j = it.col;
+            if (cond !== null) giveUp(cond.words);                 //  "score over attendance":  2 columns aren't a value
+            if (range !== null) giveUp(range.words);
+            if (wait !== null) {
+                const w = wait;
+                wait = null;
+                if (w.m === 'avg' || w.m === 'sum' || w.m === 'median') {
+                    if (isNumberKind(kindOf(j))) q.totals.push({ fn: w.m, col: j });
+                    else unused.push(w.words + ' ' + it.words + '  (' + cols[j] + ' is words,  not numbers)');
+                    lastList = null;
+                    continue;
+                }
+                if (w.m === 'distinct') { q.totals.push({ fn: 'distinct', col: j }); lastList = null; continue; }
+                if (w.m === 'high' || w.m === 'low') { highLow.push({ high: w.m === 'high', col: j }); lastList = null; continue; }
+                if (w.m === 'each' || (w.m === 'by' && (anyTotal || q.totals.length > 0))) { q.group.push(j); lastList = 'group'; continue; }
+                if (w.m === 'by' && top !== null && top.col === null) { top.col = j; lastList = null; continue; }
+                if (w.m === 'sort' || w.m === 'by') { q.sort.push({ col: j, desc: pendingDir === 'desc' }); pendingDir = null; lastList = 'sort'; continue; }
+                if (w.m === 'no') { condition(j, 'empty', null); continue; }
+                if (w.m === 'with') {                       //  "with homework" = it's filled in.   ("with score over 90":  just a little word)
+                    const after = nextItem(k);
+                    const more = after !== null && (after.t === 'value' || (after.t === 'known' && (OPS.has(after.m) || after.m === 'between' || after.m === 'from')));
+                    if (!more) { condition(j, 'filled', null); continue; }
+                }
+            }
+            if (top !== null && top.col === null && lastCol === null) { top.col = j; continue; }       //  "top 5 scores"
+            if (lastList !== null && k > 0 && items[k - 1].t === 'known' && items[k - 1].m === 'and') {  //  "for each A and B"
+                if (lastList === 'group') q.group.push(j);
+                else q.sort.push({ col: j, desc: false });
+                continue;
+            }
+            if (lastCol !== null) q.show.push(lastCol);     //  "name and score":  the one before was a column to show
+            lastCol = j;
+            lastList = null;
+            continue;
+        }
+
+        //  ---- A VALUE   (a number,  'words',  a date,  or the file's own words) ----
+        if (it.t === 'value') {
+            if (wait !== null && wait.m === 'with') wait = null;                                        //  ("who HAS an A":  just a little word)
+            if (top !== null && top.n === null && it.k === 'num') { top.n = it.v; continue; }           //  top 5
+            if (range !== null) {
+                if (range.lo === null) { range.lo = it; continue; }
+                if (range.col === null) giveUp(range.words + ' ' + range.lo.words + ' and ' + it.words + '  (which column?)');
+                else condition(range.col, 'between', [range.lo, it]);
+                range = null;
+                continue;
+            }
+            let col, op = '=', words = it.words;
+            if (cond !== null) { col = cond.col !== null ? cond.col : it.col; op = cond.op; words = cond.words + ' ' + it.words; cond = null; }
+            else if (lastCol !== null) col = lastCol;       //  "grade level 10"
+            else col = it.col;                              //  "the A students":  the one column that has an A
+            if (col === null) { unused.push(words); continue; }
+            if (col === lastCol) lastCol = null;
+            const a = items[k + 1], b = items[k + 2];       //  80-90  /  80 to 90:   a range
+            if (op === '=' && a !== undefined && b !== undefined && a.t === 'known' && a.m === 'to' && b.t === 'value') {
+                condition(col, 'between', [it, b]);
+                k += 2;
+                continue;
+            }
+            condition(col, op, it);
+            continue;
+        }
+
+        //  ---- A KNOWN WORD ----
+        const m = it.m;
+        if (m === 'and' || m === 'or') {
+            if (range !== null && range.lo !== null) continue;                     //  between 80 AND 90
+            if (q.filters.length > 0 && cond === null) join = m;
+            continue;
+        }
+        if (cond !== null) {
+            if (cond.op === '=' && (OPS.has(m) || m === 'empty' || m === 'filled')) {       //  "score IS over 90"   "homework IS empty"
+                if (m === 'empty' || m === 'filled') { condition(cond.col, m, null); cond = null; continue; }
+                cond.op = m; cond.words += ' ' + it.words; continue;
+            }
+            if (cond.op === '=' && (m === 'between' || m === 'from')) { range = { col: cond.col, lo: null, words: cond.words + ' ' + it.words }; cond = null; continue; }
+            if (cond.op === '<>' && NOT_OP[m] !== undefined) { cond.op = NOT_OP[m]; cond.words += ' ' + it.words; continue; }     //  "NOT over 90"
+            giveUp(cond.words);
+        }
+        if (range !== null && !(m === 'to' && range.lo !== null)) giveUp(range.words);
+        if (wait !== null && wait.m === 'with' && m !== 'and') wait = null;     //  ("who HAS the highest ...",  "with NO homework":  just a little word)
+        if (m === 'count') { if (!q.totals.some(function (t) { return t.fn === 'rows'; })) q.totals.push({ fn: 'rows' }); continue; }
+        if (m === 'by' && wait !== null && wait.m === 'sort') { wait.words += ' ' + it.words; continue; }      //  "sort that BY name"
+        if (m === 'distinct' || m === 'avg' || m === 'sum' || m === 'median' || m === 'each' || m === 'by' || m === 'sort' || m === 'no' || m === 'with') {
+            if (wait !== null) unused.push(wait.words);
+            wait = { m: m, words: it.words };
+            continue;
+        }
+        if (m === 'high' || m === 'low' || m === 'top' || m === 'bottom' || m === 'first') {
+            const after = nextItem(k);
+            const high = m === 'high' || m === 'top';
+            if (after !== null && after.t === 'value' && after.k === 'num') { top = { n: null, desc: m === 'first' ? null : high, col: null, words: it.words }; continue; }   //  top 5,  newest 10
+            if (m === 'first') { unused.push(it.words); continue; }
+            if (wait !== null) unused.push(wait.words);
+            wait = { m: high ? 'high' : 'low', words: it.words };
+            continue;
+        }
+        if (m === 'desc' || m === 'asc') {
+            if (q.sort.length > 0 && lastList === 'sort') q.sort[q.sort.length - 1].desc = m === 'desc';
+            else if (top !== null) top.desc = m === 'desc';
+            else pendingDir = m;
+            continue;
+        }
+        if (OPS.has(m)) {
+            if (lastCol !== null) { cond = { col: lastCol, op: m, words: it.words }; lastCol = null; }
+            else if (m !== '=') cond = { col: null, op: m, words: it.words };      //  "except F":  then F's own column,  if only one has it
+            continue;                                                               //  (a lone "is" / "are":  just a little word)
+        }
+        if (m === '>=after' || m === '<=after') {                                   //  "score 90 or more"
+            const f = q.filters[q.filters.length - 1];
+            if (f !== undefined && f.op === '=' && join === null) f.op = m === '>=after' ? '>=' : '<=';
+            else unused.push(it.words);
+            continue;
+        }
+        if (m === 'between' || m === 'from') {
+            const after = nextItem(k);
+            if (after !== null && after.t === 'value') { range = { col: lastCol !== null ? lastCol : after.col, lo: null, words: it.words }; lastCol = null; }
+            continue;                                                               //  ("rows FROM class_data":  just a little word)
+        }
+        if (m === 'empty' || m === 'filled') {
+            if (lastCol !== null) { condition(lastCol, m, null); lastCol = null; }
+            else if (m === 'empty') wait = { m: 'no', words: it.words };            //  "empty homework"
+            else unused.push(it.words);
+            continue;
+        }
+        //  (to  /  -  with nothing to join:   "want TO see")
+    }
+
+
+    //  ---- 3.  WHAT'S LEFT WAITING ----
+
+    if (cond !== null) unused.push(cond.words);
+    if (range !== null) unused.push(range.words + (range.lo !== null ? ' ' + range.lo.words : ''));
+    if (lastCol !== null) {
+        if (q.totals.length > 0 || anyTotal) q.group.push(lastCol);        //  "grade level  average score"
+        else q.show.push(lastCol);
+    }
+    //  "scores ... sorted highest first":  sorted with no column named,  but only ONE thing is shown?   By that.
+    if (wait !== null && wait.m === 'sort' && pendingDir !== null && q.totals.length + q.show.length === 1 && q.group.length === 0) {
+        if (q.totals.length === 1) q.sort.push({ total: 0, desc: pendingDir === 'desc' });
+        else q.sort.push({ col: q.show[0], desc: pendingDir === 'desc' });
+        wait = null;
+    }
+    if (wait !== null && wait.m !== 'with') unused.push(wait.words);   //  (a "with" left over was just a little word)
+    highLow.forEach(function (h) {
+        if (q.group.length === 0 && (asksRows || (!asksTotal && q.totals.length === 0))) {       //  "WHO has the highest score":  the top row
+            q.sort.push({ col: h.col, desc: h.high });
+            if (q.limit === null && top === null) q.limit = 1;
+        } else {                                                                                  //  "WHAT is the highest score":  a total
+            q.totals.push({ fn: h.high ? 'max' : 'min', col: h.col });
+            if (asksRows) unused.push('who  (for each group it can show the highest one,  not whose it is)');
+        }
+    });
+    if (top !== null) {
+        if (top.n !== null) q.limit = parseInt(String(top.n).replace(/,/g, ''), 10);
+        if (top.col !== null) q.sort.unshift({ col: top.col, desc: top.desc !== false });
+        else if (top.desc !== null && q.totals.length > 0) q.sort.unshift({ total: 0, desc: top.desc });
+        else if (top.desc !== null) unused.push(top.words + '  (by what?)');
+    }
+    if (joins.indexOf('or') !== -1 && joins.indexOf('and') !== -1) unused.push('or  (and + or together:  which comes first?  Say it in SQL)');
+
+    //  Nothing it could use?   null   (or,  if it can say WHY a word didn't fit:  no SQL,  just the reasons:  "average Letter Grade")
+    const nothing = q.show.length + q.totals.length + q.group.length + q.filters.length + q.sort.length === 0 && q.limit === null;
+    if (nothing && !(showsAll && unused.length === 0)) {
+        return unused.some(function (u) { return u.indexOf('  (') !== -1; }) ? { sql: null, unused: unused, meaning: null } : null;
+    }                                                                           //  ("show me everything":  every row)
+
+
+    //  ---- 4.  THE SQL ----
+
+    const name = function (j) { return flexName(cols[j]); };
+    const totalSql = function (t) {
+        if (t.fn === 'rows') return 'COUNT(*)';
+        if (t.fn === 'distinct') return 'COUNT(DISTINCT ' + name(t.col) + ')';
+        return { avg: 'AVG', sum: 'SUM', median: 'MEDIAN', max: 'MAX', min: 'MIN' }[t.fn] + '(' + name(t.col) + ')';
+    };
+    const valueSql = function (v, j) {
+        const kind = kindOf(j);
+        let s = String(v.v);
+        if (v.k === 'date') { const d = s.split(/[-\/]/); return flexWords(d[0] + '-' + ('0' + d[1]).slice(-2) + '-' + ('0' + d[2]).slice(-2)); }
+        if (v.k === 'num' && /^\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) s = s.split(',').join('');      //  1,200  ->  1200
+        return isNumberKind(kind) && NUMBER_WORDS.test(s) ? s.trim() : flexWords(s);
+    };
+    const conditionSql = function (f) {
+        const c = name(f.col);
+        if (f.op === 'empty') return c + ' IS NULL';
+        if (f.op === 'filled') return c + ' IS NOT NULL';
+        if (f.op === 'between') return c + ' BETWEEN ' + valueSql(f.value[0], f.col) + ' AND ' + valueSql(f.value[1], f.col);
+        if (f.op === 'contains') return c + ' ' + flexLike(f.value.v, '%', '%');
+        if (f.op === 'starts') return c + ' ' + flexLike(f.value.v, '', '%');
+        if (f.op === 'ends') return c + ' ' + flexLike(f.value.v, '%', '');
+        return c + ' ' + f.op + ' ' + valueSql(f.value, f.col);
+    };
+    const unique = function (list) { return list.filter(function (x, k) { return list.indexOf(x) === k; }); };
+
+    const grouped = q.totals.length > 0 || q.group.length > 0;
+    const groups = unique(q.group);
+    const totals = q.totals.filter(function (t, k) { return q.totals.findIndex(function (u) { return u.fn === t.fn && u.col === t.col; }) === k; });
+    const shown = grouped ? groups.map(name).concat(totals.map(totalSql)) : unique(q.show).map(name);
+    let sql = 'SELECT ' + (shown.length > 0 ? shown.join(', ') : '*') + ' FROM ' + flexName(tableName);
+    if (q.filters.length > 0) sql += ' WHERE ' + q.filters.map(conditionSql).join(joins.length > 0 && joins.every(function (j) { return j === 'or'; }) ? ' OR ' : ' AND ');
+    if (groups.length > 0) sql += ' GROUP BY ' + groups.map(name).join(', ');
+    const order = [];
+    q.sort.forEach(function (s) {
+        if (s.total !== undefined) { order.push(totalSql(totals[s.total]) + (s.desc ? ' DESC' : '')); return; }
+        if (!grouped || groups.indexOf(s.col) !== -1) { order.push(name(s.col) + (s.desc ? ' DESC' : '')); return; }
+        const t = totals.find(function (x) { return x.col === s.col; });       //  grouped:  by that column's total   ("average score ... highest first")
+        if (t !== undefined) order.push(totalSql(t) + (s.desc ? ' DESC' : ''));
+        else unused.push('sorted by ' + cols[s.col] + '  (it isn\'t in the answer:  each group is ONE row)');
+    });
+    if (order.length > 0) sql += ' ORDER BY ' + order.join(', ');
+    if (q.limit !== null && q.limit > 0) sql += ' LIMIT ' + q.limit;
+
+    return { sql: sql, unused: unique(unused), meaning: queryInWords(sql, catalog) };
+}
+
+
+
+// ----------------------------------------------------------
+//
+//    A QUESTION,  BACK IN PLAIN WORDS   (SQL  ->  words:   "In words:"  in the query menu,  and the answer's badge)
+//
+//        SELECT * FROM orders WHERE qty > 5 ORDER BY qty DESC LIMIT 3
+//        ->   Every row of orders where qty is over 5,  sorted by qty (highest first),  at most 3 rows
+//
+//    The words come from each column's KIND,  so they never fib about what SQL will do:
+//        sorting numbers  ->  highest first / lowest first      words  ->  Z to A / A to Z      dates  ->  newest / oldest first
+//        a WORDS column  >  'C'   ->   "comes after 'C'  (A to Z)"     (that's what  >  does to words:  alphabetical,  not better)
+//        x = NULL   ->   "(never true:  NULL isn't equal to anything,  say IS NULL)"
+//
+//    ->  the words,  or null  (it isn't a question yet:  a mistake in it,  or nothing typed)
+//
+// ----------------------------------------------------------
+
+function queryInWords(sql, catalog) {
+    let statements;
+    try { statements = parseSql(sql); }
+    catch (problem) { if (problem instanceof QueryError) return null; throw problem; }
+    const q = statements[statements.length - 1];
+    let words = q.t === 'write' ? q.verb + ' would change the data  (this tool only reads:  it won\'t run)' : wordsOfQuery(q, catalog);
+    if (statements.length > 1) words += '   (only the last of the ' + statements.length + ' questions runs)';
+    return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+function wordsOfQuery(q, catalog) {
+    let words, core = null;
+    if (q.body.t === 'core') { core = q.body; words = wordsOfCore(core, catalog); }
+    else if (q.body.t === 'set') words = 'the rows of two questions put together  (' + q.body.op + ')';
+    else words = wordsOfQuery(q.body.q, catalog);
+    if (q.with !== null) words = 'first making  ' + q.with.map(function (w) { return w.name; }).join(',  ') + ',  then:  ' + words;
+    if (q.order !== null && q.order.length > 0) words += ',  sorted by ' + q.order.map(function (o) { return wordsOfSort(o, core, catalog); }).join(',  then ');
+    const limit = q.limit !== null ? q.limit : core !== null ? core.top : null;
+    if (limit !== null) words += ',  at most ' + wordsOfValue(limit) + (limit.t === 'lit' && limit.v === 1 ? ' row' : ' rows');
+    if (q.offset !== null) words += ',  after skipping the first ' + wordsOfValue(q.offset);
+    return words;
+}
+
+function wordsOfCore(c, catalog) {
+    const from = c.from === null ? null : wordsOfFrom(c.from);
+    const grouped = c.group !== null || c.items.some(function (it) { return !it.star && isTotal(it.e); });
+    const groupKeys = (c.group || []).map(function (g) { return exprText(g).toLowerCase(); });
+    let words;
+    if (grouped) {
+        const parts = c.items.filter(function (it) { return it.star || groupKeys.indexOf(exprText(it.e).toLowerCase()) === -1; })
+                             .map(function (it) { return it.star ? 'every column' : wordsOfItem(it.e, c, catalog); });
+        words = (parts.length > 0 ? wordsList(parts) : 'each different ' + wordsList((c.group || []).map(function (g) { return wordsOfItem(g, c, catalog); })));
+        if (c.group !== null && parts.length > 0) words += ' for each ' + wordsList(c.group.map(function (g) { return wordsOfItem(g, c, catalog); }));
+        if (from !== null) words += ' in ' + from;
+    } else if (c.items.length === 1 && c.items[0].star && c.items[0].table === null) {
+        words = (c.distinct ? 'every different row' : 'every row') + (from !== null ? ' of ' + from : '');
+    } else {
+        const parts = c.items.map(function (it) { return it.star ? (it.table ? 'every column of ' + it.table : 'every column') : wordsOfItem(it.e, c, catalog); });
+        words = c.distinct ? 'each different ' + wordsList(parts) + (from !== null ? ' in ' + from : '')
+                           : wordsList(parts) + (from !== null ? ',  from every row of ' + from : '');
+    }
+    if (c.where !== null) words += ' where ' + wordsOfCond(c.where, c, catalog);
+    if (c.having !== null) words += ',  keeping only the groups where ' + wordsOfCond(c.having, c, catalog);
+    return words;
+}
+
+function wordsOfFrom(f) {
+    if (f.t === 'table') return f.name;
+    if (f.t === 'sub') return 'the answer to another question';
+    const how = f.kind === 'cross' ? ' paired with every row of ' : f.kind === 'left' ? ' with the matching rows of ' :
+                f.kind === 'right' ? ' matched to every row of ' : f.kind === 'full' ? ' and ' : ' joined with ';
+    return wordsOfFrom(f.a) + how + wordsOfFrom(f.b);
+}
+
+//  One thing shown:  a column  ->  its name,   a total  ->  "how many rows",  "the average Score" ...,   anything else  ->  its SQL
+function wordsOfItem(e, c, catalog) {
+    if (e.t === 'col') return e.name;
+    if (e.t === 'fn' && isTotal(e) && !e.filter) {
+        const x = e.args.length === 1 ? wordsOfItem(e.args[0], c, catalog) : null;
+        const kind = e.args.length === 1 ? kindOfExpr(e.args[0], c, catalog) : 'number';
+        if (e.name === 'COUNT') return e.star ? 'how many rows' : e.distinct ? 'how many different values of ' + x : 'how many filled-in ' + x;
+        if (e.distinct || x === null) return exprText(e);
+        if (e.name === 'SUM' || e.name === 'TOTAL') return 'the total of ' + x;
+        if (e.name === 'AVG') return 'the average ' + x;
+        if (e.name === 'MEDIAN') return 'the middle value of ' + x;
+        if (e.name === 'MIN') return kind === 'words' ? 'the first ' + x + ' (A to Z)' : kind === 'date' ? 'the earliest ' + x : 'the smallest ' + x;
+        if (e.name === 'MAX') return kind === 'words' ? 'the last ' + x + ' (A to Z)' : kind === 'date' ? 'the latest ' + x : 'the biggest ' + x;
+    }
+    return exprText(e);
+}
+
+function wordsList(list) {
+    return list.length <= 1 ? list.join('') : list.slice(0, -1).join(',  ') + ' and ' + list[list.length - 1];
+}
+
+function wordsOfSort(o, core, catalog) {
+    let e = o.e;
+    if (core !== null && e.t === 'lit' && Number.isInteger(e.v) && core.items[e.v - 1] && !core.items[e.v - 1].star) e = core.items[e.v - 1].e;    //  ORDER BY 2
+    if (core !== null && e.t === 'col' && e.table === null) {                    //  ORDER BY a nickname
+        const it = core.items.find(function (x) { return x.alias && x.alias.toLowerCase() === String(e.name).toLowerCase(); });
+        if (it) e = it.e;
+    }
+    const kind = kindOfExpr(e, core, catalog);
+    const way = kind === 'words' ? (o.desc ? 'Z to A' : 'A to Z') : kind === 'date' ? (o.desc ? 'newest first' : 'oldest first') : (o.desc ? 'highest first' : 'lowest first');
+    return wordsOfItem(e, core, catalog) + ' (' + way + (o.nulls ? ',  empty ones ' + o.nulls : '') + ')';
+}
+
+function wordsOfCond(e, c, catalog) {
+    const side = function (x) { return x.t === 'col' ? x.name : wordsOfValue(x); };
+    const inner = function (x, outer) { const w = wordsOfCond(x, c, catalog); return (x.t === 'or' || x.t === 'and') && x.t !== outer ? '(' + w + ')' : w; };
+    switch (e.t) {
+        case 'and':
+        case 'or':
+            return inner(e.a, e.t) + ' ' + e.t + ' ' + inner(e.b, e.t);
+        case 'not':
+            return 'NOT (' + wordsOfCond(e.e, c, catalog) + ')';
+        case 'cmp': {
+            if ((e.a.t === 'lit' && e.a.v === null) || (e.b.t === 'lit' && e.b.v === null)) {
+                return side(e.a) + ' ' + e.op + ' ' + side(e.b) + '  (never true:  NULL isn\'t equal to anything,  even NULL.   Say "is empty":  IS NULL)';
+            }
+            const flip = e.a.t !== 'col' && e.b.t === 'col';                         //  5 < qty   =   qty > 5
+            const left = flip ? e.b : e.a, right = flip ? e.a : e.b;
+            const op = flip ? FLIP_WORDS[e.op] : e.op;
+            const kind = kindOfExpr(left, c, catalog);
+            const words = (kind === 'words' ? WORDS_OPS_WORDS : kind === 'date' ? WORDS_OPS_DATES : WORDS_OPS_NUMBERS)[op] || op;
+            return side(left) + ' ' + words + ' ' + side(right) + (kind === 'words' && op !== '=' && op !== '<>' ? '  (A to Z)' : '');
+        }
+        case 'isnull':  return side(e.e) + (e.not ? ' is not empty' : ' is empty');
+        case 'isdist':  return side(e.a) + (e.not ? ' is ' : ' is not ') + side(e.b);
+        case 'istrue':  return side(e.e) + (e.not ? ' is not ' : ' is ') + (e.v ? 'true' : 'false');
+        case 'between': return side(e.e) + (e.not ? ' is not from ' : ' is from ') + side(e.lo) + ' to ' + side(e.hi);
+        case 'in': {
+            const list = e.list.map(side);
+            const either = list.length <= 1 ? list.join('') : list.slice(0, -1).join(',  ') + ' or ' + list[list.length - 1];
+            return side(e.e) + (e.not ? ' is none of ' + list.join(',  ') : ' is ' + either);
+        }
+        case 'insub':   return side(e.e) + (e.not ? ' is not in ' : ' is in ') + 'the answer to another question';
+        case 'exists':  return 'another question has an answer';
+        case 'like': {
+            const p = e.pat.t === 'lit' && typeof e.pat.v === 'string' && e.esc === null ? e.pat.v : null;
+            const plain = p === null ? null : p.replace(/^%/, '').replace(/%$/, '');
+            const how = p === null || /[%_]/.test(plain) ? 'matches the pattern ' + side(e.pat)
+                : p.length > 1 && p[0] === '%' && p[p.length - 1] === '%' ? 'contains ' + flexWords(plain)
+                : p[p.length - 1] === '%' ? 'starts with ' + flexWords(plain)
+                : p[0] === '%' ? 'ends with ' + flexWords(plain)
+                : 'is ' + flexWords(plain) + '  (any capitals)';
+            return side(e.e) + (e.not ? ' does not ' + how.replace(/^(contains|starts|ends|matches|is)/, function (w) { return { contains: 'contain', starts: 'start', ends: 'end', matches: 'match', is: 'equal' }[w]; }) : ' ' + how);
+        }
+        default:
+            return exprText(e);
+    }
+}
+
+const FLIP_WORDS = { '=': '=', '<>': '<>', '<': '>', '<=': '>=', '>': '<', '>=': '<=' };
+const WORDS_OPS_NUMBERS = { '=': 'is', '<>': 'is not', '>': 'is over', '>=': 'is at least', '<': 'is under', '<=': 'is at most' };
+const WORDS_OPS_WORDS   = { '=': 'is', '<>': 'is not', '>': 'comes after', '>=': 'is or comes after', '<': 'comes before', '<=': 'is or comes before' };
+const WORDS_OPS_DATES   = { '=': 'is', '<>': 'is not', '>': 'is after', '>=': 'is on or after', '<': 'is before', '<=': 'is on or before' };
+
+function wordsOfValue(e) {
+    if (e.t === 'lit' && typeof e.v === 'string' && lookOf(e.v) !== null) return e.v;          //  '85%'  '$1,200'  ->  85%  $1,200   (a number with a look)
+    if (e.t === 'lit') return e.v === null ? 'NULL' : typeof e.v === 'string' ? flexWords(e.v) : typeof e.v === 'boolean' ? (e.v ? 'TRUE' : 'FALSE') : numberText(e.v);
+    if (e.t === 'neg' && e.e.t === 'lit') return '-' + wordsOfValue(e.e);
+    return exprText(e);
+}
+
+//  Any piece of a question,  written back as SQL   (for the parts plain words can't say:  UPPER(city),  qty * 2)
+function exprText(e) {
+    switch (e.t) {
+        case 'lit':    return wordsOfValue(e);
+        case 'col':    return (e.table ? e.table + '.' : '') + e.name;
+        case 'ref':    return 'column ' + (e.idx + 1);
+        case 'fn':     return e.name + '(' + (e.star ? '*' : (e.distinct ? 'DISTINCT ' : '') + e.args.map(exprText).join(', ')) + ')' + (e.over ? ' OVER (...)' : '');
+        case 'bin':    return exprText(e.a) + ' ' + e.op + ' ' + exprText(e.b);
+        case 'cat':    return exprText(e.a) + ' || ' + exprText(e.b);
+        case 'neg':    return '-' + exprText(e.e);
+        case 'cast':   return 'CAST(' + exprText(e.e) + ' AS ' + String(e.to).toUpperCase() + ')';
+        case 'case':   return 'CASE ... END';
+        case 'cmp':    return exprText(e.a) + ' ' + e.op + ' ' + exprText(e.b);
+        case 'and':
+        case 'or':     return exprText(e.a) + ' ' + e.t.toUpperCase() + ' ' + exprText(e.b);
+        case 'not':    return 'NOT ' + exprText(e.e);
+        case 'isnull': return exprText(e.e) + (e.not ? ' IS NOT NULL' : ' IS NULL');
+        case 'like':   return exprText(e.e) + (e.not ? ' NOT LIKE ' : ' LIKE ') + exprText(e.pat);
+        case 'between': return exprText(e.e) + (e.not ? ' NOT BETWEEN ' : ' BETWEEN ') + exprText(e.lo) + ' AND ' + exprText(e.hi);
+        case 'in':     return exprText(e.e) + (e.not ? ' NOT IN (' : ' IN (') + e.list.map(exprText).join(', ') + ')';
+        case 'isdist': return exprText(e.a) + (e.not ? ' IS ' : ' IS NOT ') + exprText(e.b);
+        case 'istrue': return exprText(e.e) + (e.not ? ' IS NOT ' : ' IS ') + (e.v ? 'TRUE' : 'FALSE');
+        case 'scalar':
+        case 'insub':
+        case 'exists': return '(another question)';
+        default:       return '(...)';
+    }
+}
+
+//  What KIND of thing a piece of a question gives:  'number',  'words',  or 'date'   (for the right words:  "highest first"  or  "Z to A")
+function kindOfExpr(e, c, catalog) {
+    if (e.t === 'lit') return typeof e.v === 'string' ? (CELL_DATE.test(e.v) || CELL_TIME.test(e.v) ? 'date' : 'words') : 'number';
+    if (e.t === 'col' && c !== null) {
+        const found = [];
+        (function look(f) {
+            if (f === null) return;
+            if (f.t === 'join') { look(f.a); look(f.b); return; }
+            if (f.t !== 'table') return;
+            if (e.table !== null && String(e.table).toLowerCase() !== String(f.name).toLowerCase() && String(e.table).toLowerCase() !== String(f.alias || '').toLowerCase()) return;
+            const table = catalog.find(f.name);
+            if (table === null) return;
+            const j = columnNames(table).map(function (n) { return n.toLowerCase(); }).indexOf(String(e.name).toLowerCase());
+            if (j !== -1) found.push(kindAt(table, j));
+        })(c.from);
+        const kind = found.length === 1 ? found[0] : null;
+        return kind === 'text' ? 'words' : kind === 'date' || kind === 'timestamp' ? 'date' : 'number';
+    }
+    if (e.t === 'fn') {
+        if ((e.name === 'MIN' || e.name === 'MAX') && e.args.length === 1) return kindOfExpr(e.args[0], c, catalog);
+        if (isTotal(e)) return 'number';
+        return /^(UPPER|LOWER|TRIM|LTRIM|RTRIM|SUBSTR|SUBSTRING|REPLACE|CONCAT|LEFT|RIGHT|PRINTF|FORMAT|STRING_AGG|GROUP_CONCAT)$/.test(e.name) ? 'words' : 'number';
+    }
+    if (e.t === 'cat') return 'words';
+    return 'number';
 }
