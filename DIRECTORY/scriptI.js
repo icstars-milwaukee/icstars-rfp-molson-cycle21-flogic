@@ -765,14 +765,19 @@ function showBadge() {
     backBtn.hidden = !showingAnswer();
     fileBadge.title = '';
 
-    //  A query's answer:   QUERY RESULT  ·  12 rows  ·  from sales  ·  8 ms
-    //  (Query Flexibility fixed something?   ·  Query Flexibility fixed 2 things    hover  ->  what they were)
+    //  A query's answer:   ANSWER  ·  12 rows  ·  from sales  ·  8 ms
+    //  (fixed something?   ·  fixed 2 things    hover  ->  the question in words,  and what they were)
+    //  A fix LEFT OUT a condition?   It's said right ON the badge,  in amber  (the menu is closed by now:  a hover isn't enough).
+    fileBadge.classList.remove('warn');
     if (showingAnswer()) {
         const r = sqlInfo.result;
-        fileBadge.textContent = 'QUERY RESULT  ·  ' + r.rows.toLocaleString() + ' row' + (r.rows === 1 ? '' : 's') +
+        fileBadge.textContent = 'ANSWER  ·  ' + r.rows.toLocaleString() + ' row' + (r.rows === 1 ? '' : 's') +
             (r.from ? '  ·  from ' + r.from : '') + '  ·  ' + formatTime(r.ms) +
-            (r.fixes.length > 0 ? '  ·  Query Flexibility fixed ' + r.fixes.length + (r.fixes.length === 1 ? ' thing' : ' things') : '');
-        fileBadge.title = r.fixes.join('   ·   ');
+            (r.skipped.length > 0 ? '  ·  skipped ' + r.skipped.join(',  ') + '  (it only reads)' : '') +
+            (r.fixes.length > 0 ? '  ·  fixed ' + r.fixes.length + (r.fixes.length === 1 ? ' thing' : ' things') : '') +
+            r.warnings.map(function (w) { return '  ·  ⚠ ' + w; }).join('');
+        fileBadge.classList.toggle('warn', r.warnings.length > 0);
+        fileBadge.title = [r.meaning].concat(r.fixes).filter(function (x) { return x; }).join('\n');
         fileBadge.hidden = false;
         return;
     }
@@ -3458,29 +3463,33 @@ measureFold();
 //
 //    QUERY   (ask the open table a question:  the engine is queryI.js)
 //
-//    "Query",  at the end of the file bar,  UNFOLDS the query menu  (out of the button,  like the theme menu):
+//    "Ask",  at the end of the file bar,  UNFOLDS the query menu  (out of the button,  like the theme menu):
 //
-//        ┌──────────────────────────────────────────────────────────────┐
-//        │ Query  ·  sales  ·  1,204 rows                             × │
-//        ├────────────┬─────────────────────────────────────────────────┤
-//        │ Show       │ [all columns]   [+ column ▾]                    │
-//        │ Keep rows  │ [city ▾] [is ▾] [Chicago] ×    [+ condition]    │
-//        │ Group by   │ [+ column ▾]                                    │
-//        │ Totals     │ [count ▾] [of rows ▾] ×    [+ total]            │
-//        │ Sort by    │ [+ column ▾]                                    │
-//        │ At most    │ [     ] rows                                    │
-//        ├────────────┴─────────────────────────────────────────────────┤
-//        │ SQL  [✓] Query Flexibility  [ ] Type mode   written for you  │
-//        │ SELECT city, COUNT(*) AS count FROM sales GROUP BY city      │
-//        ├──────────────────────────────────────────────────────────────┤
-//        │ [Run ▶]  [Copy SQL]  [Export CSV]            12 rows · 8 ms  │
-//        └──────────────────────────────────────────────────────────────┘
+//        ┌───────────────────────────────────────────────────────────────────┐
+//        │ Ask  ·  class_data  ·  10 rows                                  × │
+//        │ [ Ask in your own words, like:  average Score for each Grade... ] │   <- 1. plain words
+//        │ Try:  (How many for each Grade Level) (Top 5 by Score) ...        │      ...or one press
+//        ├───────────┬───────────────────────────────────────────────────────┤
+//        │ Show      │ [every column]  [+ column ▾]  [+ count or total ▾]    │   <- 2. the SENTENCE
+//        │ where     │ [Score ▾] [is over ▾] [90] ×    [+ and ▾]             │      (only the parts in use,
+//        │           │ [+ for each ▾]  [+ sorted by ▾]  [+ at most]          │       then the rest on one line)
+//        ├───────────┴───────────────────────────────────────────────────────┤
+//        │ → 4 rows  ·  Every row of class_data where Score is over 90       │   <- what you'd get,  in words
+//        │ SQL  [✓] Fix my typos  [ ] Write it myself  writes itself as ...  │   <- 3. the SQL
+//        │ SELECT * FROM class_data WHERE Score > 90                         │
+//        ├───────────────────────────────────────────────────────────────────┤
+//        │ [Show answer ▶]  [Copy SQL]  [Save as CSV]          4 rows · 8 ms │
+//        └───────────────────────────────────────────────────────────────────┘
 //
-//    1.  The BUILDER:  pick things,  and it writes the SQL for you  (so you can learn it,  too).
-//    2.  Or TYPE MODE:  type your own SQL in the box  (click in,  and it turns on:  the builder is greyed out).
-//        Untick it  ->  your SQL snaps back into the builder's buttons.   (A part they can't show?  It asks first.)
-//        QUERY FLEXIBILITY  ("snap to result",  on at the start):  small mistakes get fixed,  and you're told what changed.
-//    3.  Run  ->  the ANSWER takes the window's place:  a little table of its own,
+//    1.  PLAIN WORDS:  type a question and press Enter  (queryI.js reads it:  readWords).   Every word understood?
+//        It's asked.   A word left over?   "Did you mean ...?"  first.   TRY:  ready questions about THIS file.
+//    2.  The SENTENCE  (the builder):  pick things,  and it writes the SQL for you  (so you can learn it,  too).
+//        Its words follow each column's KIND:  numbers  "is over / highest first",  words  "A to Z",  dates  "newest first".
+//    3.  Or WRITE IT MYSELF:  type your own SQL in the box  (click in,  and it turns on:  the sentence waits).
+//        Untick it  ->  your SQL snaps back into the sentence.   (A part it can't show?  It asks first.)
+//        FIX MY TYPOS  (Query Flexibility,  on at the start):  small mistakes get fixed,  and you're told what changed.
+//    Enter  =  show the answer  (Shift + Enter  =  a new line in the SQL box).
+//    The answer takes the window's place:  a little table of its own,
 //        in the table look  (its column types on top,  NULLs shown).   Search it,  flip it,  snap to it.
 //        "← Back to file"  brings the file back,  right away  (it was never gone:  just put aside).
 //
@@ -3492,23 +3501,26 @@ measureFold();
 //
 // ----------------------------------------------------------
 
-const queryBtn     = document.getElementById('queryBtn');       //  "Query"  (the end of the file bar)
+const queryBtn     = document.getElementById('queryBtn');       //  "Ask"  (the end of the file bar)
 const queryMenu    = document.getElementById('queryMenu');      //  the menu it unfolds into
-const queryTitle   = document.getElementById('queryTitle');     //  its  "Query  ·  sales  ·  1,204 rows"
+const queryTitle   = document.getElementById('queryTitle');     //  its  "Ask  ·  sales  ·  1,204 rows"
 const queryClose   = document.getElementById('queryClose');     //  its  ×
-const queryBuilder = document.getElementById('queryBuilder');   //  the builder  (the brain fills it in)
+const queryWords   = document.getElementById('queryWords');     //  "Ask in your own words"
+const queryTry     = document.getElementById('queryTry');       //  "Try:  (How many for each Region) ..."   (the brain fills it in)
+const queryBuilder = document.getElementById('queryBuilder');   //  the sentence  (the brain fills it in)
+const queryMeaning = document.getElementById('queryMeaning');   //  "→ 4 rows  ·  Every row of sales where ..."
 const querySql     = document.getElementById('querySql');       //  the SQL box
-const queryNote    = document.getElementById('querySqlNote');   //  "written for you as you pick"
-const queryFlex    = document.getElementById('queryFlex');      //  [✓] Query Flexibility
-const queryType    = document.getElementById('queryType');      //  [ ] Type mode
-const queryAsk     = document.getElementById('queryAsk');       //  "The builder can't show ...   [Drop them] [Keep typing]"
+const queryNote    = document.getElementById('querySqlNote');   //  "writes itself as you pick"
+const queryFlex    = document.getElementById('queryFlex');      //  [✓] Fix my typos
+const queryType    = document.getElementById('queryType');      //  [ ] Write it myself
+const queryAsk     = document.getElementById('queryAsk');       //  "Did you mean ...?   [Ask that] [Keep writing]"
 const queryAskWords = document.getElementById('queryAskWords');
 const queryAskYes  = document.getElementById('queryAskYes');
 const queryAskNo   = document.getElementById('queryAskNo');
-const queryFixes   = document.getElementById('queryFixes');     //  "Query Flexibility fixed:  selct  ->  SELECT ..."
-const queryRun     = document.getElementById('queryRun');       //  "Run ▶"
+const queryFixes   = document.getElementById('queryFixes');     //  "Fixed for you:  selct  ->  SELECT ..."   (+ the amber warnings)
+const queryRun     = document.getElementById('queryRun');       //  "Show answer ▶"
 const queryCopy    = document.getElementById('queryCopy');      //  "Copy SQL"
-const queryExport  = document.getElementById('queryExport');    //  "Export CSV"
+const queryExport  = document.getElementById('queryExport');    //  "Save as CSV"
 const queryStatus  = document.getElementById('queryStatus');    //  "12 rows · 8 ms"   (or what went wrong)
 const backBtn      = document.getElementById('backBtn');        //  "← Back to file"
 
@@ -3516,8 +3528,12 @@ let fileTable   = null;     //  the open file's table  (what a query asks about)
 let answer      = null;     //  the answer on screen:  { table, csv }   (null  =  the file is on screen)
 let fileLook    = false;    //  the file's look,  to go back to
 let queryId     = 0;        //  counts every Run.  (Run again while one is going?  The old one sees the number changed,  and quits.)
-let typeMode    = false;    //  TYPE MODE:  you write the SQL yourself.  (The builder is greyed out,  and stops writing over it.)
+let typeMode    = false;    //  WRITE IT MYSELF:  you write the SQL yourself.  (The sentence waits,  and stops writing over it.)
 let queryFold   = null;     //  the "hide it once it's done folding" timer
+let limitOpen   = false;    //  "at most ... rows" shown,  but no number in it yet   (you pressed "+ at most")
+let previewId   = 0;        //  counts every "→ 4 rows" look-ahead  (a newer pick?  The old count stops)
+let previewWait = null;     //  ...and the little wait before it starts  (picking 3 things fast = one count)
+let wordsId     = 0;        //  counts every "Ask in your own words"  (asked again?  The old reading stops)
 
 //  What you picked in the builder.
 let build = newBuild();
@@ -3694,32 +3710,48 @@ function queryFileChanged() {
     answer = null;
     queryExport.disabled = true;
     build = newBuild();
+    limitOpen = false;
     setTypeMode(false);
-    showFixes([]);
+    showFixes([], []);
+    queryWords.value = '';
+    queryWords.placeholder = 'Ask in your own words, then press Enter';
+    queryTry.textContent = '';                          //  (the "Try:" questions come when the menu opens:  they need a look at the file)
 
-    queryTitle.textContent = 'Query  ·  ' + name + '  ·  ' + fileTable.table.count.toLocaleString() + ' row' + (fileTable.table.count === 1 ? '' : 's');
+    queryTitle.textContent = 'Ask  ·  ' + name + '  ·  ' + fileTable.table.count.toLocaleString() + ' row' + (fileTable.table.count === 1 ? '' : 's');
     setQueryStatus('', false);
     drawBuilder();
     writeSql();
+    if (queryMenuOpen()) showStarters();
 }
 
 
-//  ---- THE BUILDER ----
+//  ---- THE SENTENCE   (the builder) ----
 
-//  Which conditions you can pick,  in plain words.
-const FILTER_OPS = [
-    ['=',        'is'],
-    ['<>',       'is not'],
-    ['>',        'is over'],
-    ['>=',       'is at least'],
-    ['<',        'is under'],
-    ['<=',       'is at most'],
-    ['contains', 'contains'],
-    ['starts',   'starts with'],
-    ['ends',     'ends with'],
-    ['empty',    'is empty'],
-    ['filled',   'is not empty'],
-];
+//  A column's KIND,  for the words:   'number'  ·  'words'  ·  'date'
+//  (Worked out from up to 20,000 of its rows,  only when a word needs it:  queryI.js's kindAt.)
+function kindWordsOf(col) {
+    const kind = kindAt(fileTable.engine, queryColumns().indexOf(col));
+    return kind === 'int' || kind === 'real' || kind === 'num' ? 'number' : kind === 'date' || kind === 'timestamp' ? 'date' : 'words';
+}
+
+//  Which conditions you can pick,  in plain words.   They follow the column:  to WORDS,  ">"  means "comes after,  A to Z"
+//  (that's what SQL does with it),  so the words say that,  instead of "is over".
+const FILTER_WORDS = {
+    number: [['=', 'is'], ['<>', 'is not'], ['>', 'is over'], ['>=', 'is at least'], ['<', 'is under'], ['<=', 'is at most'],
+             ['contains', 'contains'], ['starts', 'starts with'], ['ends', 'ends with'], ['empty', 'is empty'], ['filled', 'is not empty']],
+    words:  [['=', 'is'], ['<>', 'is not'], ['contains', 'contains'], ['starts', 'starts with'], ['ends', 'ends with'],
+             ['empty', 'is empty'], ['filled', 'is not empty'],
+             ['<', 'comes before (A to Z)'], ['<=', 'is or comes before'], ['>', 'comes after (A to Z)'], ['>=', 'is or comes after']],
+    date:   [['=', 'is'], ['<>', 'is not'], ['>', 'is after'], ['>=', 'is on or after'], ['<', 'is before'], ['<=', 'is on or before'],
+             ['empty', 'is empty'], ['filled', 'is not empty'], ['contains', 'contains'], ['starts', 'starts with'], ['ends', 'ends with']],
+};
+
+//  Which way a sort goes,  in plain words   ("highest first" would be a fib for letters:  F comes after A)
+const SORT_WORDS = {
+    number: [['up', 'lowest first'], ['down', 'highest first']],
+    words:  [['up', 'A to Z'], ['down', 'Z to A']],
+    date:   [['up', 'oldest first'], ['down', 'newest first']],
+};
 
 //  Which totals you can pick.   [what it's called here,  its SQL,  its nickname's start]
 const TOTAL_FNS = [
@@ -3732,7 +3764,23 @@ const TOTAL_FNS = [
     ['max',      'MAX',            'biggest'],
     ['median',   'MEDIAN',         'median'],
 ];
-const TOTAL_WORDS = { rows: 'count rows', count: 'count', distinct: 'count different', sum: 'sum of', avg: 'average of', min: 'smallest', max: 'biggest', median: 'middle value of' };
+
+//  The "+ count or total" list   (before a column is picked,  so its words are the number ones)
+const TOTAL_ADD = [['rows', 'how many rows'], ['distinct', 'how many different ...'], ['count', 'how many filled-in ...'],
+                   ['sum', 'the total of ...'], ['avg', 'the average of ...'], ['min', 'the smallest ...'], ['max', 'the biggest ...'],
+                   ['median', 'the middle value of ...']];
+
+//  A total,  in plain words,  for the kind of column it's of   (the smallest WORD is the first one,  A to Z)
+function totalWords(fn, kind) {
+    if (fn === 'min') return kind === 'words' ? 'the first (A to Z)' : kind === 'date' ? 'the earliest' : 'the smallest';
+    if (fn === 'max') return kind === 'words' ? 'the last (A to Z)' : kind === 'date' ? 'the latest' : 'the biggest';
+    return { rows: 'how many rows', count: 'how many filled-in', distinct: 'how many different', sum: 'the total of', avg: 'the average of', median: 'the middle value of' }[fn];
+}
+
+//  Only NUMBERS can be added up,  averaged,  or have a middle value   (an average of words would always be 0:  never offered)
+function totalFits(fn, kind) {
+    return kind === 'number' || ['rows', 'count', 'distinct', 'min', 'max'].indexOf(fn) !== -1;
+}
 
 function queryColumns() { return columnNames(fileTable.engine); }
 function queryKinds()   { return columnKinds(fileTable.engine); }
@@ -3811,9 +3859,24 @@ function totalNames(of) {
     });
 }
 
-//  Draw the builder  (all of it,  every time something is picked:  it's small).
+//  Draw the sentence  (all of it,  every time something is picked:  it's small).
+//
+//      Show       [Student Name ×]  [+ column ▾]  [+ count or total ▾]
+//      where      [Score ▾] [is over ▾] [90] ×    [or ▾] [Letter Grade ▾] [is ▾] [A] ×    [+ and ▾]
+//      for each   [Grade Level ×]  [+ and ▾]
+//      sorted by  [Score ▾] [highest first ▾] ×    [+ then by ▾]
+//      at most    [ 10 ] rows ×
+//                 [+ where ▾]  [+ for each ▾]  [+ sorted by ▾]  [+ at most]      <- the parts not used yet,  on ONE line
+//
+//  Only the parts you use get a line:  a new file's sentence is just  "Show every column",  and that one line of more.
+//  Each line has a NAME that never changes  (data-part:  show,  where,  group,  sort,  limit,  more),  and so does each
+//  "+" list  (data-add:  what it adds).   The words can change;  the names don't  (tests and screen readers go by them).
+//  (focusNext:  which pick gets the keyboard after the redraw.   Add a condition  ->  you're typing its value right away.)
+let focusNext = null;
+
 function drawBuilder() {
 
+    const before = document.activeElement && queryBuilder.contains(document.activeElement) ? document.activeElement.dataset.key : null;
     queryBuilder.textContent = '';
     if (fileTable === null) return;
 
@@ -3821,126 +3884,156 @@ function drawBuilder() {
     const colOptions = columns.map(function (c) { return [c, c]; });
     const grouped = build.group.length > 0 || build.totals.length > 0;
 
-    function section(words, fill) {
+    //  One line of the sentence:   [its words]  [what you picked ...]
+    function part(name, words, fill) {
         const row = document.createElement('div');
         row.className = 'query-row';
-        const name = document.createElement('span');
-        name.className = 'query-label';
-        name.textContent = words;
+        row.dataset.part = name;
+        row.setAttribute('role', 'group');
+        row.setAttribute('aria-label', words || 'Add to the question');
+        const label = document.createElement('span');
+        label.className = 'query-label';
+        label.textContent = words;
         const box = document.createElement('div');
         box.className = 'query-pick';
         fill(box);
-        row.append(name, box);
+        row.append(label, box);
         queryBuilder.appendChild(row);
     }
-
+    function key(element, name) { element.dataset.key = name; return element; }
+    function adder(what, words, options, label, onPick) { const list = key(addList(words, options, label, onPick), 'add:' + what); list.dataset.add = what; return list; }
+    function hint(box, words) { const h = document.createElement('span'); h.className = 'query-hint'; h.textContent = words; box.appendChild(h); }
     function changed() { drawBuilder(); writeSql(); }
 
-    //  SHOW
-    section('Show', function (box) {
-        if (grouped) {
-            const note = document.createElement('span');
-            note.className = 'query-hint';
-            note.textContent = 'the groups and their totals  (below)';
-            box.appendChild(note);
+    //  A total:   [the average of ▾] [Score ▾]  as n  ×     (its words follow its column's kind)
+    function addTotal(fn) {
+        if (fn === 'rows' && build.totals.some(function (t) { return t.fn === 'rows'; })) return;     //  ("how many rows" twice says nothing new)
+        let col = null;
+        if (fn !== 'rows') {
+            col = columns.find(function (c) { return totalFits(fn, kindWordsOf(c)); }) || null;
+            if (col === null) { setQueryStatus('There\'s no column of numbers to work that out on.', true); return; }
+        }
+        build.totals.push({ fn: fn, col: col });
+        focusNext = 'total:' + (build.totals.length - 1) + ':col';
+        changed();
+    }
+    function totalLine(t, k) {
+        const line = document.createElement('span');
+        line.className = 'query-line';
+        const kind = t.col === null ? 'number' : kindWordsOf(t.col);
+        line.appendChild(key(pickList(TOTAL_FNS.map(function (f) { return [f[0], totalWords(f[0], kind)]; }), t.fn, 'Count or total', function (v) {
+            t.fn = v;
+            t.name = null;                              //  (a nickname you typed was for the OLD total)
+            if (v === 'rows') t.col = null;
+            else if (t.col === null || !totalFits(v, kindWordsOf(t.col))) {
+                const fit = columns.find(function (c) { return totalFits(v, kindWordsOf(c)); });
+                if (fit === undefined) { t.fn = 'rows'; t.col = null; setQueryStatus('There\'s no column of numbers to work that out on.', true); }
+                else t.col = fit;
+            }
+            changed();
+        }), 'total:' + k + ':fn'));
+        if (t.fn !== 'rows') {
+            const numbersOnly = !totalFits(t.fn, 'words');
+            const fits = numbersOnly ? colOptions.filter(function (o) { return kindWordsOf(o[0]) === 'number'; }) : colOptions;
+            line.appendChild(key(pickList(fits, t.col, 'Of which column', function (v) { t.col = v; t.name = null; changed(); }), 'total:' + k + ':col'));
+        }
+        if (t.name) hint(line, 'as ' + t.name);         //  a nickname from SQL you typed:   COUNT(*) AS n   ->   "as n"
+        line.appendChild(key(smallButton('×', 'Remove this total', function () { build.totals.splice(k, 1); changed(); }), 'total:' + k + ':x'));
+        return line;
+    }
+
+    //  SHOW:  the columns,  or the totals   ("Show how many rows,  the average of Score")
+    part('show', 'Show', function (box) {
+        if (build.totals.length > 0) {
+            build.totals.forEach(function (t, k) { box.appendChild(totalLine(t, k)); });
+            box.appendChild(adder('totals', '+ and ...', TOTAL_ADD, 'Count or total something else', addTotal));
             return;
         }
-        if (build.show.length === 0) {
-            const all = document.createElement('span');
-            all.className = 'query-hint';
-            all.textContent = 'all columns';
-            box.appendChild(all);
+        if (build.group.length > 0) hint(box, 'each different ' + build.group.join(' + '));
+        else {
+            if (build.show.length === 0) hint(box, 'every column');
+            build.show.forEach(function (c, k) {
+                box.appendChild(key(chip(c, function () { build.show.splice(k, 1); changed(); }), 'show:' + k));
+            });
+            const left = colOptions.filter(function (o) { return build.show.indexOf(o[0]) === -1; });
+            if (left.length > 0) box.appendChild(adder('show', '+ column', left, 'Show just some columns', function (v) { build.show.push(v); changed(); }));
         }
-        build.show.forEach(function (c, k) {
-            box.appendChild(chip(c, function () { build.show.splice(k, 1); changed(); }));
-        });
-        const left = colOptions.filter(function (o) { return build.show.indexOf(o[0]) === -1; });
-        if (left.length > 0) box.appendChild(addList('+ column', left, 'Add a column to show', function (v) { build.show.push(v); changed(); }));
+        box.appendChild(adder('totals', '+ count or total', TOTAL_ADD, 'Count or total something', addTotal));
     });
 
-    //  KEEP ROWS
-    section('Keep rows', function (box) {
+    //  WHERE:   [column] [how] [value] ×,  each one after the first starts with  [and ▾] / [or ▾]
+    function addCondition(v) {
+        build.filters.push({ col: v, op: '=', value: '' });
+        focusNext = 'where:' + (build.filters.length - 1) + ':value';
+        changed();
+    }
+    if (build.filters.length > 0) part('where', 'where', function (box) {
         build.filters.forEach(function (f, k) {
             const line = document.createElement('span');
             line.className = 'query-line';
-            line.appendChild(pickList(colOptions, f.col, 'Column', function (v) { f.col = v; changed(); }));
-            line.appendChild(pickList(FILTER_OPS, f.op, 'Condition', function (v) { f.op = v; changed(); }));
+            if (k > 0) {                                //  (all of them join the same way:  pick "or" once,  and they all say "or")
+                const join = key(pickList([['all', 'and'], ['any', 'or']], build.any ? 'any' : 'all', 'And, or or', function (v) { build.any = v === 'any'; changed(); }), 'where:' + k + ':join');
+                join.classList.add('query-join');
+                line.appendChild(join);
+            }
+            line.appendChild(key(pickList(colOptions, f.col, 'Column', function (v) { f.col = v; changed(); }), 'where:' + k + ':col'));
+            const kind = kindWordsOf(f.col);
+            let ops = FILTER_WORDS[kind];
+            if (!ops.some(function (o) { return o[0] === f.op; })) ops = ops.concat(FILTER_WORDS.number.filter(function (o) { return o[0] === f.op; }));
+            line.appendChild(key(pickList(ops, f.op, 'Condition', function (v) { f.op = v; if (v !== 'empty' && v !== 'filled') focusNext = 'where:' + k + ':value'; changed(); }), 'where:' + k + ':op'));
             if (f.op !== 'empty' && f.op !== 'filled') {
                 const value = document.createElement('input');
                 value.type = 'text';
                 value.className = 'query-value';
                 value.value = f.value;
-                value.placeholder = 'value';
+                value.placeholder = kind === 'number' ? 'a number' : kind === 'date' ? 'YYYY-MM-DD' : 'words';
                 value.setAttribute('aria-label', 'Value');
                 value.addEventListener('input', function () { f.value = value.value; writeSql(); });
-                line.appendChild(value);
+                line.appendChild(key(value, 'where:' + k + ':value'));
             }
-            line.appendChild(smallButton('×', 'Remove this condition', function () { build.filters.splice(k, 1); changed(); }));
+            line.appendChild(key(smallButton('×', 'Remove this condition', function () { build.filters.splice(k, 1); changed(); }), 'where:' + k + ':x'));
             box.appendChild(line);
         });
-        if (build.filters.length > 1) {
-            box.appendChild(pickList([['all', 'all of these'], ['any', 'any of these']], build.any ? 'any' : 'all', 'Keep rows that pass',
-                                     function (v) { build.any = v === 'any'; changed(); }));
-        }
-        box.appendChild(addList('+ condition', colOptions, 'Add a condition', function (v) { build.filters.push({ col: v, op: '=', value: '' }); changed(); }));
+        box.appendChild(adder('where', '+ and ...', colOptions, 'Add another condition', addCondition));
     });
 
-    //  GROUP BY
-    section('Group by', function (box) {
+    //  FOR EACH   (group by)
+    if (build.group.length > 0) part('group', 'for each', function (box) {
         build.group.forEach(function (c, k) {
-            box.appendChild(chip(c, function () { build.group.splice(k, 1); changed(); }));
+            box.appendChild(key(chip(c, function () { build.group.splice(k, 1); changed(); }), 'group:' + k));
         });
         const left = colOptions.filter(function (o) { return build.group.indexOf(o[0]) === -1; });
-        if (left.length > 0) box.appendChild(addList('+ column', left, 'Group by a column', function (v) { build.group.push(v); changed(); }));
+        if (left.length > 0) box.appendChild(adder('group', '+ and ...', left, 'For each of another column too', function (v) { build.group.push(v); changed(); }));
     });
 
-    //  TOTALS
-    section('Totals', function (box) {
-        build.totals.forEach(function (t, k) {
-            const line = document.createElement('span');
-            line.className = 'query-line';
-            line.appendChild(pickList(TOTAL_FNS.map(function (f) { return [f[0], TOTAL_WORDS[f[0]]]; }), t.fn, 'Total', function (v) {
-                t.fn = v;
-                t.name = null;                          //  (a nickname you typed was for the OLD total)
-                if (v !== 'rows' && t.col === null) t.col = columns[0];
-                changed();
-            }));
-            if (t.fn !== 'rows') line.appendChild(pickList(colOptions, t.col, 'Of which column', function (v) { t.col = v; t.name = null; changed(); }));
-            if (t.name) {                               //  a nickname from SQL you typed:   COUNT(*) AS n   ->   "as n"
-                const as = document.createElement('span');
-                as.className = 'query-hint';
-                as.textContent = 'as ' + t.name;
-                line.appendChild(as);
-            }
-            line.appendChild(smallButton('×', 'Remove this total', function () { build.totals.splice(k, 1); changed(); }));
-            box.appendChild(line);
-        });
-        box.appendChild(addList('+ total', TOTAL_FNS.map(function (f) { return [f[0], TOTAL_WORDS[f[0]]]; }), 'Add a total', function (v) {
-            build.totals.push({ fn: v, col: v === 'rows' ? null : columns[0] });
-            changed();
-        }));
-    });
-
-    //  SORT BY   (grouped:  by a group,  or by a total)
-    section('Sort by', function (box) {
-        const sortOptions = grouped
-            ? build.group.map(function (g) { return [g, g]; }).concat(totalNames().map(function (n) { return [n, n]; }))
-            : colOptions;
-        build.sort = build.sort.filter(function (s) { return sortOptions.some(function (o) { return o[0] === s.col; }); });
+    //  SORTED BY   (grouped:  by a group,  or by a total).   Its "which way" words follow what's sorted.
+    const names = totalNames();
+    const sortOptions = grouped
+        ? build.group.map(function (g) { return [g, g]; }).concat(names.map(function (n) { return [n, n]; }))
+        : colOptions;
+    function sortKind(col) {
+        const k = grouped ? names.indexOf(col) : -1;
+        if (k === -1) return kindWordsOf(col);
+        const t = build.totals[k];
+        return (t.fn === 'min' || t.fn === 'max') && t.col !== null ? kindWordsOf(t.col) : 'number';
+    }
+    build.sort = build.sort.filter(function (s) { return sortOptions.some(function (o) { return o[0] === s.col; }); });
+    function addSort(v) { build.sort.push({ col: v, desc: false }); focusNext = 'sort:' + (build.sort.length - 1) + ':way'; changed(); }
+    if (build.sort.length > 0) part('sort', 'sorted by', function (box) {
         build.sort.forEach(function (s, k) {
             const line = document.createElement('span');
             line.className = 'query-line';
-            line.appendChild(pickList(sortOptions, s.col, 'Sort by', function (v) { s.col = v; changed(); }));
-            line.appendChild(pickList([['up', '↑ low to high'], ['down', '↓ high to low']], s.desc ? 'down' : 'up', 'Which way',
-                                      function (v) { s.desc = v === 'down'; changed(); }));
-            line.appendChild(smallButton('×', 'Remove this sort', function () { build.sort.splice(k, 1); changed(); }));
+            line.appendChild(key(pickList(sortOptions, s.col, 'Sort by', function (v) { s.col = v; changed(); }), 'sort:' + k + ':col'));
+            line.appendChild(key(pickList(SORT_WORDS[sortKind(s.col)], s.desc ? 'down' : 'up', 'Which way',
+                                          function (v) { s.desc = v === 'down'; changed(); }), 'sort:' + k + ':way'));
+            line.appendChild(key(smallButton('×', 'Remove this sort', function () { build.sort.splice(k, 1); changed(); }), 'sort:' + k + ':x'));
             box.appendChild(line);
         });
-        if (sortOptions.length > 0) box.appendChild(addList('+ column', sortOptions, 'Sort by a column', function (v) { build.sort.push({ col: v, desc: false }); changed(); }));
+        if (sortOptions.length > 0) box.appendChild(adder('sort', '+ then by ...', sortOptions, 'Then sort by', addSort));
     });
 
     //  AT MOST
-    section('At most', function (box) {
+    if (build.limit !== '' || limitOpen) part('limit', 'at most', function (box) {
         const limit = document.createElement('input');
         limit.type = 'number';
         limit.min = '1';
@@ -3949,13 +4042,37 @@ function drawBuilder() {
         limit.value = build.limit;
         limit.setAttribute('aria-label', 'At most this many rows');
         limit.addEventListener('input', function () { build.limit = limit.value; writeSql(); });
-        const words = document.createElement('span');
-        words.className = 'query-hint';
-        words.textContent = 'rows';
-        box.append(limit, words);
+        box.appendChild(key(limit, 'limit'));
+        hint(box, 'rows');
+        box.appendChild(key(smallButton('×', 'Show every row', function () { build.limit = ''; limitOpen = false; changed(); }), 'limit:x'));
     });
 
+    //  THE PARTS NOT USED YET,  on one line   (pick one:  its line shows up,  and the keyboard is already in it)
+    const more = [];
+    if (build.filters.length === 0) more.push(adder('where', '+ where ...', colOptions, 'Keep only the rows where ...', addCondition));
+    if (build.group.length === 0) more.push(adder('group', '+ for each ...', colOptions, 'One row for each ...', function (v) {
+        build.group.push(v);
+        if (build.totals.length === 0) build.totals.push({ fn: 'rows', col: null });     //  "for each Region"  ->  how many in each   (× it,  for just the different ones)
+        changed();
+    }));
+    if (build.sort.length === 0 && sortOptions.length > 0) more.push(adder('sort', '+ sorted by ...', sortOptions, 'Sort by ...', addSort));
+    if (build.limit === '' && !limitOpen) {
+        const atMost = key(smallButton('+ at most ...', 'Show at most this many rows', function () { limitOpen = true; focusNext = 'limit'; drawBuilder(); }), 'add:limit');
+        atMost.className = 'query-add-button';
+        atMost.dataset.add = 'limit';
+        more.push(atMost);
+    }
+    if (more.length > 0) part('more', '', function (box) { more.forEach(function (m) { box.appendChild(m); }); });
+
     queryBuilder.classList.toggle('paused', typeMode);
+
+    //  The keyboard goes back where it was  (or where the pick said:  the new condition's value box)
+    const want = focusNext !== null ? focusNext : before;
+    focusNext = null;
+    if (want !== null && !typeMode) {
+        const target = queryBuilder.querySelector('[data-key="' + want.replace(/"/g, '') + '"]') || queryBuilder.querySelector('[data-key^="add:"]');
+        if (target !== null) target.focus();
+    }
 }
 
 
@@ -3990,7 +4107,9 @@ function likeOf(text, before, after) {
     return 'LIKE ' + sqlWordsOf(before + safe + after) + (marked ? " ESCAPE '!'" : '');
 }
 
-function builderSql() {
+//  forCount  =  the question  "how many rows will the answer have?"   (for  "→ 4 rows",  before you ask)
+//               the rows that pass the conditions,  or  (for each ...)  how many groups.
+function builderSql(forCount) {
 
     //  (A column's TYPE is only worked out when a condition needs it:  that looks at up to 20,000 rows,
     //   too much to do for every new file just in case.)
@@ -4035,6 +4154,11 @@ function builderSql() {
     //  GROUP BY
     if (build.group.length > 0) lines.push('GROUP BY ' + build.group.map(sqlName).join(', '));
 
+    if (forCount) {
+        const rest = lines.slice(1).join('\n');                     //  FROM,  WHERE,  GROUP BY
+        return build.group.length > 0 ? 'SELECT COUNT(*) FROM (SELECT 1\n' + rest + ') AS counted' : 'SELECT COUNT(*)\n' + rest;
+    }
+
     //  ORDER BY
     if (build.sort.length > 0) lines.push('ORDER BY ' + build.sort.map(function (s) { return sqlName(s.col) + (s.desc ? ' DESC' : ''); }).join(', '));
 
@@ -4049,6 +4173,145 @@ function builderSql() {
 function writeSql() {
     if (fileTable === null || typeMode) return;
     querySql.value = builderSql();
+    showMeaning();
+}
+
+
+//  ---- WHAT YOU'D GET   ("→ 4 rows  ·  Every row of class_data where Score is over 90":  under the sentence,  before you ask) ----
+//
+//  A little while after each pick  (3 quick picks = 1 count),  in bites,  and it stops when you pick again,  or ask.
+//  It counts with "Fix my typos" too  (a word spelled the file's way:  the same rows the answer will have).
+//  Writing it yourself?   Just the words  (no counting while you type).
+const PREVIEW_WAIT = 250;
+const PREVIEW_MAX_ROWS = 2000000;       //  a bigger file:  just the words  (counting on every pick would keep the computer busy)
+
+function showMeaning() {
+    clearTimeout(previewWait);
+    previewId++;                                        //  (a count that's still going:  stop)
+    if (fileTable === null || !queryMenuOpen()) return;
+    previewWait = setTimeout(previewNow, PREVIEW_WAIT);
+}
+
+async function previewNow() {
+    const myPreview = previewId, myLoad = loadId, myRun = queryId;
+    function isCurrent() { return myPreview === previewId && myLoad === loadId && myRun === queryId && queryMenuOpen(); }
+    const catalog = queryCatalog(isCurrent);
+    const sql = typeMode ? querySql.value : builderSql();
+    const words = sql.trim() === '' ? null : queryInWords(sql, catalog);
+
+    if (typeMode) {
+        meaningLine(null, words !== null ? words : sql.trim() === '' ? '' :
+                    '... not a whole question yet' + (queryFlex.checked ? '   ("Show answer" will try to fix it)' : ''));
+        return;
+    }
+    if (build.totals.length > 0 && build.group.length === 0) { meaningLine(1, words); return; }     //  totals of everything:  ONE row
+    if (fileTable.table.count > PREVIEW_MAX_ROWS) { meaningLine(null, words); return; }
+    meaningLine(undefined, words);
+    try {
+        const counted = await runQuery(builderSql(true), catalog, isCurrent, null, queryFlex.checked);
+        if (!isCurrent()) return;
+        const limit = parseInt(build.limit, 10);
+        const n = counted.rows[0][0];
+        meaningLine(limit > 0 && n > limit ? limit : n, words, counted.fixes.length > 0);
+    } catch (problem) {
+        if (problem === QUERY_STALE || problem === XLSX_STALE || problem === SQL_STALE) return;
+        if (!(problem instanceof QueryError)) throw problem;
+        if (isCurrent()) meaningLine(null, words);
+    }
+}
+
+//  The line:   → 4 rows  ·  the words      (n:  undefined = still counting,  null = no count)
+function meaningLine(n, words, fixed) {
+    queryMeaning.textContent = '';
+    if (n !== null) {
+        const count = document.createElement('strong');
+        count.textContent = n === undefined ? '→ counting ...' : '→ ' + n.toLocaleString() + (n === 1 ? ' row' : ' rows') + (fixed ? '  (with a fix)' : '');
+        queryMeaning.appendChild(count);
+    }
+    if (words) queryMeaning.appendChild(document.createTextNode((n !== null ? '   ·   ' : '') + words));
+}
+
+
+//  ---- ASK IT   (a whole question in SQL:  a "Try:" button,  plain words,  or "Did you mean")  ----
+//  Into the sentence,  then asked.   A part the sentence can't show?   Into the SQL box instead,  as if you wrote it.
+function askSql(sql) {
+    let read = null;
+    try { read = buildFromSql(sql); }
+    catch (problem) { if (!(problem instanceof QueryError)) throw problem; }
+    askFirst(null);
+    if (read !== null && read.left.length === 0) {
+        build = read.build;
+        limitOpen = false;
+        setTypeMode(false);
+        drawBuilder();
+        writeSql();
+    } else {
+        setTypeMode(true);
+        querySql.value = sql;
+    }
+    runTheQuery();
+}
+
+
+//  ---- IN YOUR OWN WORDS   (the box at the top:  queryI.js reads it,  readWords) ----
+//      every word understood   ->   asked,  right away   (the sentence shows how it was read)
+//      a word left over        ->   "Did you mean ...?   (I didn't use:  ...)"   [Ask that]  [Keep writing]
+//      nothing in it           ->   examples,  with THIS file's columns
+//  (SELECT ... typed here?   That's SQL:  it goes in the SQL box.)
+async function askInWords() {
+    const text = queryWords.value.trim();
+    if (text === '' || fileTable === null) return;
+    if (/^(select|with)\s/i.test(text)) { setTypeMode(true); querySql.value = text; runTheQuery(); return; }
+
+    const myWords = ++wordsId, myLoad = loadId;
+    function isCurrent() { return myWords === wordsId && myLoad === loadId; }
+    const catalog = queryCatalog(isCurrent);
+    setQueryStatus('Reading your words ...', false);
+    let words;
+    try { words = await readWords(text, catalog, isCurrent); }
+    catch (problem) { if (problem === QUERY_STALE) return; throw problem; }
+    if (!isCurrent()) return;
+    setQueryStatus('', false);
+
+    if (words === null) {
+        setQueryStatus('I couldn\'t find a question in that.   Try words like:   ' + wordsExamples(catalog).join('   ·   '), true);
+        return;
+    }
+    if (words.sql === null) {
+        setQueryStatus('I couldn\'t make a question of that:   ' + words.unused.join('   ·   ') + '.', true);
+        return;
+    }
+    if (words.unused.length === 0) { askSql(words.sql); return; }
+    askFirst('Did you mean:   ' + words.meaning + '?   (I didn\'t use:  ' + words.unused.join(',  ') + ')', 'Ask that',
+             function () { askSql(words.sql); }, 'Keep writing', queryWords);
+}
+
+
+//  ---- TRY:   up to 4 ready questions about THIS file   (queryI.js:  tableStarters,  from the file's profile) ----
+//  Worked out the first time the menu opens for a file  (one look at its rows,  in bites),  then kept.
+async function showStarters() {
+    if (fileTable === null || queryTry.childElementCount > 0) return;
+    const table = fileTable.engine, myLoad = loadId;
+    function isCurrent() { return myLoad === loadId && fileTable !== null && fileTable.engine === table; }
+    let profile;
+    try { profile = await tableProfile(table, isCurrent); }
+    catch (problem) { if (problem === QUERY_STALE) return; throw problem; }
+    if (!isCurrent() || queryTry.childElementCount > 0) return;
+
+    const label = document.createElement('span');
+    label.className = 'query-try-label';
+    label.textContent = 'Try:';
+    queryTry.appendChild(label);
+    tableStarters(profile, table.name).forEach(function (s) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'query-try';
+        b.textContent = s.words;
+        b.title = s.sql;                                //  (hover:  the SQL it asks)
+        b.addEventListener('click', function () { askSql(s.sql); });
+        queryTry.appendChild(b);
+    });
+    queryWords.placeholder = 'Ask in your own words, like:  ' + wordsExamples(queryCatalog(isCurrent))[0];
 }
 
 
@@ -4073,7 +4336,7 @@ function buildFromSql(text) {
     const b = newBuild();
     const left = [];
 
-    if (q === undefined || q.t !== 'query') queryFail('The builder only shows a question  (a SELECT).');
+    if (q === undefined || q.t !== 'query') queryFail('The sentence only shows a question  (a SELECT).');
     if (statements.length > 1) left.push('the queries before the last one');
     if (q.with !== null) left.push('the WITH tables');
     if (q.body.t !== 'core') {
@@ -4309,16 +4572,19 @@ function setTypeMode(on) {
     typeMode = on;
     queryType.checked = on;
     queryBuilder.classList.toggle('paused', on);
-    queryNote.textContent = on ? 'type mode  ·  the builder is greyed out' : 'written for you as you pick';
+    queryNote.textContent = on ? 'you\'re writing it  ·  the sentence waits' : 'writes itself as you pick';
     askFirst(null);
+    showMeaning();
 }
 
-//  Click in the box  (or type in it)  ->  type mode turns on.
+//  Click in the box  (or type in it)  ->  "Write it myself" turns on.
 querySql.addEventListener('pointerdown', function () { if (!typeMode) setTypeMode(true); });
 querySql.addEventListener('input', function () {
     if (!typeMode) setTypeMode(true);
-    showFixes([]);                                      //  (the fixes were for the SQL before you changed it)
+    showFixes([], []);                                  //  (the fixes were for the SQL before you changed it)
+    showMeaning();                                      //  (what it says now,  in words)
 });
+queryFlex.addEventListener('change', showMeaning);
 
 //  The checkbox.   Unticked?  Not right away:  first,  does your SQL fit the builder?
 queryType.addEventListener('change', function () {
@@ -4334,19 +4600,21 @@ function leaveTypeMode() {
     const typed = querySql.value;
     if (typed.trim() === '' || typed === builderSql()) { setTypeMode(false); writeSql(); return; }
 
-    let sql = typed, fixes = [];
+    let sql = typed, fixes = [], warnings = [];
     if (queryFlex.checked) {
         const fixed = flexSync(typed, queryCatalog(function () { return true; }));
         sql = fixed.sql;
         fixes = fixed.fixes;
+        warnings = fixed.warnings;
     }
 
     function done(newBuild) {
         build = newBuild;
+        limitOpen = false;
         setTypeMode(false);
         drawBuilder();
         writeSql();
-        showFixes(fixes);
+        showFixes(fixes, warnings);
     }
 
     let read;
@@ -4354,25 +4622,29 @@ function leaveTypeMode() {
         read = buildFromSql(sql);
     } catch (problem) {
         if (!(problem instanceof QueryError)) throw problem;
-        askFirst('The builder can\'t read this SQL:   ' + problem.message, 'Start the builder fresh', function () { done(newBuild()); });
+        askFirst('The sentence can\'t read this SQL:   ' + problem.message, 'Start over', function () { done(newBuild()); });
         return;
     }
 
     if (read.left.length === 0) { done(read.build); return; }
-    askFirst('The builder can\'t show:   ' + read.left.join(',   ') + '.', read.left.length === 1 ? 'Drop it' : 'Drop them',
+    askFirst('The sentence can\'t show:   ' + read.left.join(',   ') + '.', read.left.length === 1 ? 'Drop it' : 'Drop them',
              function () { done(read.build); });
 }
 
-//  The question,  under the SQL box:   "The builder can't show:  the JOIN.   [Drop it]  [Keep typing]"
-//  (words  null  =  put it away)
+//  The question,  under the SQL box:   "The sentence can't show:  the JOIN.   [Drop it]  [Keep writing]"
+//  or   "Did you mean:  ...?   [Ask that]  [Keep writing]"
+//  (words  null  =  put it away.   noWords / noFocus:  the other button,  and where it sends the keyboard.)
 let askYes = null;
+let askNoFocus = null;
 
-function askFirst(words, yesWords, onYes) {
+function askFirst(words, yesWords, onYes, noWords, noFocus) {
     queryAsk.hidden = words === null;
     askYes = onYes || null;
+    askNoFocus = noFocus || querySql;
     if (words === null) return;
     queryAskWords.textContent = words;
     queryAskYes.textContent = yesWords;
+    queryAskNo.textContent = noWords || 'Keep writing';
     queryAskYes.focus();
 }
 
@@ -4383,19 +4655,33 @@ queryAskYes.addEventListener('click', function () {
 });
 
 queryAskNo.addEventListener('click', function () {
+    const back = askNoFocus;
     askFirst(null);
-    querySql.focus();                                   //  (still in type mode)
+    back.focus();                                       //  (still writing:  nothing changed)
 });
 
-//  What Query Flexibility fixed,  in words,  under the box   ([]  =  nothing:  put the line away)
-function showFixes(list) {
-    queryFixes.hidden = list.length === 0;
-    queryFixes.textContent = list.length === 0 ? '' : 'Query Flexibility fixed:   ' + list.join('   ·   ');
+//  What "Fix my typos" fixed,  in words,  under the box.   A fix that LEFT OUT a condition comes first,  in amber:
+//  that answer has rows the question meant to keep out.   (Both empty  =  put the line away.)
+function showFixes(fixes, warnings) {
+    const left = warnings || [];
+    queryFixes.hidden = fixes.length === 0 && left.length === 0;
+    queryFixes.textContent = '';
+    left.forEach(function (w) {
+        const line = document.createElement('div');
+        line.className = 'query-warn';
+        line.textContent = '⚠  ' + w;
+        queryFixes.appendChild(line);
+    });
+    if (fixes.length > 0) {
+        const line = document.createElement('div');
+        line.textContent = 'Fixed for you:   ' + fixes.join('   ·   ');
+        queryFixes.appendChild(line);
+    }
 }
 
-//  After a Run:  Query Flexibility changed the SQL?   Show the SQL that REALLY ran,  and say what changed.
-function afterFlex(sql, fixes) {
-    showFixes(fixes);
+//  After a Run:  "Fix my typos" changed the SQL?   Show the SQL that REALLY ran,  and say what changed.
+function afterFlex(sql, fixes, warnings) {
+    showFixes(fixes, warnings);
     if (fixes.length === 0) return;
     if (typeMode) { querySql.value = sql; return; }
     //  The builder's own SQL  (snap to result:  a word,  spelled the file's way):  its buttons follow along.
@@ -4407,12 +4693,19 @@ function afterFlex(sql, fixes) {
     }
 }
 
-//  Ctrl + Enter  (or Cmd + Enter on a Mac)  in the box  =  Run.
+//  ENTER  =  ask it,  like a chat box.   Shift + Enter  =  a new line.   Ctrl / Cmd + Enter  works too.
+//  (Never while an input method is still making a letter:  there,  Enter PICKS the letter  (Japanese,  Chinese,  Korean ...).)
+function isAskEnter(e) {
+    return e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.isComposing && e.keyCode !== 229;
+}
 querySql.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        runTheQuery();
-    }
+    if (isAskEnter(e)) { e.preventDefault(); runTheQuery(); }
+});
+queryWords.addEventListener('keydown', function (e) {
+    if (isAskEnter(e)) { e.preventDefault(); askInWords(); }
+});
+queryBuilder.addEventListener('keydown', function (e) {             //  (Enter in a value box,  or in "at most")
+    if (isAskEnter(e) && e.target.tagName === 'INPUT') { e.preventDefault(); runTheQuery(); }
 });
 
 function setQueryStatus(words, bad) {
@@ -4432,18 +4725,19 @@ function runTheQuery() {
     const myLoad = loadId;
     function isCurrent() { return myRun === queryId && myLoad === loadId; }
 
-    setQueryStatus('Running...', false);
-    startLoading('Running the query...');
+    setQueryStatus('Asking ...', false);
+    startLoading('Working out the answer...');
     const started = performance.now();
 
     askFirst(null);
+    clearTimeout(previewWait);                          //  (the "→ 4 rows" look-ahead:  not now.   queryId changed,  so it stops anyway)
     runQuery(text, queryCatalog(isCurrent), isCurrent, function (done) {
         setProgress(0.9 * done);
-        setLoadingLabel('Running the query...  ' + Math.floor(100 * done) + '%');
+        setLoadingLabel('Working out the answer...  ' + Math.floor(100 * done) + '%');
     }, queryFlex.checked).then(function (result) {
 
         if (!isCurrent()) return;
-        afterFlex(result.sql, result.fixes);                //  (Query Flexibility changed it?  Show what really ran.)
+        afterFlex(result.sql, result.fixes, result.warnings);       //  (fixed?  Show what really ran,  and what a fix left out.)
         return showAnswer(result, result.sql, performance.now() - started, isCurrent);
 
     }).then(function () {
@@ -4455,7 +4749,14 @@ function runTheQuery() {
 
         if (!isCurrent() || problem === QUERY_STALE || problem === XLSX_STALE || problem === SQL_STALE) return;
         finishLoading();
-        if (problem && problem.fixes && problem.fixes.length > 0) afterFlex(problem.sql, problem.fixes);    //  (how far the fixing got:  so the problem lines up)
+        if (problem && problem.fixes && problem.fixes.length > 0) afterFlex(problem.sql, problem.fixes, problem.warnings);    //  (how far the fixing got)
+        //  Plain words with a word left over:  not an error,  a QUESTION back   ("Did you mean ...?"  [Ask that])
+        if (problem instanceof QueryError && problem.why && problem.why.kind === 'words' && problem.why.sql !== null) {
+            const sql = problem.why.sql;
+            setQueryStatus('', false);
+            askFirst(problem.message.replace(/^That reads like plain words\.\s+/, ''), 'Ask that', function () { askSql(sql); }, 'Keep writing', querySql);
+            return;
+        }
         setQueryStatus(queryProblem(problem), true);
     });
 }
@@ -4528,7 +4829,8 @@ async function showAnswer(result, text, ms, isCurrent) {
         nullCount: nullRows.length,
         nullRows: Uint32Array.from(nullRows),
         nullCols: Uint16Array.from(nullCols),
-        result: { sql: text, ms: ms, rows: rows.length, from: mainTableName(), fixes: result.fixes || [] },
+        result: { sql: text, ms: ms, rows: rows.length, from: mainTableName(), fixes: result.fixes || [],
+                  warnings: result.warnings || [], skipped: result.skipped || [], meaning: queryInWords(text, queryCatalog(isCurrent)) },
     };
 
     pieces.push(parts.join(''));
@@ -4613,10 +4915,14 @@ function openQueryMenu() {
     }
     queryMenu.classList.remove('folded');
     queryBtn.setAttribute('aria-expanded', 'true');
+    showStarters();                                     //  ("Try:":  the first time,  for this file)
+    showMeaning();                                      //  ("→ 400 rows  ·  Every row of orders")
 }
 
 function closeQueryMenu() {
     if (!queryMenuOpen()) return;
+    clearTimeout(previewWait);
+    previewId++;                                        //  (a "→ 4 rows" count still going:  stop)
     measureQueryFold();
     queryMenu.classList.add('folded');
     queryBtn.setAttribute('aria-expanded', 'false');

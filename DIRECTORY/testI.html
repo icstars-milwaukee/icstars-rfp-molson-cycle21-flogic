@@ -164,8 +164,8 @@
                 </div>
             </div>
 
-            <!--  QUERY:  ask the open table a question  (in SQL).  It unfolds the query menu,  below.  -->
-            <button id="queryBtn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="queryMenu" title="Ask the open table a question:  keep some rows,  group them,  total them,  sort them" disabled>Query</button>
+            <!--  ASK:  ask the open file a question  (in plain words,  by picking,  or in SQL).  It unfolds the query menu,  below.  -->
+            <button id="queryBtn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="queryMenu" title="Ask the open file a question:  in your own words,  by picking,  or in SQL" disabled>Ask</button>
         </div>
 
         <!--  The DETAILS, when you press "Details ▾".  It drops down right under the bar:
@@ -185,43 +185,53 @@
             <div id="aimRowList"></div>
         </div>
 
-        <!--  THE QUERY MENU,  when you press "Query".  It unfolds out of the button:
-                1.  The BUILDER:  pick what you want  (which rows,  grouped how,  what totals,  sorted how).
-                2.  The SQL it writes for you.   TYPE MODE  =  type your own  (the builder is greyed out while you do).
-                3.  Run it.   The ANSWER takes the window's place  ("← Back to file" brings the file back).
-              QUERY FLEXIBILITY  (on at the start)  =  "snap to result":  small SQL mistakes get fixed,
-              and what you typed snaps back into the builder's buttons when you leave type mode.
+        <!--  THE QUERY MENU,  when you press "Ask".  It unfolds out of the button.   3 ways to ask,  always in step:
+                1.  YOUR OWN WORDS   ("average score for each grade level"),  and  TRY:  ready questions about THIS file
+                    (one press:  the answer).
+                2.  THE SENTENCE   (the builder):   Show [every column]  where [Score] [is over] [90]  sorted by ...
+                    Each blue word is a pick.   The parts you don't use wait on one line  ("+ where ...").
+                    Under it:  how many rows you'd get,  and the question in plain words  (before you ask).
+                3.  THE SQL it writes for you.   WRITE IT MYSELF  =  type your own  (the sentence waits while you do).
+              Then "Show answer":  the ANSWER takes the window's place  ("← Back to file" brings the file back).
+              FIX MY TYPOS  (on at the start)  =  small SQL mistakes get fixed,  and you're told what changed
+              (in amber if a fix left a condition out:  that answer has rows you meant to keep out).
               class="folded closed"  =  it starts folded up,  and out of sight.
-              (The brain fills in the builder.)  -->
-        <div id="queryMenu" class="folded closed" role="dialog" aria-label="Query the open table">
+              (The brain fills in the "Try:" line and the sentence.)  -->
+        <div id="queryMenu" class="folded closed" role="dialog" aria-label="Ask the open file a question">
             <div class="query-head">
-                <span id="queryTitle">Query</span>
-                <button id="queryClose" type="button" aria-label="Close the query menu">×</button>
+                <span id="queryTitle">Ask</span>
+                <button id="queryClose" type="button" aria-label="Close">×</button>
             </div>
-            <div id="queryBuilder"></div>
+            <div class="query-words-line">
+                <input type="text" id="queryWords" autocomplete="off" aria-label="Ask in your own words" placeholder="Ask in your own words, then press Enter">
+            </div>
+            <div id="queryTry" role="group" aria-label="Ready questions about this file"></div>
+            <div id="queryBuilder" role="group" aria-label="Pick your question"></div>
+            <p id="queryMeaning" aria-live="polite"></p>
             <div class="query-sql-head">
                 <span class="query-sql-label">SQL</span>
-                <label class="query-option" title="Snap to result:  small SQL mistakes get fixed  (a typo,  a missing FROM,  words without quotes ...),  and what you type snaps into the builder's buttons">
-                    <input type="checkbox" id="queryFlex" checked> Query Flexibility
+                <label class="query-option" title="Small SQL mistakes get fixed  (a typo,  a missing FROM,  words without quotes ...),  and you're told what changed">
+                    <input type="checkbox" id="queryFlex" checked> Fix my typos
                 </label>
-                <label class="query-option" title="Type your own SQL  (the builder is greyed out while you do)">
-                    <input type="checkbox" id="queryType"> Type mode
+                <label class="query-option" title="Type your own SQL  (or plain words).   The sentence waits while you do.">
+                    <input type="checkbox" id="queryType"> Write it myself
                 </label>
-                <span id="querySqlNote">written for you as you pick</span>
+                <span id="querySqlNote">writes itself as you pick</span>
             </div>
-            <textarea id="querySql" spellcheck="false" autocomplete="off" rows="6" aria-label="The SQL query"></textarea>
-            <!--  Leaving type mode,  but some of your SQL doesn't fit the builder?  It ASKS first.  -->
+            <textarea id="querySql" spellcheck="false" autocomplete="off" rows="4" aria-label="The question in SQL" placeholder="SQL,  or plain words.   Enter = show the answer,  Shift + Enter = a new line"></textarea>
+            <!--  It ASKS first:  "Did you mean ...?"  (plain words with a word left over),  or leaving "Write it myself"
+                  when part of your SQL doesn't fit the sentence.  -->
             <div id="queryAsk" role="alertdialog" aria-live="polite" hidden>
                 <span id="queryAskWords"></span>
                 <button id="queryAskYes" type="button">Drop them</button>
-                <button id="queryAskNo" type="button">Keep typing</button>
+                <button id="queryAskNo" type="button">Keep writing</button>
             </div>
-            <!--  What Query Flexibility fixed  (in words)  -->
+            <!--  What "Fix my typos" fixed  (and what a fix left out:  in amber)  -->
             <div id="queryFixes" hidden></div>
             <div class="query-foot">
-                <button id="queryRun" type="button" title="Run it  (Ctrl + Enter)">Run ▶</button>
+                <button id="queryRun" type="button" title="Show the answer  (Enter)">Show answer ▶</button>
                 <button id="queryCopy" type="button">Copy SQL</button>
-                <button id="queryExport" type="button" title="Save the answer as a CSV file" disabled>Export CSV</button>
+                <button id="queryExport" type="button" title="Download the answer as a CSV file" disabled>Save as CSV</button>
                 <span id="queryStatus" role="status" aria-live="polite"></span>
             </div>
         </div>

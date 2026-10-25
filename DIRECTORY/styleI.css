@@ -77,6 +77,9 @@
     --sql-dark:     #265174;                        /*  ...a shade darker:  the "Table View" button  */
     --sql-glow:     rgba(58, 126, 202, 0.5);        /*  ...and its glow  (#3a7eca,  brighter)  */
 
+    --warn:         #8a4b00;                        /*  amber:  a fix LEFT OUT a condition  (not red:  there IS an answer,  just a bigger one)  */
+    --warn-dark:    #7a4500;                        /*  ...the answer's badge,  when it says so  */
+
     --check-box:    #ffffff;                        /*  a checkbox:  a white box  (ticked:  solid SQL blue,  a white ✓)  */
     --tag-bg:       #020202;                        /*  the "expand?" tag:  OLED-off black  (like the "CSV View" button)  */
     --tag-glow:     rgba(255, 255, 255, 0.35);      /*  ...and its soft white glow  */
@@ -133,6 +136,9 @@
     --sql:          #3a7eca;                        /*  SQL blue:  the BRIGHTER one  (#336791 is too dark to see on black)  */
     --sql-dark:     #265174;
     --sql-glow:     rgba(58, 126, 202, 0.5);
+
+    --warn:         #e8a33d;                        /*  amber,  bright enough for black  */
+    --warn-dark:    #7a4500;
 
     --check-box:    #ffffff;                        /*  still a white box:  it reads as "a box to tick",  even on black  */
     --tag-bg:       #020202;                        /*  blacker than the page  (#18191c),  so it still stands out  */
@@ -787,8 +793,76 @@ h1 {
 }
 
 
-/*  THE BUILDER:  one row per part  (Show,  Keep rows,  Group by ...).
-    The name on the left is a header square,  what you pick is a light square:  like the sheet.  */
+/*  1.  IN YOUR OWN WORDS:  a big light square to type in   (the search bar's look:  "type here")  */
+.query-words-line {
+    padding: 10px 10px 0;
+}
+
+#queryWords {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    padding: 0 12px;
+    line-height: 34px;
+    font: inherit;
+    font-size: 15px;
+    color: var(--text);
+    background: var(--square-light);
+    border: 1px solid var(--glass-edge);
+    border-radius: 10px;
+    box-shadow: inset 0 0 12px var(--inner-glow, rgba(255, 255, 255, 0.8));
+}
+
+#queryWords:focus {
+    outline: none;
+    box-shadow:
+        inset 0 0 0 1px var(--glow-edge, rgba(255, 255, 255, 0.95)),
+        0 0 14px 2px var(--glow, rgba(255, 255, 255, 0.9));
+}
+
+/*  TRY:  ready questions about this file,  one press each.
+    SQL-blue outlines:  "press me",  but quieter than the solid "Show answer".  */
+#queryTry {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+}
+
+#queryTry:empty {
+    display: none;
+}
+
+.query-try-label {
+    font-weight: 600;
+    color: var(--text-soft);
+}
+
+.query-try {
+    margin: 0;
+    padding: 0 10px;
+    line-height: 24px;
+    font-size: 12px;
+    color: var(--sql);
+    background: transparent;
+    border: 1px solid var(--sql);
+    border-radius: 12px;
+    box-shadow: none;
+}
+
+.query-try:hover,
+.query-try:focus-visible {
+    outline: none;
+    color: #fff;
+    background: var(--sql-dark);
+    box-shadow: 0 0 10px var(--sql-glow);
+}
+
+
+/*  THE SENTENCE  (the builder):  one line per part you use  (Show,  where,  for each,  sorted by,  at most),
+    then the parts you don't use yet,  on one line.
+    The sentence's word on the left is a header square,  what you pick is a light square:  like the sheet.  */
 .query-row {
     display: grid;
     grid-template-columns: 96px minmax(0, 1fr);
@@ -892,6 +966,73 @@ h1 {
 
 .query-hint {
     color: var(--text-soft);
+}
+
+/*  "+ at most ...":  a button dressed like the "+" lists  (dashed and quiet:  "there's more,  if you want it")  */
+.query-add-button {
+    margin: 0;
+    padding: 0 8px;
+    height: 26px;
+    line-height: 24px;
+    font: inherit;
+    color: var(--text-soft);
+    background: transparent;
+    border: 1px dashed var(--glass-edge);
+    border-radius: 7px;
+    box-shadow: none;
+}
+
+.query-add-button:hover,
+.query-add-button:focus-visible {
+    outline: none;
+    color: var(--text);
+    border-style: solid;
+}
+
+/*  The  [and ▾] / [or ▾]  in front of a condition:  a word of the sentence,  not a box  */
+#queryMenu select.query-join {
+    font-weight: 600;
+    color: var(--sql);
+    background: transparent;
+    border-color: transparent;
+}
+
+/*  The sentence's picks are as wide as their words  (a short pick = a short box:  it reads like a sentence).
+    (A browser without  field-sizing  keeps them as wide as their longest choice:  still works,  just roomier.)  */
+@supports (field-sizing: content) {
+    #queryMenu select {
+        field-sizing: content;
+    }
+    #queryMenu .query-value:not(.query-limit) {
+        field-sizing: content;
+        width: auto;
+        min-width: 90px;
+        max-width: 240px;
+    }
+}
+
+/*  "→ 4 rows  ·  Every row of class_data where ...":  what you'd get,  in plain words,  BEFORE you ask  */
+#queryMeaning {
+    margin: 0;
+    padding: 6px 12px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-soft);
+    border-top: 1px solid var(--line-soft, rgba(255, 255, 255, 0.45));
+}
+
+#queryMeaning:empty {
+    display: none;
+}
+
+#queryMeaning strong {
+    color: var(--sql);
+}
+
+/*  A fix that LEFT OUT a condition:  amber  (not red:  there is an answer,  it just has rows you meant to keep out)  */
+.query-warn {
+    font-weight: 600;
+    color: var(--warn);
 }
 
 
@@ -1025,7 +1166,7 @@ h1 {
     width: calc(100% - 20px);
     margin: 0 10px;
     padding: 8px 10px;
-    min-height: 92px;
+    min-height: 72px;
     resize: vertical;
     font-family: Consolas, "Cascadia Mono", Menlo, monospace;
     font-size: 13px;
@@ -1154,6 +1295,14 @@ h1 {
     box-shadow:
         inset 0 0 12px color-mix(in srgb, var(--theme-glow) 25%, transparent),     /*  a soft rim of the theme's glow  */
         0 4px 14px rgba(0, 0, 0, 0.1);
+}
+
+/*  An answer a fix LEFT A CONDITION OUT of:  amber,  and the words wrap  (they have to be READ,  not cut off with "...")  */
+#fileBadge.warn {
+    white-space: pre-wrap;
+    text-overflow: clip;
+    background: var(--warn-dark);
+    text-shadow: none;
 }
 
 
