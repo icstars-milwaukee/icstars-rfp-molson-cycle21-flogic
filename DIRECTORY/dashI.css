@@ -148,6 +148,7 @@ body.focus #dash {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 12px;
+    align-items: start;             /*  each tile as tall as what's in it  (a 4-bar chart doesn't stretch to match a 10-bar one)  */
 }
 
 .dash-tile {

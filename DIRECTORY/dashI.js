@@ -77,7 +77,7 @@ const DASH_KINDS        = ['count', 'distinct', 'bars', 'time'];
 const DASH_SIZES        = ['s', 'm', 'l'];
 
 //  Words that make a column a good first chart  (in this order).
-const DASH_GOOD_NAMES = [/state|status|stage/i, /priority|urgency|impact|risk/i, /group|team|owner|assign/i,
+const DASH_GOOD_NAMES = [/state|status|stage/i, /priority|urgency|impact|risk/i, /(^|\s)assign|owner|team/i, /group/i,
                          /category|type|kind|class/i, /region|location|site|city|country/i];
 
 //  Columns that are IDs  (every value different):  never a chart.
@@ -94,7 +94,7 @@ const DASH_ID_LIKE = /(^|[^a-z])(id|number|key|code)$/i;
 //
 // ----------------------------------------------------------
 
-const DASH_NEEDS = ['queryFileChanged', 'tableProfile', 'askSql', 'sqlName', 'sqlWordsOf', 'nextBite'];
+const DASH_NEEDS = ['queryFileChanged', 'tableProfile', 'askSql', 'sqlName', 'sqlWordsOf', 'nextBite', 'isNumberKind'];
 
 const dashReady = DASH_NEEDS.every(function (name) {
     const ok = typeof window[name] === 'function';
@@ -159,7 +159,7 @@ dashEditBar.append(
     dashButton('+ Add a tile', 'Make a new tile from this file\'s columns', function () { openAdd(); }),
     dashButton('Save layout', 'Download this dashboard\'s layout as a small .json file', saveLayout),
     dashButton('Load layout', 'Open a layout you saved before', function () { dashLayoutInput.click(); }),
-    dashButton('Suggested', 'Put the dashboard back the way it started', function () { suggestTiles(); refresh(); }),
+    dashButton('Suggested', 'Put the dashboard back the way it started', function () { dashNote.textContent = ''; suggestTiles(); refresh(); }),
     dashLayoutInput
 );
 
@@ -252,8 +252,8 @@ async function dashFileChanged() {
 //    STEP 2:  THE SUGGESTED TILES   (worked out from the file's profile)
 //
 //        1.  Rows                                      (always)
-//        2.  Different <the column with the most groups>   (like:  how many teams)
-//        3.  Rows by <status-like column>             (up to 3 bars tiles,  best names first)
+//        2.  Different <a team-like column>            (like:  how many teams.   No team?  The column with the most groups.)
+//        3.  Rows by <status / priority / team ...>    (up to 3 bars tiles,  ONE per kind of name,  best names first)
 //        4.  Rows over time  (<the first date column>)
 //
 // ----------------------------------------------------------
@@ -266,25 +266,37 @@ function suggestTiles() {
 
     dashTiles.push(newTile('count', 'Rows', null, null, 's'));
 
-    //  "Group" columns:  a handful to a few hundred different values,  repeated  (not one per row),  not an ID.
+    //  "Group" columns:  a handful to a few hundred different values,  repeated  (not one per row),
+    //  not an ID by name  (… Number),  and not full of record ids  (INC0012345:  a link to another ticket,  not a group).
     const groups = cols.filter(function (c) {
-        if (c.filled === 0 || c.values === null) return false;
+        if (c.filled === 0 || c.values === null || c.kind === 'date' || c.kind === 'timestamp') return false;     //  (dates go in the time tile)
         const size = c.values.size;
-        return size >= 2 && size <= 500 && size <= Math.max(2, c.filled * 0.5) && !DASH_ID_LIKE.test(c.name);
+        return size >= 2 && size <= 500 && size <= Math.max(2, c.filled * 0.5) && !DASH_ID_LIKE.test(c.name) && !mostlyIds(c);
     });
 
-    //  Best first:  a good name  (status,  priority,  team ...),  then fewer values.
-    function rank(c) {
+    //  Which kind of good name it has  (0 = status,  1 = priority,  2 = team ...),  or DASH_GOOD_NAMES.length  (none).
+    function nameKind(c) {
         const hit = DASH_GOOD_NAMES.findIndex(function (re) { return re.test(c.name); });
-        return (hit === -1 ? DASH_GOOD_NAMES.length : hit) * 1000 + c.values.size;
+        return hit === -1 ? DASH_GOOD_NAMES.length : hit;
     }
-    const ranked = groups.slice().sort(function (a, b) { return rank(a) - rank(b); });
+    //  Best first:  a good name,  then fewer values.
+    const ranked = groups.slice().sort(function (a, b) { return nameKind(a) - nameKind(b) || a.values.size - b.values.size; });
 
-    //  The column with the MOST groups  (teams,  cities):  how many there are.
-    const widest = groups.slice().sort(function (a, b) { return b.values.size - a.values.size; })[0];
-    if (widest && widest.values.size > DASH_TOP) dashTiles.push(newTile('distinct', 'Different ' + widest.name, widest.name, null, 's'));
+    //  How many TEAMS  (or owners,  or the column with the most groups):  a team-like name wins.
+    const wide = groups.filter(function (c) { return c.values.size > DASH_TOP && !isNumberKind(c.kind); });     //  (words:  "how many different Lane #" says nothing)
+    const team = wide.find(function (c) { return nameKind(c) === 2; })
+              || wide.sort(function (a, b) { return b.values.size - a.values.size; })[0];
+    if (team) dashTiles.push(newTile('distinct', 'Different ' + team.name, team.name, null, 's'));
 
-    ranked.slice(0, 3).forEach(function (c, i) {
+    //  Up to 3 bar charts,  ONE per kind of name  (a status,  a priority,  a team ...:  not 3 kinds of priority).
+    const picked = [], kindsUsed = new Set();
+    ranked.forEach(function (c) {
+        const k = nameKind(c);
+        if (picked.length >= 3 || (k < DASH_GOOD_NAMES.length && kindsUsed.has(k))) return;
+        kindsUsed.add(k);
+        picked.push(c);
+    });
+    picked.forEach(function (c) {
         dashTiles.push(newTile('bars', 'Rows by ' + c.name, c.name, null, 'm'));
     });
 
@@ -296,6 +308,17 @@ function suggestTiles() {
     if (dashTiles.length === 1 && table.rowCount > 0 && cols.length > 0) {
         dashNote.textContent = 'No column here splits the rows into groups, so there\'s just the row count.  Edit  ->  "+ Add a tile"  to add your own.';
     }
+}
+
+//  Are most of a column's values record ids  (INC0012345,  CHG0034567,  RITM0001234)?
+const DASH_RECORD_ID = /^[A-Za-z]{2,8}[-_]?\d{4,}$/;
+function mostlyIds(c) {
+    let ids = 0, seen = 0;
+    for (const v of c.values.values()) {
+        if (++seen > 200) break;
+        if (DASH_RECORD_ID.test(String(v).trim())) ids++;
+    }
+    return seen > 0 && ids / Math.min(seen, 200) > 0.8;
 }
 
 function newTile(kind, title, col, value, size) {
@@ -417,14 +440,15 @@ function drawTiles(counting) {
     dashTiles.forEach(function (tile, index) {
 
         const card = document.createElement('article');
-        card.className = 'dash-tile dash-' + tile.kind + ' size-' + tile.size;
+        card.className = 'dash-tile kind-' + tile.kind + ' size-' + tile.size;
 
         //  The title  (editable in Edit mode:  click it and type)
         const title = document.createElement('h3');
         title.className = 'dash-tile-title';
         title.textContent = tile.title;
         if (dashEditing) {
-            title.contentEditable = 'plaintext-only';
+            try { title.contentEditable = 'plaintext-only'; }      //  (only words:  no bold or pasted pictures)
+            catch (e) { title.contentEditable = 'true'; }           //  (an older browser:  the blur below keeps only the words anyway)
             title.spellcheck = false;
             title.title = 'Click to rename';
             title.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); title.blur(); } });
