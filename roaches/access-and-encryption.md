@@ -1,7 +1,7 @@
 # Login, saving and encryption: a talk doc for DJ (and DJ's agent)
 
 **Started:** Nov 5, 2026, by Fernando (PM/BA), with Claude
-**Status:** talking it over. Nothing is built yet. DJ and DJ's agent write the code (a new file, e.g. `DIRECTORY/vaultI.js`).
+**Status:** ANSWERED by DJ (Nov 5). The build plan is `access-and-encryption-handoff.md`. One change: **`keepPacks` is dropped**, so the vault holds locked keys only and never data. DJ and DJ's agent write the code (a new file, e.g. `DIRECTORY/vaultI.js`).
 **Deadline:** feature freeze Nov 16, final presentation Nov 19.
 
 **How to use this file:** read it top to bottom, then answer the questions in section 11 right under each one
@@ -265,29 +265,29 @@ every time, and only the keys live in the vault.
 ## 11. Questions for DJ (answer under each one)
 
 1. **Option pick:** A + B for the freeze, C as a stretch. OK?
-   `DJ:`
+   `DJ:` A + B for the freeze, C as a stretch. Agreed.
 2. **"One instance per browser":** one signed-in person at a time (switch = lock, then another credential)? Or one
    person, period, until IT resets it?
-   `DJ:`
+   `DJ:` One person at a time. Switching = Lock, then unlock as another person. The vault keeps one locked record per person who has set up, so we can both use the demo laptop.
 3. **Plain files after sign-in:** still allowed (demo mode), or packs only?
-   `DJ:`
+   `DJ:` Allowed, with a visible "unlocked" tag (demo mode). Also allowed before sign-in, from the unlock card.
 4. **Export report:** printable page + small CSV of the tile numbers. Do we also allow exporting the filtered rows
    (the sheet after a query), or only the dashboard?
-   `DJ:`
+   `DJ:` Both, gated: the dashboard's Export report AND the Query menu's Save as CSV follow the group's `export` rule while a pack is open. Plain files aren't gated.
 5. **Who sets auto-lock:** IT per group (in the credential), the user, or both (IT sets the max)?
-   `DJ:`
+   `DJ:` Both: IT sets the max (`autoLockMin`), and the user can pick shorter.
 6. **The IT console:** same repo folder (`DIRECTORY/it-console.html`), or its own folder, so it's obvious it's
    "IT's tool, not the user's"?
-   `DJ:`
+   `DJ:` Its own top-level folder, `it-console/`.
 7. **Pack format:** JSON with base64 (simple, slower), or a JSON header + raw bytes (faster)? Your agent's call.
-   `DJ:`
+   `DJ:` A JSON header plus raw bytes (`FLGPACK1`, see the handoff, section 4).
 8. **Recovery code to IT:** we don't think IT needs a copy (IT can reissue the credential). Agree, or should the
    console also print one for IT?
-   `DJ:`
+   `DJ:` Agree: no IT copy. IT reissues the credential file.
 9. **Branch:** `feature/vault` off `dev` after your merge, or off `feature/dashboard`?
-   `DJ:`
+   `DJ:` `feature/vault` off `fix/stray-quotes` (it already has the dashboard + focus mode + the quote fix).
 10. **Login look:** a full-screen unlock card before the app, or a small "🔒 Locked: unlock" bar on top of the normal page?
-    `DJ:`
+    `DJ:` A full-screen unlock card, then a small "Lock · name · group" chip once signed in.
 
 ---
 
