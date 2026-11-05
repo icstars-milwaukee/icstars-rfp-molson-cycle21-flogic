@@ -173,3 +173,41 @@ If it gets tight, cut V6 first (auto-lock and two tabs). Lock stays.
   - "Wiped from memory": the browser frees memory when it chooses.
   - "Safe after export": an exported file is plain on purpose.
 - **This is a prototype of what Entra ID would do.** The IT console plays Molson IT's part.
+
+---
+
+## 9. Fernando's side: done (Nov 5), on `feature/vault`
+
+| # | What | Where | Status |
+|---|---|---|---|
+| 5.1 | **Export report** button + panel: "Print or save as PDF" and "Download the numbers (.csv)", both stamped and both saying *"This file isn't locked. Share it like any work document."* | `dashI.js` (end of file), `dashI.css` (end of file) | ✅ |
+| 5.2 | **Dashboard clears on Lock**: `queryFileChanged()` with `fileTable === null` empties and hides it, and forgets the tiles (a tile like "State: New" names a value). | `dashI.js` `dashClear()` | ✅ (see the note below) |
+| 5.3 | **Demo data**: `demo_incident.csv` (2,400 rows) and `demo_change_request.csv` (450 rows). Same column names as the real exports, every value made up. | `demo-data/` (+ `README.md`) | ✅ |
+| 5.4 | The real-laptop checklist (section 7) | Fernando's laptop | After V3–V4 |
+
+**How the dashboard reads the vault** (only reads, never writes):
+- `FlogicVault` is looked up at use time, not load time, since `vaultI.js` loads after `dashI.js`. `onChange` is hooked the first time it's seen.
+- **The gate:** `state() === 'locked'` or `canExport() !== true` turns the button off, with the reason next to it ("Your group can't export"). An open panel closes. Each click checks again, so a button turned back on in DevTools still doesn't export.
+- **Fails closed:** if `canExport()` or `stamp()` throws, Export stays off ("Couldn't check the export rule").
+- **No `FlogicVault`:** Export works, and the stamp is the file + rows + time (`demo_incident.csv (2,400 rows) · made Nov 5, 2026, 3:53 PM`).
+- **With the vault:** `stamp()` + `· made <time>`.
+
+**The CSV:** `Tile, Column, Value, Rows, Share`, every value (not just the top 10), every day of a time tile, then the stamp and the note at the bottom. It starts with a UTF-8 BOM so Excel reads `·` and `é` right. A cell starting with `= + - @` gets a `'` in front (a value from the file like `=HYPERLINK(...)` won't run in Excel).
+
+**The printed page:** a copy of the tiles under a heading, the stamp and the note. Only that copy prints (`@media print`), always in light colors (Neo-Dark too), and it fits one Letter page for `demo_incident.csv`. A normal Ctrl + P prints the page like before.
+
+**⚠ For `closeFile()` (DJ):** the original `queryFileChanged()` reads `fileTable.table` first, so with `fileTable = null` it throws `Cannot read properties of null (reading 'table')`. The dashboard's wrapper now runs in `try/finally`, so the dashboard still clears even when that throws. But the Query menu won't reset. Either give `queryFileChanged()` a `fileTable === null` branch (reset the menu, disable Ask), or have `closeFile()` reset the menu itself and call only the dashboard part. Your call. The dashboard handles both.
+
+**One dashboard change on the way:** within a kind of name, the auto-pick now prefers the column further **left** in the file (it used to prefer fewer values). So `incident` still gets Priority (not Impact), and `change_request` now gets **Risk** instead of "SAP impact" (the "Worth knowing" note in the dashboard README). Checked on the real files: incident → State, Priority, Assignment group; change_request → State, Risk, Owner group.
+
+**Tested** (headless Chromium, `file://`):
+- 30 export checks:
+  - no vault
+  - a mock `FlogicVault`: allowed, not allowed, turned off while the panel is open, throwing, locked
+  - forced calls to the export functions
+  - formula cells
+  - the printed page
+  - close-then-reopen
+- The 18 dashboard checks from before still pass.
+- Row counts on the real six files are unchanged.
+- No page errors.

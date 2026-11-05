@@ -19,7 +19,7 @@
 
     WHAT IT LOOKS LIKE:
 
-        ┌ DASHBOARD  ·  incident  ·  23,334 rows ─────────────── [ Edit ] [ Hide ] ┐
+        ┌ DASHBOARD  ·  incident  ·  23,334 rows ─── [ Export report ] [ Edit ] [ Hide ] ┐
         │ ┌────────────┐ ┌────────────┐ ┌──────────────────────────────────────┐ │
         │ │ Rows       │ │ Different  │ │ Rows by State                        │ │
         │ │ 23,334     │ │ Assignment │ │ Closed        ██████████████  16,404 │ │
@@ -48,6 +48,11 @@
     CLICK A BAR  (or a count card with a "where")  ->  the rows behind it,  asked through the query
     engine  (askSql in scriptI.js),  so they show up in the sheet with  "← Back to file".
 
+    EXPORT REPORT  ->  the dashboard as a page to print  (or "Save as PDF" in the print window),
+              and the numbers behind every tile as a small CSV.   Both are stamped with who,  which group,
+              when and which file  (from the vault,  vaultI.js,  when it's there),  and both say
+              "This file isn't locked."   A locked pack's group decides if it can export  (the gate).
+
     SAFETY  (same rules as the rest of the app):
         -  Nothing is saved in the browser.   A layout only leaves as a file YOU download.
         -  No network.   No outside code.
@@ -59,6 +64,10 @@
         and adds ONE thing:  when a file finishes loading,  scriptI.js calls  queryFileChanged().
         This file wraps it,  so the dashboard hears about every new file  (and every sheet tab).
         It runs the original first,  then rebuilds the dashboard.   Nothing in scriptI.js is edited.
+        No file open any more  (Lock calls closeFile(),  which calls queryFileChanged())  ->  the dashboard empties.
+
+        The vault  (vaultI.js,  loaded AFTER this file)  is only ever READ,  through one object:
+        window.FlogicVault  (canExport,  stamp,  onChange ...).   No vault?  Export works,  just with no stamp.
 
 */
 
@@ -82,6 +91,9 @@ const DASH_GOOD_NAMES = [/state|status|stage/i, /priority|urgency|impact|risk/i,
 
 //  Columns that are IDs  (every value different):  never a chart.
 const DASH_ID_LIKE = /(^|[^a-z])(id|number|key|code)$/i;
+
+//  What every exported report says  (on the page,  and at the bottom of the CSV).
+const DASH_UNLOCKED_NOTE = 'This file isn\'t locked. Share it like any work document.';
 
 
 
@@ -142,10 +154,33 @@ const dashTools = document.createElement('div');
 dashTools.className = 'dash-tools';
 dashHead.append(dashTitle, dashTools);
 
+const dashExportBtn = dashButton('Export report', 'Print this dashboard, or download its numbers as a CSV', toggleExport);
 const dashEditBtn = dashButton('Edit', 'Move, resize, rename, add or remove tiles', toggleEditing);
 const dashHideBtn = dashButton('Hide', 'Fold the dashboard away  (the sheet stays)', toggleHidden);
 dashEditBtn.setAttribute('aria-pressed', 'false');
-dashTools.append(dashEditBtn, dashHideBtn);
+dashExportBtn.setAttribute('aria-expanded', 'false');
+const dashWhy = document.createElement('span');       //  why Export is off  ("Your group can't export")
+dashWhy.className = 'dash-why';
+dashWhy.id = 'dash-why';
+dashTools.append(dashWhy, dashExportBtn, dashEditBtn, dashHideBtn);
+
+//  The Export panel:   who · group · date · file      [ Print or save as PDF ]  [ Download the numbers (.csv) ]  [ Close ]
+const dashExport = document.createElement('div');
+dashExport.className = 'dash-export';
+dashExport.hidden = true;
+const dashExportStamp = document.createElement('p');
+dashExportStamp.className = 'dash-export-stamp';
+const dashExportNote = document.createElement('p');
+dashExportNote.className = 'dash-export-note';
+dashExportNote.textContent = '⚠ ' + DASH_UNLOCKED_NOTE;
+const dashExportButtons = document.createElement('div');
+dashExportButtons.className = 'dash-export-buttons';
+dashExportButtons.append(
+    dashButton('Print or save as PDF', 'Opens the print window.  Pick "Save as PDF" there to get a file.', printReport),
+    dashButton('Download the numbers (.csv)', 'Every tile\'s numbers, as a small CSV for Excel', downloadReportCsv),
+    dashButton('Close', 'Close the export panel', function () { showExport(false); })
+);
+dashExport.append(dashExportStamp, dashExportNote, dashExportButtons);
 
 //  Edit mode's own bar:   [ + Add a tile ]  [ Save layout ]  [ Load layout ]  [ Suggested ]
 const dashEditBar = document.createElement('div');
@@ -175,7 +210,7 @@ dashNote.setAttribute('aria-live', 'polite');
 const dashGrid = document.createElement('div');
 dashGrid.className = 'dash-grid';
 
-dash.append(dashHead, dashEditBar, dashAdd, dashNote, dashGrid);
+dash.append(dashHead, dashExport, dashEditBar, dashAdd, dashNote, dashGrid);
 
 if (dashReady) {
     const controlsBox = document.getElementById('controls');
@@ -208,12 +243,21 @@ function dashButton(words, title, onClick) {
 if (dashReady) {
     const originalFileChanged = queryFileChanged;
     queryFileChanged = function () {
-        originalFileChanged.apply(this, arguments);
-        dashFileChanged();
+        try {
+            return originalFileChanged.apply(this, arguments);
+        } finally {
+            dashFileChanged();          //  (even if the original trips:  on Lock,  emptying the screen matters most)
+        }
     };
 }
 
 async function dashFileChanged() {
+
+    //  No file open any more  (Lock  ->  closeFile()  ->  here)?   Empty the dashboard.
+    if (fileTable === null || !fileTable.engine) {
+        dashClear();
+        return;
+    }
 
     const myLoad = ++dashLoad;
     const table = fileTable.engine;
@@ -222,8 +266,10 @@ async function dashFileChanged() {
     dashProfile = null;
     dashResults = new Map();
     dashAdd.hidden = true;
+    showExport(false);
     dashNote.textContent = '';
     dash.hidden = false;
+    updateExport();
     dashTitle.textContent = 'Dashboard  ·  ' + table.name + '  ·  ' + table.rowCount.toLocaleString() + ' row' + (table.rowCount === 1 ? '' : 's');
     dashGrid.textContent = '';
     dashGrid.appendChild(waitingCard('Looking at the file...'));
@@ -243,6 +289,24 @@ async function dashFileChanged() {
     else suggestTiles();
 
     refresh();
+}
+
+//  Empty,  hidden,  and forgetting everything about the last file:  its numbers,  and its tiles too
+//  (a tile's title or "where" can name a value,  like  "State:  New",  and the next person shouldn't see it).
+function dashClear() {
+    ++dashLoad;                                 //  (a count still running for the old file quits)
+    dashProfile = null;
+    dashResults = new Map();
+    dashTiles = [];
+    if (dashEditing) toggleEditing();
+    dashAdd.hidden = true;
+    dashAdd.textContent = '';
+    showExport(false);
+    dashNote.textContent = '';
+    dashTitle.textContent = '';
+    dashGrid.textContent = '';
+    dash.hidden = true;
+    updateExport();
 }
 
 
@@ -279,8 +343,13 @@ function suggestTiles() {
         const hit = DASH_GOOD_NAMES.findIndex(function (re) { return re.test(c.name); });
         return hit === -1 ? DASH_GOOD_NAMES.length : hit;
     }
-    //  Best first:  a good name,  then fewer values.
-    const ranked = groups.slice().sort(function (a, b) { return nameKind(a) - nameKind(b) || a.values.size - b.values.size; });
+    //  Best first:  a good name,  then the one further LEFT in the file  (ServiceNow puts Priority before Impact
+    //  and Urgency,  and Risk before "SAP impact":  the main column comes first).   No good name:  fewer values first.
+    const ranked = groups.slice().sort(function (a, b) {
+        const ka = nameKind(a), kb = nameKind(b);
+        if (ka !== kb) return ka - kb;
+        return ka === DASH_GOOD_NAMES.length ? a.values.size - b.values.size : cols.indexOf(a) - cols.indexOf(b);
+    });
 
     //  How many TEAMS  (or owners,  or the column with the most groups):  a team-like name wins.
     const wide = groups.filter(function (c) { return c.values.size > DASH_TOP && !isNumberKind(c.kind); });     //  (words:  "how many different Lane #" says nothing)
@@ -434,6 +503,7 @@ function drawTiles(counting) {
 
     if (dashTiles.length === 0) {
         dashGrid.appendChild(waitingCard(dashEditing ? 'No tiles.  "+ Add a tile"  makes one.' : 'No tiles.  Edit  ->  "+ Add a tile".'));
+        updateExport();
         return;
     }
 
@@ -484,6 +554,8 @@ function drawTiles(counting) {
 
         dashGrid.appendChild(card);
     });
+
+    updateExport();
 }
 
 function soft(words) {
@@ -582,18 +654,10 @@ function drawBars(body, tile, result) {
 //  ---- time:   rows per day  (or month),  as columns.   First and last day under it. ----
 function drawTime(body, tile, result) {
 
-    let days = Array.from(result.map.entries()).sort(function (a, b) { return a[0] < b[0] ? -1 : 1; });
-    if (days.length === 0) { body.appendChild(soft('No dates in this column.')); return; }
-
+    const buckets = timeBuckets(result);
+    if (buckets === null) { body.appendChild(soft('No dates in this column.')); return; }
+    const days = buckets.days, unit = buckets.unit;
     const first = days[0][0], last = days[days.length - 1][0];
-    const span = (Date.parse(last) - Date.parse(first)) / 86400000;
-    let unit = 'day';
-    if (span > DASH_MONTHS_AFTER) {
-        const months = new Map();
-        days.forEach(function (d) { const m = d[0].slice(0, 7); months.set(m, (months.get(m) || 0) + d[1]); });
-        days = Array.from(months.entries());
-        unit = 'month';
-    }
 
     const most = days.reduce(function (m, d) { return Math.max(m, d[1]); }, 1);
     const total = days.reduce(function (s, d) { return s + d[1]; }, 0);
@@ -618,6 +682,20 @@ function drawTime(body, tile, result) {
     const c = document.createElement('span'); c.textContent = days[days.length - 1][0];
     axis.append(a, b, c);
     body.appendChild(axis);
+}
+
+
+//  A time tile's counts,  in order:   { days: [['2026-07-05', 312], ...],  unit: 'day' }
+//  (a long stretch,  more than DASH_MONTHS_AFTER days,  goes by month:  [['2026-07', 9120], ...])   No dates?  null.
+//  (The chart and the export both use this,  so they always agree.)
+function timeBuckets(result) {
+    let days = Array.from(result.map.entries()).sort(function (a, b) { return a[0] < b[0] ? -1 : 1; });
+    if (days.length === 0) return null;
+    const span = (Date.parse(days[days.length - 1][0]) - Date.parse(days[0][0])) / 86400000;
+    if (span <= DASH_MONTHS_AFTER) return { days: days, unit: 'day' };
+    const months = new Map();
+    days.forEach(function (d) { const m = d[0].slice(0, 7); months.set(m, (months.get(m) || 0) + d[1]); });
+    return { days: Array.from(months.entries()), unit: 'month' };
 }
 
 
@@ -871,3 +949,198 @@ dashLayoutInput.addEventListener('change', function () {
         refresh();
     });
 });
+
+
+
+// ----------------------------------------------------------
+//
+//    EXPORT REPORT   (the handoff's  5.1:   access-and-encryption-handoff.md)
+//
+//        [ Export report ]   ->   a small panel:
+//            Fernando G · Service Desk · Nov 19, 2026 · incident.csv (23,334 rows)  ·  made 3:52 PM
+//            ⚠ This file isn't locked. Share it like any work document.
+//            [ Print or save as PDF ]   [ Download the numbers (.csv) ]   [ Close ]
+//
+//    THE GATE:  while a locked pack is open,  its group's rule decides  (FlogicVault.canExport()).
+//               A plain file is the user's own file:  never gated.
+//               The button is OFF with the reason next to it  ("Your group can't export"),
+//               and the rule is checked AGAIN on every click  (a disabled button isn't a lock).
+//
+//    THE VAULT is only READ:   window.FlogicVault   (vaultI.js,  loaded after this file).
+//    It isn't there?  Export still works,  with no stamp.   It's there but breaks?  Export stays OFF.
+//
+// ----------------------------------------------------------
+
+let dashVaultHooked = false;        //  told the vault to call  updateExport  when something changes?
+
+//  The vault,  if vaultI.js is there  (and looks like the real thing).   Otherwise  null.
+function dashVault() {
+    const v = window.FlogicVault;
+    return v && typeof v.canExport === 'function' && typeof v.stamp === 'function' ? v : null;
+}
+
+//  Can the dashboard export right now?    { ok: true }   or   { ok: false,  why: 'Your group can\'t export' }
+function exportCheck() {
+    if (fileTable === null || !fileTable.engine || dashProfile === null) return { ok: false, why: '' };
+    if (dashTiles.length === 0) return { ok: false, why: 'No tiles to export' };
+    if (dashResults.size === 0) return { ok: false, why: 'Still counting...' };
+    const v = dashVault();
+    if (v === null) return { ok: true };
+    try {
+        if (typeof v.state === 'function' && v.state() === 'locked') return { ok: false, why: 'Locked' };
+        if (v.canExport() !== true) return { ok: false, why: 'Your group can\'t export' };
+        return { ok: true };
+    } catch (problem) {
+        console.warn('Dashboard: the vault couldn\'t say if exporting is allowed, so Export stays off.', problem);
+        return { ok: false, why: 'Couldn\'t check the export rule' };
+    }
+}
+
+//  Button on or off  (and why),  and the stamp in the panel.   Runs after every draw,  and whenever the vault changes.
+function updateExport() {
+
+    const v = dashVault();
+    if (v !== null && !dashVaultHooked && typeof v.onChange === 'function') {
+        dashVaultHooked = true;
+        try { v.onChange(updateExport); } catch (e) { dashVaultHooked = false; }
+    }
+
+    const check = exportCheck();
+    dashExportBtn.disabled = !check.ok;
+    dashWhy.textContent = check.ok ? '' : check.why;
+    if (check.ok) dashExportBtn.removeAttribute('aria-describedby');
+    else dashExportBtn.setAttribute('aria-describedby', 'dash-why');
+    if (!check.ok) showExport(false);
+    else dashExportStamp.textContent = reportStamp();
+}
+
+function toggleExport() {
+    showExport(dashExport.hidden);
+}
+
+function showExport(open) {
+    if (open && !exportCheck().ok) open = false;
+    dashExport.hidden = !open;
+    dashExportBtn.setAttribute('aria-expanded', String(open));
+    if (open) dashExportStamp.textContent = reportStamp();
+}
+
+//  Who · group · date · file  (from the vault),  then the time it was made.
+//  No vault  (or a plain file):  the file and its rows,  then the time.
+function reportStamp() {
+    let stamp = '';
+    const v = dashVault();
+    if (v !== null) {
+        try { stamp = String(v.stamp() || ''); } catch (e) { stamp = ''; }
+    }
+    if (stamp === '') {
+        const rows = fileTable.engine.rowCount;
+        stamp = fileTable.file.name + '  (' + rows.toLocaleString() + ' row' + (rows === 1 ? '' : 's') + ')';
+        if (fileTable.engine.name !== fileTable.file.name.replace(/\.[^.]*$/, '')) stamp += '  ·  sheet:  ' + fileTable.engine.name;
+    }
+    const made = new Date().toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return stamp + '  ·  made ' + made;
+}
+
+
+//  ---- THE NUMBERS,  as rows:   [ tile,  column,  value,  rows,  share ] ----
+//
+//      Rows                    (every row)   23334
+//      Rows by Priority        Priority      3 - Moderate     17138    73%
+//      Rows over time (...)    Opened        2026-07-05       312      1.3%
+//
+function reportRows() {
+    const rows = [];
+    const all = fileTable.engine.rowCount;
+    dashTiles.forEach(function (tile) {
+        const result = dashResults.get(tile.id);
+        if (result === undefined) return;                     //  (a column this file doesn't have)
+        if (tile.kind === 'count') {
+            rows.push([tile.title, tile.col === null ? '(every row)' : tile.col, tile.value === null ? '' : tile.value, result.n, percent(result.n, all)]);
+        } else if (tile.kind === 'distinct') {
+            const different = Array.from(result.map.keys()).filter(function (k) { return k !== DASH_BLANK; }).length;
+            rows.push([tile.title, tile.col, '(different values)', different, '']);
+        } else if (tile.kind === 'bars') {
+            const entries = topValues(result.map, Infinity);
+            const total = entries.reduce(function (s, e) { return s + e[1]; }, 0);
+            entries.forEach(function (e) { rows.push([tile.title, tile.col, e[0], e[1], percent(e[1], total)]); });
+        } else {
+            const buckets = timeBuckets(result);
+            if (buckets === null) return;
+            const total = buckets.days.reduce(function (s, d) { return s + d[1]; }, 0);
+            buckets.days.forEach(function (d) { rows.push([tile.title, tile.col + '  (by ' + buckets.unit + ')', d[0], d[1], percent(d[1], total)]); });
+        }
+    });
+    return rows;
+}
+
+//  One CSV cell.   Quotes when it needs them,  and a cell that starts like a FORMULA  (= + - @)
+//  gets a ' in front,  so Excel shows it instead of running it  (a value from the file could be  =HYPERLINK(...) ).
+function csvCell(value) {
+    let text = String(value);
+    if (typeof value !== 'number' && /^[=+\-@\t\r]/.test(text)) text = '\'' + text;
+    return /[",\r\n]/.test(text) ? '"' + text.split('"').join('""') + '"' : text;
+}
+
+function downloadReportCsv() {
+    if (!exportCheck().ok) { updateExport(); return; }          //  (checked again:  the rule may have changed)
+    const lines = [['Tile', 'Column', 'Value', 'Rows', 'Share']].concat(reportRows());
+    lines.push([], ['Report', reportStamp()], ['Note', DASH_UNLOCKED_NOTE]);
+    const text = lines.map(function (line) { return line.map(csvCell).join(','); }).join('\r\n') + '\r\n';
+    const blob = new Blob(['﻿' + text], { type: 'text/csv' });          //  (the BOM tells Excel it's UTF-8:  é and — come out right)
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = fileTable.file.name.replace(/\.[^.]*$/, '') + '-report.csv';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
+    dashNote.textContent = 'Report numbers saved as  ' + link.download + '.   ' + DASH_UNLOCKED_NOTE;
+}
+
+
+//  ---- THE PRINTED PAGE ----
+//
+//  A copy of the tiles  (no buttons that do anything,  no Edit tools)  goes in  #dash-report,  under a
+//  heading,  the stamp and the "isn't locked" line.   For the print,  ONLY that shows  (dashI.css,  @media print).
+//  The print window's "Save as PDF" makes it a file.   Then the copy is thrown away.
+//
+function printReport() {
+    if (!exportCheck().ok) { updateExport(); return; }
+
+    const old = document.getElementById('dash-report');
+    if (old) old.remove();
+
+    const report = document.createElement('section');
+    report.id = 'dash-report';
+    const h = document.createElement('h1');
+    h.textContent = 'Report  ·  ' + fileTable.engine.name;
+    const stamp = document.createElement('p');
+    stamp.className = 'dash-report-stamp';
+    stamp.textContent = reportStamp();
+    const note = document.createElement('p');
+    note.className = 'dash-report-note';
+    note.textContent = DASH_UNLOCKED_NOTE;
+
+    const grid = dashGrid.cloneNode(true);
+    grid.querySelectorAll('.dash-tile-tools').forEach(function (t) { t.remove(); });
+    grid.querySelectorAll('[contenteditable]').forEach(function (t) { t.removeAttribute('contenteditable'); });
+    grid.querySelectorAll('button').forEach(function (b) { b.tabIndex = -1; });
+    grid.querySelectorAll('[title]').forEach(function (t) { t.removeAttribute('title'); });
+
+    report.append(h, stamp, note, grid);
+    document.body.appendChild(report);
+    document.body.classList.add('dash-printing');
+
+    let done = false;
+    const cleanUp = function () {
+        if (done) return;
+        done = true;
+        document.body.classList.remove('dash-printing');
+        report.remove();
+        window.removeEventListener('afterprint', cleanUp);
+    };
+    window.addEventListener('afterprint', cleanUp);
+    window.print();                         //  (the copy is thrown away when the print window closes:  "afterprint".
+                                            //   It's hidden on the screen anyway,  and the next print replaces it.)
+}
