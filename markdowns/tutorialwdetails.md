@@ -19233,6 +19233,78 @@ Rows 1–15 of 3  ·  ⚠ 1 quote opened a cell that never closed:  the row coun
 ---
 
 
+# PART 15: The Vault, Step 1: Locks and Keys (`vaultcoreI.js`) 🔐
+
+The plan is in `roaches/access-and-encryption-handoff.md`: IT hands out **access groups**, each with its own **key**. A data file is locked with its group's key (a **data pack**, `.flogic`). Each person gets a **credential file** (`.flogic-id`) holding their groups' keys, locked. The browser only ever keeps *locked keys*, never data.
+
+This part is only the **locks and keys**: no page, no saving. Two pages will use it: the app and IT's console.
+
+```text
+   IT's console                                   the app
+   ────────────                                   ───────
+   newGroupKey()  ──►  makePack(file)  ──────────►  readPackHeader()   "This pack is for Service Desk"
+        │                                            openPack(key)  ──►  the file  ──►  loadFile
+        └──►  makeCredential(person)  ─────────────►  openCredential(setup code)     (once, at setup)
+                    + a setup code (handed over)       lockKeys(passphrase), lockKeys(recovery code)
+                                                       unlockKeys(passphrase)          (every time)
+```
+
+### Step 15.1: One name on the page
+
+```js
+const VaultCore = (function () {
+    ...
+    return Object.freeze({ makeCode, lockKeys, unlockKeys, makeCredential, openCredential, makePack, openPack, ... });
+})();
+```
+
+Why the wrapper? Every script shares one scope. Twice, a new function silently replaced an old one with the same name (Part 13's `showMatches`). Inside the wrapper, names can't clash with anything, and `Object.freeze` means nobody can swap a piece out later.
+
+### Step 15.2: A passphrase becomes a key (PBKDF2)
+
+A passphrase is too short to be a key by itself. PBKDF2 mixes it with a random **salt** 600,000 times. That's slow on purpose: about 0.1–0.3 s per try, so guessing a million passphrases takes days. With no server, nothing can count wrong tries, so this slowness is the only brake.
+
+The key it makes can only **lock and unlock other keys** (`wrapKey`/`unwrapKey`), and can't be read out (`extractable: false`).
+
+### Step 15.3: Locking a key with a key, tied to a label
+
+```js
+subtle.wrapKey('raw', groupKey, kek, { name: 'AES-GCM', iv: iv, additionalData: label });
+//  label  =  "u-0003|service-desk|1"     (person | group | key version)
+```
+
+AES-GCM checks the label when it unlocks. Copy a locked key onto another person or group in the file, and it won't open. A wrong passphrase makes `unwrapKey` throw: that's how the app knows it was wrong.
+
+### Step 15.4: Codes
+
+`23456789ABCDEFGHJKMNPQRSTUVWXYZ`: 31 symbols, with no `0 O 1 I L` (they look alike when written down). A **recovery code** is 25 symbols (`7KQ4M-X9WTC-...`), a **setup code** 15. Each symbol comes from a random byte, but bytes 248–255 are thrown away: 248 = 8 × 31, so every symbol is exactly as likely as the others.
+
+> 🧠 `normalizeCode` (no spaces or dashes, capitals only) must be used before a code locks or unlocks anything. A passphrase is NOT normalized: `Horse` and `horse` are different passphrases. The test caught exactly this: a recovery code typed in small letters was refused until it was normalized.
+
+### Step 15.5: Data packs: a label you can read, data you can't
+
+```text
+ "FLGPACK1" │ N │ { "group": "service-desk", "fileName": "incident.csv", ... } │ IV │ locked file + tag
+ └──────────────────── additionalData (checked, not hidden) ─────────────────┘
+```
+
+The label is plain, so the app can say *"This pack is for Change Team"* without even trying a key. But it's the AES-GCM `additionalData`, so changing one letter of it (like the group) breaks the unlock. Raw bytes, not base64: a 95 MB file stays 95 MB, plus 12 + N + 16 bytes.
+
+### ✅ Test it
+
+`sh tools/run-tests.sh realfile-vaultcore` → **32 / 32** (made-up data only):
+- one name on the page; `file://` has `crypto.subtle`
+- codes: the right shape, no look-alikes, 50,000 symbols spread evenly; typed codes forgive spaces and small letters
+- a credential: it doesn't contain its setup code; a wrong code, swapped keys, or a changed person id are all refused
+- passphrase + recovery code: two locked copies; the unlocked key can't be read out; one letter off is refused
+- packs: the label reads without a key; the data isn't readable; the other group's key, an edited label, or one flipped bit won't open; the same file packed twice comes out different (a fresh IV)
+- 600,000 rounds really cost about 10× what 60,000 do; a 95 MB pack locks and opens in about 1 s
+
+<br>
+
+---
+
+
 ## Change stuff yourself
 
 | I want to... | Do this |
