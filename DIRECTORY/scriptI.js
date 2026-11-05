@@ -76,6 +76,7 @@ const WINDOW_SIZE = 15;          //  how many rows fit in the window  (plus the 
 
 let focusOn   = false;           //  FOCUS MODE on?  (the bars fold away,  the window fills the screen:  see "FOCUS MODE")
 let focusRows = WINDOW_SIZE;     //  ...and then how many rows fit on the screen
+let gridCell  = null;            //  focus mode's SELECTED cell,  like Excel's:  { row: the row in the FILE,  col }.   null = none yet
 const FOCUS_GAP = 8;             //  focus mode:  the gap under the window  (px).   Small:  the table gets the screen.
                                  //  If you change this, change the 8px in styleI.css's FOCUS MODE too.
 
@@ -711,6 +712,7 @@ function swapIn(table, look) {
     rowCache    = new Map();                //  new rows  =  forget the old ones
     cacheCells  = 0;
     xlsxInfo    = table.excel;              //  the Excel notes  (null for a CSV)
+    gridCell    = null;                     //  (focus mode's selected cell belonged to the OLD file)
     sqlInfo     = table.sql;                //  the SQL notes    (null if it's not a SQL dump)
     fileNote    = table.note;
     excelLook   = look;
@@ -1146,7 +1148,9 @@ function layoutColumns() {
     for (let col = 0; col < dataColumns; col++) dataWidth += dataWidths[col];
 
     //  Room left in the spreadsheet look's window  (minus the row numbers,  its 2 edges,  and room for a scrollbar).
-    const room  = spreadsheetLook() ? EXCEL_WINDOW - NUM_WIDTH - 2 - 18 - dataWidth : 0;
+    //  (Focus mode:  the window is as wide as the SCREEN,  so the empty columns fill the screen.)
+    const wide  = focusOn ? window.innerWidth : EXCEL_WINDOW;
+    const room  = spreadsheetLook() ? wide - NUM_WIDTH - 2 - 18 - dataWidth : 0;
     const empty = room > 0 ? Math.ceil(room / EMPTY_COLUMN) : 0;
 
     columnCount  = dataColumns + empty;
@@ -1427,6 +1431,7 @@ function drawHeader(measure) {
             cell.className = 'cell';
             cell.removeAttribute('title');
             cell.textContent = columnName(col);
+            if (focusOn && gridCell !== null && gridCell.col === col) cell.classList.add('grid-head');     //  (focus mode:  the selected cell's letter,  lit up)
         }
         headerBox.prepend(letters);
     }
@@ -1611,6 +1616,8 @@ function aimOn(at, hit) {
     aimHits = hitsIn(matches[at]);
     aimHit  = hit < 0 ? aimHits.length - 1 : hit;
     drawAim();
+    //  Focus mode:  the SELECTED cell moves onto the match too,  like Excel's "Find Next".
+    if (focusOn) selectGridCell({ row: matches[at], col: aimHits[aimHit] });
 }
 
 
@@ -2008,6 +2015,18 @@ rowsBox.addEventListener('click', function (e) {
     if (cell === null) return;
     if (Math.abs(e.clientX - pressX) > 5 || Math.abs(e.clientY - pressY) > 5) return;     //  it moved:  selecting words
     if (String(window.getSelection()).length > 0) return;                                   //  words are selected:  leave them
+
+    //  FOCUS MODE:  a click SELECTS the cell,  like Excel.   Click the selected cell again  (or double-click)  ->  its Details.
+    if (focusOn) {
+        const at = gridSpot(cell);
+        if (at === null) return;
+        if (!isGridCell(at.row, at.col)) {
+            hideTag();
+            selectGridCell(at);
+            return;
+        }
+    }
+
     const spot = cellSpot(cell);
     if (spot === null) return;
     hideTag();
@@ -2086,7 +2105,7 @@ let flipping = false;       //  mid-flip?  (Then a second click waits.)
 
 
 //  Which of the 2 special looks is on?   (excelLook  =  "the file's own look is on".)
-function spreadsheetLook() { return excelLook && sqlInfo === null; }      //  a CSV or an Excel file,  in its own look
+function spreadsheetLook() { return (excelLook || focusOn) && sqlInfo === null; }     //  a CSV or an Excel file,  in its own look  (or in FOCUS MODE:  always the grid)
 function tableLook()       { return excelLook && sqlInfo !== null; }      //  a SQL dump,  in its own look
 
 
@@ -3143,6 +3162,11 @@ function makeRow(num, cells, query, index) {
     numCell.textContent = num + rowShift();
     row.appendChild(numCell);
 
+    //  Focus mode's SELECTED cell in this row?  Its row number lights up,  and the cell gets its box  (below).
+    //  (The header row is  num 0  ->  row -1:  never selected.)
+    const gridCol = focusOn && gridCell !== null && gridCell.row === num - 1 ? gridCell.col : -1;
+    if (gridCol !== -1) numCell.classList.add('grid-head');
+
 
     //  The LEFT spacer  (stands in for all the columns to the left that aren't built).
     row.appendChild(document.createElement('span'));
@@ -3186,6 +3210,8 @@ function makeRow(num, cells, query, index) {
         if (sqlInfo !== null && text === '' && sqlIsNull(sqlInfo, num, col)) cell.classList.add('null');
 
         paintMatches(cell, shown, query);
+
+        if (col === gridCol) cell.classList.add('grid-cell');      //  focus mode's selected cell:  a box around it
 
         row.appendChild(cell);
     }
@@ -5267,6 +5293,63 @@ outputBox.addEventListener('pointerdown', function (e) { if (focusOn && e.pointe
 pill.addEventListener('focusin', wakePill);                 //  (Tabbed to it?  It shows.)
 
 
+//  THE SELECTED CELL   (like Excel's:  a box around it,  and its column letter and row number lit up)
+//
+//          A     B     C
+//     1   ...   ...   ...
+//     2   ...  [███]  ...      <-  B2:  the box,  and the  B  and the  2  light up
+//
+//  It's remembered by its row in the FILE  (not its spot on screen),  so it stays on the same cell
+//  while you scroll,  and the rows are built and thrown away  (makeRow and drawHeader dress it).
+
+//  Which cell is this box?   Like cellSpot,  but the EMPTY columns past the data count too  (you can select G1 in Excel).
+function gridSpot(cell) {
+    const line = cell.parentElement;
+    if (line === null || line.dataset.index === undefined) return null;
+    const col = builtColStart + Array.prototype.indexOf.call(line.children, cell) - 2;
+    const at  = Number(line.dataset.index);
+    if (col < 0 || col >= columnCount || at >= matches.length) return null;
+    return { row: matches[at], col: col };
+}
+
+function isGridCell(row, col) {
+    return gridCell !== null && gridCell.row === row && gridCell.col === col;
+}
+
+//  Select a cell  ({ row, col }),  and re-dress the boxes that are built right now.
+function selectGridCell(at) {
+    gridCell = at;
+    paintGridCell();
+}
+
+function paintGridCell() {
+    for (const old of outputBox.querySelectorAll('.grid-cell, .grid-head')) old.classList.remove('grid-cell', 'grid-head');
+    if (!focusOn || gridCell === null) return;
+
+    const built = gridCell.col >= builtColStart && gridCell.col < builtColEnd;
+    const box   = 2 + gridCell.col - builtColStart;                 //  (the row number,  the left spacer,  then the cells)
+
+    const letters = headerBox.querySelector('.letters-row');
+    if (letters !== null && built) letters.children[box].classList.add('grid-head');
+
+    for (const line of rowsBox.children) {
+        if (line.dataset.index === undefined || matches[line.dataset.index] !== gridCell.row) continue;
+        line.firstChild.classList.add('grid-head');
+        if (built) line.children[box].classList.add('grid-cell');
+    }
+}
+
+//  Coming into focus mode with no cell selected  (or one a search hid)?
+//  Select the snap menu's match  (searching),  or else the top row's first column you can see.
+function startGridCell() {
+    if (matches.length === 0) { gridCell = null; return; }
+    if (gridCell !== null && matches.indexOf(gridCell.row) !== -1) return;
+    if (aimAt !== -1) { gridCell = { row: matches[aimAt], col: aimHits[aimHit] }; return; }
+    const top = Math.min(Math.max(0, Math.round(readViewY() / rowHeight)), matches.length - 1);
+    gridCell = { row: matches[top], col: Math.min(columnAt(sheetSpot(outputBox.scrollLeft, 1)), dataColumns - 1) };
+}
+
+
 //  Focus mode on  (true)  or off  (false).
 function setFocus(on) {
 
@@ -5291,15 +5374,19 @@ function setFocus(on) {
     if (on) wakePill();                                         //  show the pill once,  so you know it's there
     else { pill.classList.remove('awake'); focusBtn.focus(); }
 
-    //  The window is a new size:  measure it,  and build the rows and columns that fit now.
-    //  (Same top row as before:  you stay where you were.)
+    //  The window is a new size,  in a new look  (focus mode is always the GRID:  letters on top,  Excel's row numbers):
+    //  measure it,  and build the rows and columns that fit now.   (Same top row as before:  you stay where you were.)
     const y = readViewY();
+    if (on) startGridCell();
+    applyLook();
+    layoutColumns();            //  the empty columns fill the screen  (or go back to filling 1320px,  or away)
+    updateColumns(true);        //  the letters row,  Excel's row numbers,  the selected cell
     sizeWindow();
     placePill();
-    updateColumns();
     setViewY(Math.min(y, Math.max(lowestViewY(), 0)));
     buildVisibleRows();
     updatePosition();
+    drawAim();                  //  the snap menu:  Excel addresses  (or not)
 }
 
 focusBtn.addEventListener('click', function () { setFocus(true); });
@@ -5380,9 +5467,10 @@ document.addEventListener('keydown', function (e) {
 //  The screen changed size  (or the phone turned)  ->  a new number of rows fit.
 window.addEventListener('resize', function () {
     if (!focusOn) return;
+    layoutColumns();            //  (a wider screen:  more empty columns to fill it)
+    updateColumns(true);
     sizeWindow();
     placePill();
-    updateColumns();
     buildVisibleRows();
     updatePosition();
 });

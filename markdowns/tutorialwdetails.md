@@ -18889,7 +18889,7 @@ The 15-row glass window is good for a quick look. But a person working a ticket 
 
 | | Normal | Focus mode |
 |---|---|---|
-| The window | 15 rows, up to 900 px wide, bobbing | the whole screen (8 px from the sides and bottom, under a 26 px info strip), as many WHOLE rows as fit |
+| The window | 15 rows, up to 900 px wide, bobbing | the whole screen, EDGE TO EDGE (under a 26 px info strip, 8 px from the bottom), as many WHOLE rows as fit, as a GRID (A B C on top, Step 13.7) |
 | The file name, "Rows ..." | under the file bar | in the **info strip**: thin, quiet words across the top. No buttons: it's for reading. |
 | Search, ◀ ▶, Drag mode, Row # | always showing | in the **pill**: it floats up when you move the mouse (or tap the sheet), and fades after 2 seconds |
 | Moving around | mouse wheel, scrollbar, drag mode | all of those, plus the **keyboard walk** (↓ ↑ PageDown PageUp Home End ← →) |
@@ -19019,11 +19019,81 @@ Nothing in the brain moved it. It was the browser's **scroll anchoring**: when c
 
 > 🧠 Before naming a new function in `scriptI.js` (5,000+ lines), search for the name first: `grep -n "function yourName(" DIRECTORY/*.js`. The test pages share the same trap: a test helper called `loadFile` replaced the brain's own `loadFile`, and the file never opened.
 
+### Step 13.7: The grid (like Excel, LibreOffice and Numbers)
+
+Focus mode looked like a big CSV window. Now it looks like a **spreadsheet app**:
+
+```text
+ incidents.csv · Rows 3–79 (750 matching rows)                         <- the info strip
+┌────┬───────────┬────────────┬──────────┬═════════════┬─────────┬─────┬─────┐
+│    │     A     │     B      │    C     ║      D      ║    E    │  F  │  G  │  <- column LETTERS  (D lit up)
+├────┼───────────┼────────────┼──────────┼─────────────┼─────────┼─────┼─────┤
+│  1 │ Ticket    │ Opened     │ Priority │ Assigned to │ ...     │     │     │  <- the names are row 1
+│  3 ┃ INC0041002│ 2026-10-03 │        3 ┃ Cy Okafor   ┃ ...     │     │     │  <- the SELECTED cell:  D3
+│  7 │ INC0041006│ 2026-10-07 │        3 │ Cy Okafor   │ ...     │     │     │
+└────┴───────────┴────────────┴──────────┴─────────────┴─────────┴─────┴─────┘
+  edge to edge:  no gap at the sides,  no round corners.   Empty columns  F, G ...  fill the screen.
+```
+
+**1. Always the grid.** Focus mode always uses the **spreadsheet look** (Part 8's "Spreadsheet View"): letters on top, Excel's row numbers, the snap menu's Excel addresses. Even a CSV that's in its CSV look. Leave focus mode, and the CSV is back in its CSV look. It's ONE word in the brain:
+
+```js
+function spreadsheetLook() { return (excelLook || focusOn) && sqlInfo === null; }
+```
+
+Everything that already asks `spreadsheetLook()` (the letters row, `rowShift()`, the `excel` class, the empty columns) follows on its own. `setFocus` just re-dresses the page the way the flip does: `applyLook()`, `layoutColumns()`, `updateColumns(true)`, `sizeWindow()`, `drawAim()`. (A SQL dump keeps its **table** look: it has no "A, B, C". It's a database table.)
+
+**2. Edge to edge.** No gap at the sides, no round corners, no floating shadow: the sheet IS the screen.
+
+```css
+body.focus #output {
+    width: 100vw;
+    border-left: 0;  border-right: 0;
+    border-radius: 0;
+    box-shadow: none;
+}
+```
+
+The empty columns (`F, G, H ...` past your data) used to fill a 1320px window. Now they fill the SCREEN:
+
+```js
+const wide = focusOn ? window.innerWidth : EXCEL_WINDOW;
+const room = spreadsheetLook() ? wide - NUM_WIDTH - 2 - 18 - dataWidth : 0;
+```
+
+(And when the screen changes size, `resize` runs `layoutColumns()` again.)
+
+**3. The selected cell.** Like Excel, there's always ONE selected cell: a green box (the theme's `ƒ` color: Excel green, or forest red in Neo-Dark), and its letter and row number light up.
+
+| You do | It does |
+|---|---|
+| Open focus mode | selects the top row's first column (or the snap menu's match, if you're searching) |
+| Click a cell | selects it. No Details yet. |
+| Click the SELECTED cell again (or double-click) | opens its Details, like before |
+| ▶ ◀, or a new search | the selected cell moves onto the match, like Excel's **Find Next** |
+| Click an empty column (G5) | selects it too. Excel lets you. There are no Details for it. |
+
+It's remembered as `gridCell = { row, col }`, where `row` is the row in the **file**, not a spot on screen. Why? The rows on screen are built and thrown away all the time (the treadmill). A box on screen can't remember anything. So `makeRow` asks, for every row it builds, "is the selected cell in me?":
+
+```js
+const gridCol = focusOn && gridCell !== null && gridCell.row === num - 1 ? gridCell.col : -1;
+if (gridCol !== -1) numCell.classList.add('grid-head');      //  the row number lights up
+...
+if (col === gridCol) cell.classList.add('grid-cell');        //  the box
+```
+
+`drawHeader` does the same for the letter. A click calls `selectGridCell()`, which re-dresses just the ~45 rows that are built (`paintGridCell`), with no rebuild.
+
+The box is an **inset** shadow (`box-shadow: inset 0 0 0 2px`), drawn INSIDE the cell. A real `border` would make the cell 4px wider and push every cell after it.
+
+> 🧠 `gridSpot(cell)` is `cellSpot(cell)` with one change: it allows the EMPTY columns too (`col < columnCount`, not `col < dataColumns`). The Details still use `cellSpot`, so an empty column never opens them.
+
 ### ✅ Test it
 
-1. **The page:** `sh tools/run-tests.sh realfile-focus` → **64 / 64**:
+1. **The page:** `sh tools/run-tests.sh realfile-focus` → **77 / 77**:
    - the bars fold away, and the info strip is thin and has the file's name
-   - the window: right under the strip, 8px from each side, whole rows
+   - the window: right under the strip, edge to edge, whole rows
+   - the grid: a CSV gets A B C and Excel row numbers, empty columns fill the screen, A2 is selected; click B5 / an empty F3 selects it; it stays selected through scrolling; ▶ moves it onto the match; the CSV look comes back when you leave
    - the borrowed controls go home
    - the pill: it rests after 2 s, wakes on a mouse move, sits inside the sheet, small; the search bar slides out and stays while you type; ◀ ▶ only while searching; the Row # box goes to row 1000
    - the walk, Drag mode in focus mode, Escape's order, Expand + focus
@@ -19034,7 +19104,8 @@ Nothing in the brain moved it. It was the browser's **scroll anchoring**: when c
 3. Leave the mouse still: the pill fades. Move it: the pill floats up at the bottom.
 4. Press ↓ a few times, then PageDown, End, Home. Each lands on a whole row.
 5. Press **/** (or click 🔍): the search bar slides out. Search something, then ▶: the match lands in the MIDDLE of the big window. Click **#**, type `1000`, Enter.
-6. Click **✥** (Drag mode) and drag the sheet. Press **Esc**: out of focus mode, and every control is back in its own place.
+6. Click a cell: a green box, and its letter and row number light up. Click it again: its Details.
+7. Click **✥** (Drag mode) and drag the sheet. Press **Esc**: out of focus mode, and every control is back in its own place.
 
 <br>
 

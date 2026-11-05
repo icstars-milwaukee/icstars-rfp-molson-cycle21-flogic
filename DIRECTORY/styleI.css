@@ -2773,7 +2773,8 @@ button:active {
             │        ╭───────────────────╮         │   <-  the PILL  (floats up when you move the mouse)
             └────────╰───────────────────╯─────────┘
 
-        The window is glued 26px from the top  (under the strip),  8px from the sides and the bottom.
+        The window is glued 26px from the top  (under the strip),  edge to edge,  8px from the bottom
+        (or a bit more:  only WHOLE rows fit).   It's always the GRID  (the spreadsheet look:  A B C on top).
         (The brain MEASURES where the window starts,  so it always counts the right number of rows.
          If you change the 8px at the bottom,  change FOCUS_GAP in scriptI.js too.)
 
@@ -2801,16 +2802,39 @@ body.focus #output {
     top: 26px;                      /*  right under the info strip  */
     left: 0;
     right: 0;
-    margin: 0 auto;                 /*  in the middle  */
-    width: calc(100vw - 18px);      /*  as WIDE as the screen too  (8px each side,  + its 1px edges),  like a spreadsheet app  */
+    margin: 0;
+    width: 100vw;                   /*  EDGE TO EDGE,  like a spreadsheet app:  no gap at the sides,  */
     max-width: none;
-    border-radius: 12px;            /*  a little less round:  more room in the corners  */
+    border-left: 0;                 /*  no side edges,  */
+    border-right: 0;
+    border-radius: 0;               /*  no round corners,  */
+    box-shadow: none;               /*  no floating shadow:  it IS the screen  */
     animation: none;                /*  no bobbing:  it's glued down  */
 
     /*  The browser's "scroll anchoring" must stay OUT of this:  when the brain swaps rows in and out,
         the browser tried to "keep the same row in place" by moving the scrollbar itself  ->  on a
         1,000,000-row file,  one ↓ press jumped back ~90 rows.   The brain already puts every row exactly.  */
     overflow-anchor: none;
+}
+
+/*  THE SELECTED CELL  (click one):  a box around it,  in Excel's green  (the theme's  ƒ  color),
+    and its column letter and row number light up,  with a line on the side that faces the cell.
+    (Inset,  so it draws INSIDE the box:  the "…" of a long word still shows,  and nothing next to it moves.)  */
+body.focus .cell.grid-cell {
+    box-shadow: inset 0 0 0 2px var(--formula);
+}
+
+body.focus .letters-row .cell.grid-head {
+    color: var(--formula);
+    background-color: color-mix(in srgb, var(--formula) 14%, transparent);
+    box-shadow: inset 0 -2px 0 var(--formula);
+}
+
+body.focus .line-num.grid-head {
+    color: var(--formula);
+    font-weight: 600;
+    background: color-mix(in srgb, var(--formula) 14%, var(--line-num-bg));     /*  (still solid:  words slide UNDER it)  */
+    box-shadow: inset -2px 0 0 var(--formula);
 }
 
 /*  The Details panel  (click a cell)  still works:  it drops down over the top of the sheet.  */
