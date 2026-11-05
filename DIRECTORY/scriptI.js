@@ -74,6 +74,16 @@
 const WINDOW_SIZE = 15;          //  how many rows fit in the window  (plus the header).
                                  //  If you change this, change the 15 in styleI.css too.
 
+let focusOn   = false;           //  FOCUS MODE on?  (the bars fold away,  the window fills the screen:  see "FOCUS MODE")
+let focusRows = WINDOW_SIZE;     //  ...and then how many rows fit on the screen
+const FOCUS_GAP = 14;            //  focus mode:  the gap between the window and the screen's edges  (px).
+                                 //  If you change this, change the 14px in styleI.css's FOCUS MODE too.
+
+//  How many rows the window shows right now:  15,  or a whole screen of them in focus mode.
+function windowRows() {
+    return focusOn ? focusRows : WINDOW_SIZE;
+}
+
 const EXTRA_COLUMNS = 8;         //  the SIDEWAYS treadmill:  how many extra columns to build
                                  //  to the left and right of the ones you see.
 
@@ -1653,7 +1663,7 @@ function snapToTarget() {
         const rowsTopOnPage = rowsBox.getBoundingClientRect().top + window.scrollY;
         window.scrollTo(0, rowsTopOnPage + pageSpotFor(aimAt * rowHeight - window.innerHeight / 2));
     } else {
-        const top = Math.max(0, (aimAt - Math.floor(WINDOW_SIZE / 2)) * rowHeight);
+        const top = Math.max(0, (aimAt - Math.floor(windowRows() / 2)) * rowHeight);
         buildVisibleRows(top);
         setViewY(top);
     }
@@ -2189,8 +2199,15 @@ function sizeWindow() {
     const borders   = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
     const scrollbar = outputBox.offsetHeight - outputBox.clientHeight - borders;    //  how tall the scrollbar is
 
-    //  15 rows  (or fewer, if that's all there is)
-    const rowsToShow = Math.min(WINDOW_SIZE, matches.length);
+    //  FOCUS MODE:  as many WHOLE rows as fit on the screen  (the screen,  minus the gaps around the window,
+    //  its header,  its edges,  and the sideways scrollbar).   At least 3.
+    if (focusOn) {
+        const room = window.innerHeight - 2 * FOCUS_GAP - headerBox.offsetHeight - scrollbar - borders;
+        focusRows = Math.max(3, Math.floor(room / rowHeight));
+    }
+
+    //  15 rows  (or a screenful, in focus mode.   Or fewer, if that's all there is)
+    const rowsToShow = Math.min(windowRows(), matches.length);
 
     //  the header  +  the rows  +  the scrollbar
     outputBox.style.height = (headerBox.offsetHeight + rowsToShow * rowHeight + scrollbar) + 'px';
@@ -2228,7 +2245,7 @@ function updatePosition(y) {
 
     const last = outputBox.classList.contains('expanded')
         ? matches.length - 1                                    //  expanded?  You can see them all.
-        : Math.min(first + WINDOW_SIZE, matches.length) - 1;    //  small?     The top row + 14 more.
+        : Math.min(first + windowRows(), matches.length) - 1;   //  small?     The top row + 14 more  (focus mode:  a screenful).
 
 
     //  matches holds row numbers  (0, 1, 2...).  Row numbers start at 1  (the header is 0).  So:  +1.
@@ -5029,4 +5046,270 @@ document.addEventListener('keydown', function (event) {
         closeQueryMenu();
         queryBtn.focus();
     }
+});
+
+
+
+// ----------------------------------------------------------
+//
+//    FOCUS MODE   (just the sheet,  as big as the screen)
+//
+//    "Focus mode"  (in the controls,  or press  F)  ->  everything above the sheet folds away:
+//    the title,  the file bar,  the search bar,  the "Rows 1–15" words,  the buttons.
+//    The glass window grows to fill the screen  (in WHOLE rows:  never half a row at the bottom).
+//
+//        ┌──────────────────────[ ▾ ]──────────────────────┐   <-  the little tab:  click it  (or touch the top edge)
+//        │ id   │ name        │ city        │ ...          │
+//        │ 1    │ Person 1    │ City 1      │              │
+//        │ 2    │ Person 2    │ City 2      │              │
+//        │ ...  (a whole screen of rows)                   │
+//        └─────────────────────────────────────────────────┘
+//
+//    THE PEEK BAR:  move the mouse to the very TOP of the screen  ->  a slim glass bar slides down:
+//
+//        [ Search...        ] ◀ 3 / 128 ▶   [Row #][Go]   Rows 48,210–48,240 of 1,000,000   [Exit ✕]
+//
+//    It's the REAL search bar,  Row # box and "Rows ..." words,  moved into the bar  (and moved back
+//    when you leave focus mode),  so they work exactly like always.   Move away  ->  it slides back up.
+//    (Typing in it?  It stays until you're done.)
+//
+//    THE KEYBOARD WALK  (nothing to click):
+//        ↓ ↑              one row               PageDown  PageUp   a screen of rows
+//        Home  End        the top / the bottom  ← →                sideways
+//        /                search  (opens the peek bar)
+//        F  or  Esc       leave focus mode
+//
+//    (The bar and the tab are built HERE,  not in testI.html,  so pages that copy testI.html's skeleton
+//     keep working.)
+//
+// ----------------------------------------------------------
+
+const PEEK_EDGE = 8;            //  the mouse this close to the top of the screen  (px)  ->  the peek bar comes down
+const PEEK_STAY = 350;          //  moved away from the bar?  It waits this long  (ms)  before sliding back up
+
+//  The "Focus mode" button,  at the end of the controls.
+const focusBtn = document.createElement('button');
+focusBtn.type = 'button';
+focusBtn.id = 'focusBtn';
+focusBtn.textContent = 'Focus mode';
+focusBtn.title = 'Just the sheet, as big as the screen  (F)';
+focusBtn.setAttribute('aria-pressed', 'false');
+controls.appendChild(focusBtn);
+
+//  The peek bar,  and the little tab that opens it  (for touch screens and keyboards:  no mouse to move to the top).
+const peekBar = document.createElement('div');
+peekBar.id = 'peekBar';
+peekBar.setAttribute('role', 'toolbar');
+peekBar.setAttribute('aria-label', 'Focus mode tools');
+peekBar.hidden = true;
+
+const peekTab = document.createElement('button');
+peekTab.type = 'button';
+peekTab.id = 'peekTab';
+peekTab.textContent = '▾';
+peekTab.title = 'Show the search bar and tools';
+peekTab.setAttribute('aria-expanded', 'false');
+peekTab.hidden = true;
+
+//  The bar's own pieces:  ◀ 3 / 128 ▶   and   Exit ✕
+const peekPrev  = document.createElement('button');
+const peekCount = document.createElement('span');
+const peekNext  = document.createElement('button');
+const peekExit  = document.createElement('button');
+peekPrev.type = peekNext.type = peekExit.type = 'button';
+peekPrev.className = peekNext.className = 'peek-step';
+peekPrev.textContent = '◀';  peekPrev.title = 'The match before';
+peekNext.textContent = '▶';  peekNext.title = 'The next match';
+peekCount.id = 'peekCount';
+peekExit.id = 'peekExit';
+peekExit.textContent = 'Exit ✕';
+peekExit.title = 'Leave focus mode  (Esc)';
+
+document.body.appendChild(peekBar);
+document.body.appendChild(peekTab);
+
+
+//  The REAL controls that move into the bar  (in this order),  and a bookmark where each one lives normally.
+//  (Missing on a page?  Skipped.)
+let peekHomes = [];
+
+function movePeekPieces(intoBar) {
+
+    if (intoBar) {
+        peekBar.textContent = '';
+        peekHomes = [];
+        const pieces = [searchInput, peekPrev, peekCount, peekNext, dragBtn, jumpInput, jumpBtn, statusText, backBtn, peekExit];
+        for (const piece of pieces) {
+            if (!piece) continue;
+            if (piece.parentNode && !piece.id.startsWith('peek')) {         //  a real control:  leave a bookmark
+                const mark = document.createComment('focus mode borrowed this');
+                piece.parentNode.insertBefore(mark, piece);
+                peekHomes.push({ piece: piece, mark: mark });
+            }
+            peekBar.appendChild(piece);
+        }
+        copyAimCount();
+    } else {
+        for (const home of peekHomes) home.mark.replaceWith(home.piece);     //  back where they came from
+        peekHomes = [];
+    }
+}
+
+//  The bar's "3 / 128" copies the snap menu's,  and its ◀ ▶ turn off when the snap menu's do.
+function copyAimCount() {
+    peekCount.textContent = aimCount.textContent;
+    peekPrev.disabled = aimPrev.disabled;
+    peekNext.disabled = aimNext.disabled;
+}
+new MutationObserver(function () { if (focusOn) copyAimCount(); })
+    .observe(aimCount.parentNode.parentNode, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['disabled'] });
+
+peekPrev.addEventListener('click', function () { aimStep(-1); });
+peekNext.addEventListener('click', function () { aimStep(1); });
+peekExit.addEventListener('click', function () { setFocus(false); });
+
+
+//  Focus mode on  (true)  or off  (false).
+function setFocus(on) {
+
+    if (on === focusOn) return;
+    if (on && headerCells.length === 0) return;                 //  no file open?  Nothing to focus on.
+
+    if (on) {
+        //  Put away what would be hidden anyway,  and leave Expand  (focus mode IS the big window).
+        if (themeMenuOpen()) closeThemeMenu();
+        closeQueryMenu();
+        if (outputBox.classList.contains('expanded')) expandBtn.click();
+    }
+
+    focusOn = on;
+    document.body.classList.toggle('focus', on);
+    focusBtn.setAttribute('aria-pressed', on);
+    movePeekPieces(on);
+    peekTab.hidden = !on;
+    openPeek(false);
+    if (!on) focusBtn.focus();
+
+    //  The window is a new size:  measure it,  and build the rows and columns that fit now.
+    //  (Same top row as before:  you stay where you were.)
+    const y = readViewY();
+    sizeWindow();
+    updateColumns();
+    setViewY(Math.min(y, Math.max(lowestViewY(), 0)));
+    buildVisibleRows();
+    updatePosition();
+}
+
+focusBtn.addEventListener('click', function () { setFocus(true); });
+
+
+//  The peek bar:  down  (true)  or up  (false).
+let peekTimer = null;
+
+function openPeek(open) {
+    clearTimeout(peekTimer);
+    peekTimer = null;
+    peekBar.hidden = !(focusOn && open);
+    peekTab.setAttribute('aria-expanded', !peekBar.hidden);
+}
+
+function peekOpen() { return !peekBar.hidden; }
+
+peekTab.addEventListener('click', function () { openPeek(!peekOpen()); });
+
+//  The mouse:  at the top edge  ->  down.   Well away from the bar  (and not typing in it)  ->  up,  after a moment.
+document.addEventListener('mousemove', function (e) {
+    if (!focusOn) return;
+    if (e.clientY <= PEEK_EDGE) { openPeek(true); return; }
+    if (!peekOpen()) return;
+
+    const away = e.clientY > peekBar.getBoundingClientRect().bottom + 30;
+    if (away && !peekBar.contains(document.activeElement)) {
+        if (peekTimer === null) peekTimer = setTimeout(function () { openPeek(false); }, PEEK_STAY);
+    } else {
+        clearTimeout(peekTimer);
+        peekTimer = null;
+    }
+}, { passive: true });
+
+//  Done typing  (the search bar lost the keyboard)  and the mouse is down on the sheet?  Up it goes.
+peekBar.addEventListener('focusout', function () {
+    setTimeout(function () {
+        if (focusOn && !peekBar.contains(document.activeElement) && !peekBar.matches(':hover')) openPeek(false);
+    }, PEEK_STAY);
+});
+
+
+//  THE KEYBOARD WALK:  move  n  rows  (keeps you on whole rows,  inside the file).
+function walkRows(n) {
+    if (matches.length === 0) return;
+    wheelTarget = null;                                             //  (stop a mouse-wheel glide that's still going)
+    const row = Math.max(0, Math.round(readViewY() / rowHeight) + n);
+    setViewY(Math.min(row * rowHeight, Math.max(lowestViewY(), 0)));
+}
+
+//  Is the keyboard busy typing  (in a box,  or a drop-down list)?   Then the walk keys are theirs,  not ours.
+function typingIn(target) {
+    return target instanceof Element && target.closest('input, textarea, select, [contenteditable="true"]') !== null;
+}
+
+//  (Capture:  this runs BEFORE the other Escape listeners,  so an Escape that closes the Details or stops
+//   drag mode does only that,  and doesn't ALSO leave focus mode.)
+document.addEventListener('keydown', function (e) {
+
+    if (e.ctrlKey || e.altKey || e.metaKey) {
+        //  (Ctrl + Home / End  ->  the top / the bottom,  like a spreadsheet)
+        if (!(focusOn && e.ctrlKey && (e.key === 'Home' || e.key === 'End') && !typingIn(e.target))) return;
+    }
+
+    //  F  ->  on / off   (not while typing)
+    if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !typingIn(e.target)) {
+        if (focusOn || headerCells.length > 0) { e.preventDefault(); setFocus(!focusOn); }
+        return;
+    }
+
+    if (!focusOn) return;
+
+    if (e.key === 'Escape') {
+        if (!aimRow.hidden || dragging) return;                         //  (that Escape belongs to them)
+        if (peekOpen() && peekBar.contains(document.activeElement)) {   //  in the bar?  Just put the bar away.
+            document.activeElement.blur();
+            openPeek(false);
+            return;
+        }
+        setFocus(false);
+        return;
+    }
+
+    if (typingIn(e.target)) return;
+
+    const page = Math.max(1, focusRows - 1);                            //  a screenful,  keeping 1 row you saw
+    let handled = true;
+    switch (e.key) {
+        case 'ArrowDown': walkRows(1); break;
+        case 'ArrowUp':   walkRows(-1); break;
+        case 'PageDown':  walkRows(page); break;
+        case 'PageUp':    walkRows(-page); break;
+        case 'Home':      walkRows(-matches.length); break;
+        case 'End':       walkRows(matches.length); break;
+        case 'ArrowRight': outputBox.scrollLeft += 160; break;
+        case 'ArrowLeft':  outputBox.scrollLeft -= 160; break;
+        case '/':
+            openPeek(true);
+            searchInput.focus();
+            searchInput.select();
+            break;
+        default: handled = false;
+    }
+    if (handled) e.preventDefault();
+}, true);
+
+
+//  The screen changed size  (or the phone turned)  ->  a new number of rows fit.
+window.addEventListener('resize', function () {
+    if (!focusOn) return;
+    sizeWindow();
+    updateColumns();
+    buildVisibleRows();
+    updatePosition();
 });

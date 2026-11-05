@@ -2757,3 +2757,150 @@ button:active {
 [hidden] {
     display: none !important;
 }
+
+
+
+/*  ==========================================================
+
+        FOCUS MODE   (just the sheet,  as big as the screen)
+
+        The brain puts  class="focus"  on the page  (see "FOCUS MODE" in scriptI.js).
+        Everything above the sheet folds away,  and the glass window
+        is glued to the screen,  14px in from every edge.
+        (If you change the 14px,  change FOCUS_GAP in scriptI.js too:
+         the brain uses it to count how many rows fit.)
+
+    ==========================================================  */
+
+body.focus {
+    overflow: hidden;               /*  the WINDOW scrolls,  never the page  */
+}
+
+body.focus h1,
+body.focus #fileBar,
+body.focus #queryMenu,
+body.focus #readingFrom,
+body.focus #fileBadge,
+body.focus #sheetTabs,
+body.focus #controls,
+body.focus #themeChip,
+body.focus #themeMenu,
+body.focus #topBtn {
+    display: none !important;
+}
+
+body.focus #output {
+    position: fixed;
+    top: 14px;
+    left: 0;
+    right: 0;
+    margin: 0 auto;                 /*  still in the middle  */
+    width: calc(100vw - 28px);      /*  as WIDE as the screen too  (minus the gaps),  like a spreadsheet app  */
+    max-width: none;
+    animation: none;                /*  no bobbing:  it's glued down  */
+
+    /*  The browser's "scroll anchoring" must stay OUT of this:  when the brain swaps rows in and out,
+        the browser tried to "keep the same row in place" by moving the scrollbar itself  ->  on a
+        1,000,000-row file,  one ↓ press jumped back ~90 rows.   The brain already puts every row exactly.  */
+    overflow-anchor: none;
+}
+
+/*  The Details panel  (click a cell)  still works:  it drops down over the top of the sheet.  */
+body.focus #fileArea {
+    position: fixed;
+    top: 8px;
+    left: 16px;
+    right: 16px;
+    width: auto;
+    height: 0;
+    margin: 0;
+    z-index: 30;
+}
+
+
+/*  THE PEEK BAR:  slides down from the top edge.
+        [ Search...  ] ◀ 3 / 128 ▶  [Row #][Go]  Rows 1–30 of 100  [Exit ✕]   */
+#peekBar {
+    position: fixed;
+    top: 0;
+    left: 50%;
+    translate: -50% 0;
+    z-index: 40;                    /*  over the sheet,  and over the Details  */
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;                /*  a narrow screen?  2 lines  */
+    justify-content: center;
+    gap: 6px;
+    width: max-content;
+    max-width: calc(100vw - 16px);
+    box-sizing: border-box;
+    padding: 6px 10px;
+
+    /*  The same glass as the Details panel  (it floats over the sheet,  so the blur is real here)  */
+    background: linear-gradient(135deg, var(--glass-top), var(--glass-bottom));
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--glass-edge);
+    border-top: none;
+    border-radius: 0 0 14px 14px;
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.18),
+        inset 0 -1px 0 var(--shine, rgba(255, 255, 255, 0.9));
+    animation: peek-drop 0.18s ease-out;
+}
+
+@keyframes peek-drop {
+    from { opacity: 0; transform: translateY(-100%); }
+}
+
+#peekBar button { margin: 0; }
+
+#peekBar #searchInput {
+    flex: 1 1 220px;
+    width: 280px;
+    max-width: 360px;
+}
+
+#peekBar .peek-step {
+    padding: 0 10px;
+}
+
+#peekCount {
+    min-width: 54px;
+    text-align: center;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-soft);
+}
+
+#peekBar #status {
+    margin: 0 4px;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+/*  THE LITTLE TAB  ( ▾ ):  for touch screens and keyboards,  which can't "move to the top".
+    Faint,  until you point at it.  */
+#peekTab {
+    position: fixed;
+    top: 0;
+    left: 50%;
+    translate: -50% 0;
+    z-index: 39;
+    margin: 0;
+    padding: 0 18px;
+    line-height: 16px;
+    font-size: 11px;
+    border-top: none;
+    border-radius: 0 0 10px 10px;
+    opacity: 0.55;
+}
+
+#peekTab:hover,
+#peekTab:focus-visible {
+    opacity: 1;
+}
+
+/*  Someone turned off motion?  The bar just appears.  */
+@media (prefers-reduced-motion: reduce) {
+    #peekBar { animation: none; }
+}

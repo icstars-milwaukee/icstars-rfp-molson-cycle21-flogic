@@ -18869,6 +18869,142 @@ The test tables: `small-files/beginner/class_data.csv` (a class gradebook) and `
 ---
 
 <br>
+
+# PART 13: Focus Mode 🔭
+
+The 15-row glass window is good for a quick look. But a person working a ticket file all day wants what Excel, LibreOffice and Numbers give them: **the sheet, as big as the screen, and nothing else.** That's focus mode.
+
+```text
+   Normal                                   Focus mode  (press F)
+   ┌──────────────────────────────┐         ┌────────────────────[ ▾ ]───────────────────┐
+   │ CSV Reader                   │         │ id   │ name        │ city        │ ...     │
+   │ [Choose File][ snap ][Ask]   │         │ 1    │ Person 1    │ City 1      │         │
+   │ [ Search...               ]  │   ->    │ 2    │ Person 2    │ City 2      │         │
+   │ Rows 1–15 of 2000            │         │ ...  (a whole SCREEN of rows,  edge to edge)│
+   │ [Drag][Row #][Go][Expand]... │         │                                            │
+   │ ┌──── 15 rows ────┐          │         │                                            │
+   │ └─────────────────┘          │         └────────────────────────────────────────────┘
+   └──────────────────────────────┘
+```
+
+| | Normal | Focus mode |
+|---|---|---|
+| The window | 15 rows, up to 900 px wide, bobbing | the whole screen (14 px in from every edge), as many WHOLE rows as fit |
+| Search, Row #, Drag mode, "Rows ..." | always showing | in the **peek bar**: touch the top edge of the screen (or click the little **▾** tab) |
+| Moving around | mouse wheel, scrollbar, drag mode | all of those, plus the **keyboard walk** (↓ ↑ PageDown PageUp Home End ← →) |
+| Get in / out | | **Focus mode** button (end of the controls), **F**, or **Esc** / **F** / **Exit ✕** to leave |
+
+### Step 13.1: "15 rows" becomes "however many fit"
+
+Three places in the brain said `WINDOW_SIZE` (15): sizing the window, the "Rows 1–15" words, and the snap menu (it puts the match in the MIDDLE of the window, so it needs to know where the middle is). Now they ask a function instead:
+
+```js
+let focusOn   = false;           //  FOCUS MODE on?
+let focusRows = WINDOW_SIZE;     //  ...and then how many rows fit on the screen
+const FOCUS_GAP = 14;            //  the gap between the window and the screen's edges  (px)
+
+function windowRows() {
+    return focusOn ? focusRows : WINDOW_SIZE;
+}
+```
+
+And `sizeWindow` counts how many rows fit: the screen, minus the gaps, the header, the edges and the sideways scrollbar, cut down to WHOLE rows (never half a row at the bottom):
+
+```js
+if (focusOn) {
+    const room = window.innerHeight - 2 * FOCUS_GAP - headerBox.offsetHeight - scrollbar - borders;
+    focusRows = Math.max(3, Math.floor(room / rowHeight));
+}
+const rowsToShow = Math.min(windowRows(), matches.length);
+```
+
+### Step 13.2: The clothes
+
+The brain puts `class="focus"` on the page. The CSS folds everything else away and glues the window to the screen:
+
+```css
+body.focus { overflow: hidden; }            /*  the WINDOW scrolls,  never the page  */
+
+body.focus h1, body.focus #fileBar, body.focus #controls, ...  { display: none !important; }
+
+body.focus #output {
+    position: fixed;
+    top: 14px;  left: 0;  right: 0;  margin: 0 auto;
+    width: calc(100vw - 28px);              /*  WIDE too,  not just tall  */
+    max-width: none;
+    animation: none;                        /*  no bobbing:  it's glued down  */
+    overflow-anchor: none;                  /*  see Step 13.5  */
+}
+```
+
+> 🧠 The first try only set `max-width`. The window kept its normal `width: fit-content` ("only as wide as the sheet needs"), so it grew TALL but not WIDE. `width: calc(100vw - 28px)` fixed it: like a spreadsheet app, the grid fills the screen even when the file has 3 columns.
+
+### Step 13.3: The peek bar borrows the REAL controls
+
+The peek bar doesn't have its own search box. It **borrows** the real ones: the search bar, Drag mode, Row #, Go, the "Rows ..." words and "← Back to file". Each one leaves a bookmark (an HTML comment) where it lives, moves into the bar, and goes back to its bookmark when you leave focus mode. Same element, same listeners, so search works exactly like always, with no second copy to keep in step.
+
+```js
+const mark = document.createComment('focus mode borrowed this');
+piece.parentNode.insertBefore(mark, piece);         //  the bookmark
+peekBar.appendChild(piece);                         //  into the bar
+...
+home.mark.replaceWith(home.piece);                  //  later:  back where it came from
+```
+
+The bar's own pieces are only ◀ ▶ (they call the snap menu's `aimStep`), a "3 / 128" that copies the snap menu's count (a `MutationObserver` watches it), and **Exit ✕**.
+
+The bar slides down when the mouse touches the top 8 px of the screen (`PEEK_EDGE`), and slides back up 0.35 s after the mouse moves well away (`PEEK_STAY`). Never while you're typing in it. The **▾** tab is for touch screens and keyboards, which can't "move to the top".
+
+> 🧠 The bar and the tab are built by the BRAIN (`document.createElement`), not written in `testI.html`. Why: the test pages are copies of `testI.html`'s skeleton. If the brain expected a `<div id="peekBar">` in the skeleton, every older test page would break.
+
+### Step 13.4: The keyboard walk
+
+| Key | Does |
+|---|---|
+| ↓ ↑ | one row |
+| PageDown PageUp | a screenful, keeping 1 row you already saw |
+| Home End (or Ctrl + Home / End) | the top / the bottom |
+| ← → | sideways, 160 px |
+| / | opens the peek bar, with the search bar ready to type in |
+| F, Esc | leave focus mode |
+
+```js
+function walkRows(n) {
+    if (matches.length === 0) return;
+    wheelTarget = null;                                     //  stop a mouse-wheel glide that's still going
+    const row = Math.max(0, Math.round(readViewY() / rowHeight) + n);
+    setViewY(Math.min(row * rowHeight, Math.max(lowestViewY(), 0)));
+}
+```
+
+It goes through `setViewY`, so it works on the SQUEEZED scrollbar of a 1,000,000-row file too (Part 6's "scaled" scrollbar), and always lands on a whole row.
+
+The key listener runs in the **capture** phase (`addEventListener('keydown', ..., true)`), so it runs BEFORE the other Escape listeners. An Escape that closes the Details panel, or stops a drag, does only that. It doesn't ALSO throw you out of focus mode. And none of the keys do anything while you're typing in a box (`typingIn`).
+
+### Step 13.5: The bug the test found: the browser moved the scrollbar by itself
+
+On the 1,000,000-row file, in focus mode, ONE ↓ press in the middle of the file jumped **back 89 rows**. A probe printed the scrollbar before and after:
+
+```text
+down:   row = 500001.00    scrollTop = 2000468     <- the brain put it here
+50 ms:  row = 499764.67    scrollTop = 1999523     <- ...and something moved it 945 px
+```
+
+Nothing in the brain moved it. It was the browser's **scroll anchoring**: when content above what you're looking at changes size, the browser moves the scrollbar to "keep the same thing in place". The brain swaps rows in and out on every move, so the browser kept "helping". Outside focus mode it never happened. Fix: one line, `overflow-anchor: none`, for the focus window. The brain already puts every row exactly.
+
+### ✅ Test it
+
+1. **The page:** `sh tools/run-tests.sh realfile-focus` → **54 / 54** (the bars fold away, the window size in whole rows, the borrowed controls going home, the peek bar, the walk, Drag mode in focus mode, Escape's order, Expand + focus, and the 1,000,000-row file `big-1m.csv`: End builds the very last row, ↓ and PageDown are exact in the middle, 60 held ↓ land exactly 60 rows on). `realfile-drag` 37, `realfile-view` 42, `realfile-ask` 58: still pass. (`realfile-views` fails the same way it did BEFORE this part: `views.js:88`.)
+2. Open any CSV. Press **F**. The title, file bar, search bar and buttons fold away, and the sheet fills the screen, wide AND tall.
+3. Press ↓ a few times, then PageDown, End, Home. Each lands on a whole row.
+4. Move the mouse to the very top edge: the bar slides down. Move away: it slides back up. Press **/**: it comes down, ready to type. Search something, then ▶: the match lands in the MIDDLE of the big window.
+5. In the bar, turn on **Drag mode** and drag the sheet. Press **Esc**: out of focus mode, and every control is back in its own place.
+
+<br>
+
+---
+
+<br>
 ## Change stuff yourself
 
 | I want to... | Do this |
