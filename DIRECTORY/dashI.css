@@ -1,0 +1,354 @@
+/*  ==========================================================
+
+        THE NANDO NOTES  -  dashI.css
+
+        The dashboard's clothes.   It borrows the theme's own colors
+        (--glass-top,  --text,  --sql ...  from styleI.css),  so it matches
+        Neo-Neutral and Neo-Dark,  and any theme added later.
+
+        The tiles sit on a grid of 4 columns:
+            S  =  1 column   (a number)
+            M  =  2 columns  (a bar chart)
+            L  =  all 4      (over time)
+        A narrow screen gets 2 columns,  then 1.
+
+    ==========================================================  */
+
+
+#dash {
+    max-width: 900px;
+    margin: 12px auto 16px;
+    padding: 14px 16px 16px;
+    font-family: "Segoe UI", system-ui, Arial, sans-serif;
+    color: var(--text);
+    background: linear-gradient(135deg, var(--glass-top), var(--glass-bottom));
+    border: 1px solid var(--glass-edge);
+    border-radius: 16px;
+    box-shadow: inset 0 0 18px var(--inner-glow-soft, rgba(255, 255, 255, 0.4)), 0 8px 24px rgba(0, 0, 0, 0.1);
+}
+
+#dash[hidden] {
+    display: none;
+}
+
+/*  Focus mode is just the sheet:  the dashboard steps aside too.  */
+body.focus #dash {
+    display: none !important;
+}
+
+
+/*  ---- THE TOP LINE:   Dashboard · incident · 23,334 rows          [ Edit ] [ Hide ]  ---- */
+
+.dash-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.dash-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--text-soft);
+    overflow-wrap: anywhere;
+}
+
+.dash-tools button,
+.dash-editbar button,
+.dash-add button {
+    line-height: 30px;
+    padding: 0 12px;
+    font-size: 13px;
+}
+
+.dash-tools button[aria-pressed="true"] {
+    background: var(--square-dark);
+    color: #fff;
+}
+
+/*  Folded away  ("Hide"):  only the top line stays.  */
+#dash.folded .dash-editbar,
+#dash.folded .dash-add,
+#dash.folded .dash-note,
+#dash.folded .dash-grid {
+    display: none;
+}
+#dash.folded {
+    padding-bottom: 10px;
+}
+
+
+/*  ---- EDIT MODE'S BAR,  AND THE "+ ADD A TILE" FORM ---- */
+
+.dash-editbar {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+}
+
+.dash-editbar[hidden],
+.dash-add[hidden] {
+    display: none;
+}
+
+.dash-add {
+    margin-top: 8px;
+    padding: 10px 12px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 6px 12px;
+    background: var(--glass-top);
+    border: 1px solid var(--line, rgba(0, 0, 0, 0.12));
+    border-radius: 12px;
+}
+
+.dash-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 12px;
+    color: var(--text-soft);
+    min-width: 0;
+}
+
+.dash-field[hidden] {
+    display: none;
+}
+
+.dash-field select,
+.dash-field input {
+    font: 14px "Segoe UI", system-ui, Arial, sans-serif;
+    color: var(--menu-text);
+    background: var(--menu-bg);
+    border: 1px solid var(--glass-edge);
+    border-radius: 8px;
+    padding: 6px 8px;
+    max-width: 240px;
+}
+
+.dash-note {
+    margin: 8px 0 0;
+    font-size: 13px;
+    color: var(--text-soft);
+}
+
+.dash-note:empty {
+    display: none;
+}
+
+
+/*  ---- THE TILES ---- */
+
+.dash-grid {
+    margin-top: 12px;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    align-items: start;             /*  each tile as tall as what's in it  (a 4-bar chart doesn't stretch to match a 10-bar one)  */
+}
+
+.dash-tile {
+    grid-column: span 2;
+    min-width: 0;
+    padding: 12px 14px;
+    background: var(--glass-top);
+    border: 1px solid var(--line, rgba(0, 0, 0, 0.1));
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.dash-tile.size-s { grid-column: span 1; }
+.dash-tile.size-m { grid-column: span 2; }
+.dash-tile.size-l { grid-column: 1 / -1; }
+
+@media (max-width: 900px) {
+    .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .dash-tile.size-m { grid-column: 1 / -1; }
+}
+
+@media (max-width: 560px) {
+    .dash-grid { grid-template-columns: minmax(0, 1fr); }
+    .dash-tile.size-s { grid-column: 1 / -1; }
+}
+
+.dash-tile-title {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-soft);
+    overflow-wrap: anywhere;
+}
+
+#dash.editing .dash-tile-title {
+    cursor: text;
+    border-radius: 6px;
+    outline: 1px dashed var(--line, rgba(0, 0, 0, 0.25));
+    outline-offset: 2px;
+}
+
+.dash-soft {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-soft);
+    overflow-wrap: anywhere;
+}
+
+.dash-waiting {
+    align-items: flex-start;
+}
+
+/*  A number tile:   23,334  */
+.dash-big {
+    margin: 0;
+    font-size: 30px;
+    font-weight: 600;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+}
+
+/*  "where State is Closed  →"   (a link that is really a button)  */
+.dash-link {
+    all: unset;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--sql);
+    overflow-wrap: anywhere;
+}
+.dash-link:hover,
+.dash-link:focus-visible {
+    text-decoration: underline;
+}
+
+
+/*  ---- A TILE'S TOOLS  (Edit mode):   ◀ ▶  S M L  ✕ ---- */
+
+.dash-tile-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+}
+
+.dash-tile-tools button {
+    margin: 0;
+    padding: 0 8px;
+    line-height: 24px;
+    font-size: 12px;
+    border-radius: 8px;
+}
+
+.dash-tile-tools button[aria-pressed="true"] {
+    background: var(--square-dark);
+    color: #fff;
+}
+
+.dash-tile-tools button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.dash-tile-tools .dash-remove {
+    margin-left: auto;
+}
+
+
+/*  ---- BARS:   name   ██████████   1,234     (each row is a button:  click  ->  those rows) ---- */
+
+.dash-bars {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.dash-bar {
+    all: unset;
+    box-sizing: border-box;
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 40%) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 4px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.dash-bar:hover,
+.dash-bar:focus-visible {
+    background: var(--glass-bottom);
+    outline: 1px solid var(--line, rgba(0, 0, 0, 0.15));
+}
+
+.dash-bar-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dash-bar-track {
+    height: 10px;
+    border-radius: 5px;
+    background: var(--line-soft, rgba(0, 0, 0, 0.06));
+    overflow: hidden;
+}
+
+.dash-bar-fill {
+    display: block;
+    height: 100%;
+    border-radius: 5px;
+    background: var(--sql);
+}
+
+.dash-bar-count {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-soft);
+    text-align: right;
+    min-width: 3.5em;
+}
+
+
+/*  ---- OVER TIME:   a row of thin columns,  the first and last day under them ---- */
+
+.dash-time {
+    height: 120px;
+    display: flex;
+    align-items: flex-end;
+    gap: 1px;
+    padding-bottom: 2px;
+    border-bottom: 1px solid var(--line, rgba(0, 0, 0, 0.15));
+}
+
+.dash-time-col {
+    flex: 1 1 0;
+    min-width: 1px;
+    background: var(--sql);
+    border-radius: 2px 2px 0 0;
+    opacity: 0.85;
+}
+
+.dash-time-col:hover {
+    opacity: 1;
+    filter: brightness(1.15);
+}
+
+.dash-time-axis {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-soft);
+    font-variant-numeric: tabular-nums;
+}
+
+.dash-time-axis span:nth-child(2) {
+    text-align: center;
+}
