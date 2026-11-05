@@ -276,7 +276,7 @@ function nextBite(fn) {
 }
 const LOADER_DELAY = 150;   // the loader only shows up if a job takes longer than this (milliseconds)
 const SHOW_LETTERS = 1000;  // a cell with MORE letters than this only shows (and hovers) its first 1,000 (Step 2.5)
-const QUOTE_LIMIT = 32767;  // a quote still open this far past a line break is a MISTAKE, like 5'10" (Step 2.15)
+const QUOTE_LIMIT = 65536;  // a quote still open this far past a line break is a MISTAKE (Step 2.15; now only a safety net, Part 14)
 
 const fileInput   = document.getElementById('csvFileInput');   // Choose File button
 const searchInput = document.getElementById('searchInput');    // search bar
@@ -1969,6 +1969,8 @@ fileInput.addEventListener('change', function (event) {
 >
 > - **`tooFar`**: the "cell" runs `QUOTE_LIMIT` (32,767) letters past the first line break. That's the most Excel can fit in one cell, so no real cell is longer. *(Catches it fast in a big file.)*
 > - **`neverClosed`**: the file ENDS and the quote is still open. *(Catches it in a small file, which ends before 32,767.)*
+>
+> 🪳 **Part 14 replaces this odd/even count.** Two typos that sat close enough together still paired up and merged every row between them. Now a quote only OPENS a cell at the start of a cell, so `5'10"` is just a letter. Build this step first, then Part 14 shows the fix.
 
 > **Why count the "last bit of the file" before deciding?** A file doesn't have to end with a line break. In `1,"x⏎y"` the closing quote comes AFTER the last line break. Skip counting it, and the brain would think that quote never closed, and wrongly chop a good cell.
 
@@ -19112,6 +19114,125 @@ The box is an **inset** shadow (`box-shadow: inset 0 0 0 2px`), drawn INSIDE the
 ---
 
 <br>
+# PART 14: Stray Quotes, Fixed for Good 🪳
+
+The first roach in `roaches/roaches.md` (found by Fernando, Nov 5, 2026).
+
+**The story.** The client's `incident.csv` has 18 Work notes longer than 32,767 letters. With Step 2.15's `QUOTE_LIMIT` of 32,767, the reader called those real quotes "strays", and the file came out as 1,609,873 rows instead of 23,334. Fernando raised the limit to 65,536, and `incident.csv` read right. But that opened a new hole: two typos like `5'10"` that sit 32,767 to 65,536 letters apart now **paired up**, and every row between them merged into one:
+
+| A 5,000-row file, `5'10"` in rows 100 and 2,250 | Rows shown |
+|---|---|
+| `QUOTE_LIMIT` 32,767 | 5,000 ✅ |
+| `QUOTE_LIMIT` 65,536 | **2,850** ❌ |
+
+No number fixes it. A bigger limit merges more typos, and a smaller one breaks more real notes. The trouble is the **question**. Step 2.15 asks "is the quote count odd or even?", and that counts EVERY `"` in the file, even the inches in `5'10"`.
+
+### Step 14.1: The CSV rule: a quote only opens a cell at the START of the cell
+
+That's the official CSV rule (RFC 4180), and it's what Excel does:
+
+```text
+   Ana,"Chicago, IL",22        the " comes right after a comma        ->  it OPENS a quoted cell
+   Ana, "Chicago, IL",22       only spaces before it                  ->  it opens one too
+   Bob,5'10",Chicago           in the MIDDLE of a cell (after 5'10)  ->  just a letter
+```
+
+A typo almost always sits in the middle of a cell, so it can't open anything. Then it can't pair with anything, at ANY distance.
+
+```js
+//  Does the quote at  "q"  OPEN a quoted cell?   Only at the START of a cell.
+function opensCell(q) {
+    let k = q - 1;
+    while (k >= spot && (text.charCodeAt(k) === 32 || text.charCodeAt(k) === 9)) k--;      //  skip spaces and tabs
+    return k < spot || text.charCodeAt(k) === 44;                                         //  the row's start,  or a comma
+}
+```
+
+### Step 14.2: `nextLine` hops from quote to quote
+
+Counting odd and even only works if EVERY quote counts. Now some don't, so `nextLine` follows the quotes instead:
+
+```text
+   1,"123 Main St⏎Apt 4",Chicago⏎2,...
+     ^ opens               (find the one that closes it)
+                    ^ closes:  the ⏎ before it was INSIDE the cell
+                                 ^ the first ⏎ after the close  =  the end of the row
+```
+
+```js
+for (;;) {
+    const q    = quoteFrom(at);                         //  the next quote  (remembered,  like nextQuote was)
+    const stop = lineEnd === -1 ? text.length : lineEnd;
+    if (q === -1 || q >= stop) break;                   //  no more quotes in this row:  it ends at lineEnd
+
+    at = q + 1;
+    if (!opensCell(q)) continue;                        //  in the middle of a cell?  Just a letter.
+
+    let close = quoteFrom(at);                          //  find the quote that CLOSES it...
+    while (close !== -1 && text.charCodeAt(close + 1) === 34) close = quoteFrom(close + 2);     //  ...skipping  ""  pairs
+
+    if (close === -1 || firstEnd !== -1 && close - firstEnd > QUOTE_LIMIT) {     //  never closes,  or WAY too far:
+        strays++;                                                               //  give up  (and count it)
+        lineEnd = firstEnd;
+        nextQuote = firstEnd === -1 ? -1 : text.indexOf('"', firstEnd + 1);
+        break;
+    }
+
+    at = close + 1;
+    if (lineEnd !== -1 && close > lineEnd) lineEnd = text.indexOf('\n', close + 1);     //  the cell went past that ⏎
+}
+```
+
+It's still fast: it only stops at quotes, and each quote is found once (`quoteFrom` remembers it the same way `nextQuote` did). 200,000 rows with quotes in every row load in about 0.4 s.
+
+> 🧠 `QUOTE_LIMIT` is still there, but now it's only a **safety net**. It used to catch every typo. Now it only matters for a quote at the START of a cell that never really closes (like `Bob,"Ana`), which is rare. That's why 65,536 is safe now: no mid-cell typo can reach it.
+
+### Step 14.3: `splitIntoCells` uses the same rule
+
+The row finder and the cell cutter MUST agree, or a row is found one way and cut another. `splitIntoCells` had the same old habit: `Bob,5'10",Chicago` came out as `[Bob] [5'10,Chicago...]`. The quote opened a "cell" and swallowed the commas after it. Now it remembers whether it's at the start of a cell:
+
+```js
+let atStart = true;               //  at the START of a cell  (only spaces so far)?
+
+if (letter === '"' && atStart) insideQuotes = true;         //  opening quote:  only here
+else if (letter === ',') { ...cut...;  atStart = true; }
+else { current += letter;  if (letter !== ' ' && letter !== '\t') atStart = false; }      //  a mid-cell " lands here:  a letter
+```
+
+`Bob,5'10",Chicago` → `[Bob] [5'10"] [Chicago]`, with the inches mark kept, the way the file says.
+
+### Step 14.4: Say so when it gives up
+
+The roach's last point: "Nothing on screen says the reader gave up on a quote, so a wrong row count goes unnoticed." Now `strays` is counted, and the status says it:
+
+```text
+Rows 1–15 of 3  ·  ⚠ 1 quote opened a cell that never closed:  the row count may be off
+```
+
+### ✅ Test it
+
+1. **The page:** `sh tools/run-tests.sh realfile-quotes` → **42 / 42**:
+   - the roach itself (quotes 32,767 to 65,536 letters apart): 5,000 rows. **The old reader gives 2,850 on this same page**, so the test really catches the bug.
+   - strays 2 rows apart, and a stray in every 7th row of 20,000: every row is kept
+   - `Bob,5'10",Chicago` → 3 cells
+   - real quoting, row by row: `"Chicago, IL"`, `""` escapes, an empty `""`, a space before the quote, line breaks in cells, `"Big" Joe`, `\r\n` files
+   - a 48,000-letter note with 10 line breaks, and a 200,000-letter cell: 1 row each
+   - a cell that opens and never closes: still 3 rows, and the ⚠ shows (and goes away on the next file)
+   - **the client's 6 ServiceNow tables**, every row's cell count checked against Python's `csv` module: `incident.csv` 23,334 × 44, `sc_task.csv` 16,321 × 20, `change_request.csv` 1,969 × 39, `sc_req_item.csv` 17,501 × 20, `change_approvals.csv` 9,942 × 8, `ritm_approvals.csv` 5,379 × 7. No warnings.
+2. `linebreaks` and `break-it` still pass. `break-it`'s small stray-quote file now shows `5'10"` with its quote mark (before, the reader ate it).
+3. Make `inches.csv`:
+   ```csv
+   name,height,city
+   Bob,5'10",Chicago
+   Cy,6'1",Miami
+   ```
+   Open it: 2 rows, 3 columns, and the `"` stays in the height.
+
+<br>
+
+---
+
+
 ## Change stuff yourself
 
 | I want to... | Do this |
@@ -19196,7 +19317,7 @@ The box is an **inset** shadow (`box-shadow: inset 0 0 0 2px`), drawn INSIDE the
 | **Let bigger Excel files unpack** | `XLSX_LIMIT` in `xlsxI.js`. Careful: past ~512 MB the browser can't hold the text anyway, and this limit is what stops "zip bombs". |
 | **Show Excel dates another way** | `excelDateText` in `xlsxI.js` builds `year-month-day`. Change the order there (like `day/month/year`). The originals are kept either way. |
 | **Show more (or less) of a huge cell** | Change `SHOW_LETTERS`. Keep it in the thousands: every letter you show costs the browser work, on every row. |
-| **Change when a stray quote gets caught** | Change `QUOTE_LIMIT`. Smaller = gives up sooner. Don't go below a few thousand, or real notes with line breaks get chopped. |
+| **Change when a stray quote gets caught** | Change `QUOTE_LIMIT`. Since Part 14 it only catches a quote at the START of a cell that never closes (mid-cell typos like `5'10"` can't open anything). Don't go below the longest real note: the client's `incident.csv` has notes of 33,576 letters. |
 | **Make the page even smoother during big loads** | Lower `CHUNK_TIME` (like `8`). Smaller bites = smoother, but the whole job takes a little longer. |
 
 > ⚠️ The row count lives in 2 places. Change one, change the other (and remember the header counts as 1 more).
@@ -19420,8 +19541,8 @@ The box is an **inset** shadow (`box-shadow: inset 0 0 0 2px`), drawn INSIDE the
 - **A WIDE file's column types are a smaller guess.** It looks at up to 4 million cells (`SAMPLE_CELLS`): a 10,000-column file, 400 rows spread through it. `SELECT *` on it still has to guess every column (about 0.7 s for 10,000).
 
 - **It expects a header.** The first line is always treated as the column names.
-- **A quote that never closes still changes its OWN row.** The brain catches a stray `"` and keeps every other row safe, but in that one row, everything after the `"` lands in one cell. (`Bob,5'10",tall` → `[Bob] [5'10,tall]`.) The real fix is in the file.
-- **A real cell with a line break AND over 32,767 letters after it** gets treated like a stray quote. (Excel couldn't hold that cell either.)
+- **A quote at the START of a cell that never closes still changes its OWN row.** The brain catches it (and the status shows a ⚠), and keeps every other row safe, but in that one row, everything after the `"` lands in one cell. (`Bob,"Ana,tall` → `[Bob] [Ana,tall]`.) The real fix is in the file. (A quote in the MIDDLE of a cell, like `5'10"`, is just a letter since Part 14.)
+- **A real cell with a line break AND over 65,536 letters after it** gets treated like a stray quote (`QUOTE_LIMIT`), with a ⚠ in the status. The longest the client's files have is 33,576.
 - **Huge cells only show their first 1,000 letters**, in the box and the hover. Search still finds words past that, but you won't see the yellow.
 - **No typo help.** `Jon` won't find `John`.
 - **Whole rows only.** You can't search just one column.

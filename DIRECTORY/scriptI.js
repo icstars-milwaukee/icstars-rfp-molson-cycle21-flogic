@@ -143,7 +143,9 @@ const QUOTE_LIMIT = 65536;       //  a quote that's still open this many letters
                                  //  of 32,863 to 33,576 letters  (and sc_task.csv one of 31,644).   At 32,767 the
                                  //  reader called those quotes strays,  and incident.csv came out as 1,609,873
                                  //  rows instead of 23,334.   65,536  =  twice the longest one seen.
-                                 //  (Not bigger:  two stray quotes closer than this still pair up and merge the rows between.)
+                                 //  Now it's only a SAFETY NET:  a quote in the middle of a cell  (5'10")  no longer opens
+                                 //  anything  (see opensCell in nextLine),  so typos can't pair up at ANY distance.
+                                 //  This only catches a quote at the START of a cell that never really closes.
 
 
 
@@ -459,20 +461,31 @@ function loadFile(file, sheet) {
         let spot = 0;                       //  where we are in it
 
 
-        //  Where the next  "  is in the file  (-1 = there are no more).
+        //  Where the next  "  is in the file, from  "at"  on  (-1 = there are no more).
         //  We REMEMBER it, so each quote in the file only gets looked for once.
         //  (Looking from scratch every line would search to the END of a no-quotes file
         //   on every single line.  On a huge file, that freezes the page.)
         let nextQuote = text.indexOf('"');
 
-        //  How many quotes from here up to "end"?  (And move nextQuote past them.)
-        function quotesBefore(end) {
-            let count = 0;
-            while (nextQuote !== -1 && nextQuote < end) {
-                count++;
-                nextQuote = text.indexOf('"', nextQuote + 1);
-            }
-            return count;
+        function quoteFrom(at) {
+            if (nextQuote !== -1 && nextQuote < at) nextQuote = text.indexOf('"', at);
+            return nextQuote;
+        }
+
+        let strays = 0;                     //  how many quotes we had to GIVE UP on  (they opened a cell that never closed)
+
+
+        //  Does the quote at  "q"  OPEN a quoted cell?   Only at the START of a cell:
+        //  right after a comma,  or at the start of the row  (spaces before it are OK).
+        //
+        //      Ana,"Chicago, IL",22      <-  opens:  the comma inside is NOT a cut
+        //      Bob,5'10",Chicago         <-  in the MIDDLE of a cell:  it's just a letter
+        //
+        //  (That's the CSV rule  (RFC 4180),  and what Excel does.)
+        function opensCell(q) {
+            let k = q - 1;
+            while (k >= spot && (text.charCodeAt(k) === 32 || text.charCodeAt(k) === 9)) k--;      //  (32 = space,  9 = tab)
+            return k < spot || text.charCodeAt(k) === 44;                                         //  (44 = comma)
         }
 
 
@@ -482,42 +495,44 @@ function loadFile(file, sheet) {
         //
         //  Windows ends lines with  \r\n,  Mac and Linux with just  \n.  This handles both.
         //
-        //  A line break INSIDE quotes is part of a cell, not the end of the row:
+        //  A line break INSIDE a quoted cell is part of the cell, not the end of the row:
         //
-        //      Ana,"123 Main St       <-  1 quote so far  =  ODD   =  still inside a cell.  Keep going.
-        //      Apt 4"                 <-  2 quotes so far  =  EVEN  =  the row really ends here.
+        //      Ana,"123 Main St       <-  a quoted cell opens...
+        //      Apt 4",Chicago         <-  ...and closes here.  The row really ends at THIS line break.
         //
-        //  ("" is a real quote mark.  It's 2 quotes, so it never changes odd or even.)
+        //  So we hop from quote to quote:  a quote that opens a cell  ->  find the one that closes it
+        //  (""  is a real quote mark,  not the end)  ->  a line break before that is inside the cell.
+        //  A quote in the MIDDLE of a cell  (5'10")  opens nothing,  so it can never swallow rows.
         function nextLine() {
 
-            let lineEnd = text.indexOf('\n', spot);         //  find the next line break...
-            let quotes  = 0;                                //  how many  "  since this row started
-            const firstEnd = lineEnd;                       //  the FIRST line break  (the end, if there were no quotes)
+            const firstEnd = text.indexOf('\n', spot);      //  the FIRST line break  (the end, if no cell spans lines)
+            let lineEnd = firstEnd;                         //  (-1 = no more line breaks:  the last row of the file)
+            let at = spot;
 
-            while (lineEnd !== -1) {
+            for (;;) {
 
-                quotes += quotesBefore(lineEnd);            //  count the quotes before this line break
+                const q    = quoteFrom(at);
+                const stop = lineEnd === -1 ? text.length : lineEnd;
+                if (q === -1 || q >= stop) break;           //  no more quotes in this row:  it ends at lineEnd
 
-                if (quotes % 2 === 0) break;                //  EVEN?  Outside quotes.  This is the real end.
+                at = q + 1;
+                if (!opensCell(q)) continue;                //  in the middle of a cell?  Just a letter.
 
-                lineEnd = text.indexOf('\n', lineEnd + 1);  //  ODD?  Inside a cell.  Try the next line break.
+                //  It opens a quoted cell.  Find the quote that closes it  (skipping  ""  pairs).
+                let close = quoteFrom(at);
+                while (close !== -1 && text.charCodeAt(close + 1) === 34) close = quoteFrom(close + 2);      //  (34 = ")
 
-                //  No more line breaks?  Count the quotes in the last bit of the file too.
-                if (lineEnd === -1) quotes += quotesBefore(text.length);
-
-                //  Is it a STRAY quote  (like  5'10"  )?  Two ways to tell:
-                //    -  it's still open WAY past the first line break  (no real cell is that long), or
-                //    -  the file ENDS with it still open  (it never closed).
-                //  Then give up:  end the row at the FIRST line break.
-                //  (And count quotes again from there.  The ones we just counted belong to the next rows.)
-                const tooFar      = lineEnd - firstEnd > QUOTE_LIMIT;
-                const neverClosed = lineEnd === -1 && quotes % 2 === 1;
-
-                if (tooFar || neverClosed) {
+                //  A STRAY?  It never closes,  or it closes WAY past the first line break  (no real cell is that long).
+                //  Then give up:  end the row at the FIRST line break.   (Quotes are looked for again from there.)
+                if (close === -1 || firstEnd !== -1 && close - firstEnd > QUOTE_LIMIT) {
+                    strays++;
                     lineEnd = firstEnd;
-                    nextQuote = text.indexOf('"', firstEnd + 1);
+                    nextQuote = firstEnd === -1 ? -1 : text.indexOf('"', firstEnd + 1);
                     break;
                 }
+
+                at = close + 1;
+                if (lineEnd !== -1 && close > lineEnd) lineEnd = text.indexOf('\n', close + 1);     //  the cell went past that line break
             }
 
             const found = lineEnd !== -1;
@@ -598,9 +613,13 @@ function loadFile(file, sheet) {
                 : encoding === 'windows-1252'
                 ? '  ·  read as Windows-1252  (an older Excel format)'
                 : '';
+            //  Quotes we gave up on?  Say so:  a wrong row count should never go unnoticed.
+            const strayNote = strays > 0
+                ? '  ·  ⚠ ' + strays.toLocaleString() + ' quote' + (strays === 1 ? '' : 's') + ' opened a cell that never closed:  the row count may be off'
+                : '';
 
             const table = { header: newHeader, text: text, starts: starts, count: count, longest: longest,
-                            excel: excel, sql: sql, note: note, name: file.name };
+                            excel: excel, sql: sql, note: note + strayNote, name: file.name };
 
             //  Which look?  A NEW file:  Excel files look like Excel,  SQL dumps like a database table,  CSVs like a CSV.
             //  Another sheet tab  (or table)  of the same file  (sheet !== null):  keep the look you picked.
@@ -903,6 +922,8 @@ function splitIntoCells(line) {
     const cells = [];
     let current = '';           //  the cell we're building right now
     let insideQuotes = false;   //  are we inside "quotes" right now?
+    let atStart = true;         //  at the START of a cell  (only spaces so far)?   Only there can a quote OPEN a quoted cell.
+                                //  In the middle  (Bob,5'10",Chicago)  it's just a letter.   (Same rule as nextLine.)
 
 
     //  Walk along the line, one letter at a time.
@@ -917,19 +938,22 @@ function splitIntoCells(line) {
                 i++;                        //  skip the second one
             } else if (letter === '"') {
                 insideQuotes = false;       //  closing quote.  Back to normal.
+                atStart = false;            //  (a quote after this is in the MIDDLE of the cell)
             } else {
                 current += letter;          //  anything else (even a comma, even a line break!) is part of the cell
             }
 
         } else {
 
-            if (letter === '"') {
+            if (letter === '"' && atStart) {
                 insideQuotes = true;        //  opening quote
             } else if (letter === ',') {
                 cells.push(current);        //  a comma = CUT!  This cell is done.
                 current = '';
+                atStart = true;
             } else {
-                current += letter;
+                current += letter;          //  (a quote in the middle of a cell lands here too:  just a letter)
+                if (letter !== ' ' && letter !== '\t') atStart = false;
             }
         }
     }

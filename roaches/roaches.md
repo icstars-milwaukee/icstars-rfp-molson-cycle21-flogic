@@ -5,7 +5,20 @@ how to see it, and the fix we'd try.
 
 ---
 
-## 1. The merge glitch (stray quotes far apart)
+## 1. The merge glitch (stray quotes far apart) ✅ FIXED
+
+**Fixed:** Nov 5, 2026, on `fix/stray-quotes`. The "smarter stray-quote rule" below, plus the warning:
+- A quote only opens a quoted cell at the START of a cell (right after a comma or at the start of the row,
+  spaces allowed). `5'10"` is just a letter, so typos can't pair up at any distance. `nextLine()` hops from
+  quote to quote with this rule (`opensCell`), and `splitIntoCells` uses the same rule. Before, inside a row,
+  `Bob,5'10",Chicago` also came out as `[Bob] [5'10,Chicago...]`.
+- `QUOTE_LIMIT` stays at 65,536, but only as a safety net for a quote at the start of a cell that never closes.
+- When the reader gives up on a quote, the status says so: `⚠ 1 quote opened a cell that never closed: the row count may be off`.
+- Test: Castle Claude `tests/realfile-quotes.html` (42/42). It includes this exact repro, which gives 2,850 rows
+  on the old reader and 5,000 now, and all six ServiceNow tables checked row by row against Python's `csv` module.
+  Write-up: Part 14 of `markdowns/tutorialwdetails.md`.
+- Still open: a REAL quoted cell with line breaks that runs more than 65,536 letters past its first line break
+  is still treated as a stray (now with the ⚠). The client's longest is 33,576.
 
 **Found:** Nov 5, 2026, on `feature/dashboard` (commit `aa09d84`, the `QUOTE_LIMIT` change)
 **Where:** `DIRECTORY/scriptI.js`: `QUOTE_LIMIT` and `nextLine()` (the CSV reader)
