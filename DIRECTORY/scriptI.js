@@ -136,9 +136,13 @@ const SHOW_LETTERS = 1000;       //  a cell with MORE letters than this only sho
                                  //  You can only SEE about 40 anyway.  Putting 50 million letters
                                  //  in one box froze the page.
 
-const QUOTE_LIMIT = 32767;       //  a quote that's still open this many letters past a line break is a MISTAKE
-                                 //  (a stray quote, like  5'10"  ).  Excel can't fit more than 32,767 letters
-                                 //  in one cell either.
+const QUOTE_LIMIT = 65536;       //  a quote that's still open this many letters past a line break is a MISTAKE
+                                 //  (a stray quote, like  5'10"  ).   Excel stops at 32,767 letters in a cell,
+                                 //  but a ServiceNow export doesn't:  the client's incident.csv has 18 Work notes
+                                 //  of 32,863 to 33,576 letters  (and sc_task.csv one of 31,644).   At 32,767 the
+                                 //  reader called those quotes strays,  and incident.csv came out as 1,609,873
+                                 //  rows instead of 23,334.   65,536  =  twice the longest one seen.
+                                 //  (Not bigger:  two stray quotes closer than this still pair up and merge the rows between.)
 
 
 
