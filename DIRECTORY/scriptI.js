@@ -76,8 +76,8 @@ const WINDOW_SIZE = 15;          //  how many rows fit in the window  (plus the 
 
 let focusOn   = false;           //  FOCUS MODE on?  (the bars fold away,  the window fills the screen:  see "FOCUS MODE")
 let focusRows = WINDOW_SIZE;     //  ...and then how many rows fit on the screen
-const FOCUS_GAP = 14;            //  focus mode:  the gap between the window and the screen's edges  (px).
-                                 //  If you change this, change the 14px in styleI.css's FOCUS MODE too.
+const FOCUS_GAP = 8;             //  focus mode:  the gap under the window  (px).   Small:  the table gets the screen.
+                                 //  If you change this, change the 8px in styleI.css's FOCUS MODE too.
 
 //  How many rows the window shows right now:  15,  or a whole screen of them in focus mode.
 function windowRows() {
@@ -2199,10 +2199,11 @@ function sizeWindow() {
     const borders   = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
     const scrollbar = outputBox.offsetHeight - outputBox.clientHeight - borders;    //  how tall the scrollbar is
 
-    //  FOCUS MODE:  as many WHOLE rows as fit on the screen  (the screen,  minus the gaps around the window,
-    //  its header,  its edges,  and the sideways scrollbar).   At least 3.
+    //  FOCUS MODE:  as many WHOLE rows as fit on the screen  (from where the window starts,  under the info strip,
+    //  down to the gap at the bottom,  minus its header,  its edges,  and the sideways scrollbar).   At least 3.
     if (focusOn) {
-        const room = window.innerHeight - 2 * FOCUS_GAP - headerBox.offsetHeight - scrollbar - borders;
+        const top  = outputBox.getBoundingClientRect().top;
+        const room = window.innerHeight - top - FOCUS_GAP - headerBox.offsetHeight - scrollbar - borders;
         focusRows = Math.max(3, Math.floor(room / rowHeight));
     }
 
@@ -5055,37 +5056,42 @@ document.addEventListener('keydown', function (event) {
 //    FOCUS MODE   (just the sheet,  as big as the screen)
 //
 //    "Focus mode"  (in the controls,  or press  F)  ->  everything above the sheet folds away:
-//    the title,  the file bar,  the search bar,  the "Rows 1–15" words,  the buttons.
+//    the title,  the file bar,  the search bar,  the buttons.
 //    The glass window grows to fill the screen  (in WHOLE rows:  never half a row at the bottom).
+//    Only 2 small things stay:
 //
-//        ┌──────────────────────[ ▾ ]──────────────────────┐   <-  the little tab:  click it  (or touch the top edge)
-//        │ id   │ name        │ city        │ ...          │
-//        │ 1    │ Person 1    │ City 1      │              │
-//        │ 2    │ Person 2    │ City 2      │              │
-//        │ ...  (a whole screen of rows)                   │
-//        └─────────────────────────────────────────────────┘
+//        sales.csv   ·   Rows 1–31 of 2,000                              <-  THE INFO STRIP  (thin,  always there)
+//        ┌──────────────────────────────────────────────────────────┐
+//        │ id   │ name        │ city        │ ...                   │
+//        │ 1    │ Person 1    │ City 1      │                       │
+//        │ ...  (a whole screen of rows)                            │
+//        │                                                          │
+//        │            ╭─────────────────────────────────╮           │   <-  THE PILL  (move the mouse,  or tap)
+//        │            │ 🔍 │ ◀ 3/128 ▶ │ ✥ │ # │ ✕      │           │
+//        └────────────╰─────────────────────────────────╯───────────┘
 //
-//    THE PEEK BAR:  move the mouse to the very TOP of the screen  ->  a slim glass bar slides down:
-//
-//        [ Search...        ] ◀ 3 / 128 ▶   [Row #][Go]   Rows 48,210–48,240 of 1,000,000   [Exit ✕]
-//
-//    It's the REAL search bar,  Row # box and "Rows ..." words,  moved into the bar  (and moved back
-//    when you leave focus mode),  so they work exactly like always.   Move away  ->  it slides back up.
-//    (Typing in it?  It stays until you're done.)
+//    THE PILL floats up when you move the mouse  (or tap the sheet),  and fades away after 2 seconds of
+//    stillness  (never while the mouse is ON it,  or you're typing in it).
+//        🔍        the search bar slides out of it  ( /  does that too)
+//        ◀ 3/128 ▶  only while you're searching
+//        ✥         Drag mode
+//        #         the Row # box slides out:  type a row,  Enter
+//        ✕         leave focus mode
+//    The search bar,  Drag mode,  Row # and "Rows ..." words are the REAL ones,  moved into the pill and the strip
+//    (and moved back when you leave),  so they work exactly like always.
 //
 //    THE KEYBOARD WALK  (nothing to click):
 //        ↓ ↑              one row               PageDown  PageUp   a screen of rows
 //        Home  End        the top / the bottom  ← →                sideways
-//        /                search  (opens the peek bar)
+//        /                search
 //        F  or  Esc       leave focus mode
 //
-//    (The bar and the tab are built HERE,  not in testI.html,  so pages that copy testI.html's skeleton
-//     keep working.)
+//    (The pill,  the strip and the button are built HERE,  not in testI.html,  so pages that copy
+//     testI.html's skeleton keep working.)
 //
 // ----------------------------------------------------------
 
-const PEEK_EDGE = 8;            //  the mouse this close to the top of the screen  (px)  ->  the peek bar comes down
-const PEEK_STAY = 350;          //  moved away from the bar?  It waits this long  (ms)  before sliding back up
+const PILL_REST = 2000;         //  the mouse still this long  (ms)  ->  the pill fades away
 
 //  The "Focus mode" button,  at the end of the controls.
 const focusBtn = document.createElement('button');
@@ -5096,77 +5102,169 @@ focusBtn.title = 'Just the sheet, as big as the screen  (F)';
 focusBtn.setAttribute('aria-pressed', 'false');
 controls.appendChild(focusBtn);
 
-//  The peek bar,  and the little tab that opens it  (for touch screens and keyboards:  no mouse to move to the top).
-const peekBar = document.createElement('div');
-peekBar.id = 'peekBar';
-peekBar.setAttribute('role', 'toolbar');
-peekBar.setAttribute('aria-label', 'Focus mode tools');
-peekBar.hidden = true;
 
-const peekTab = document.createElement('button');
-peekTab.type = 'button';
-peekTab.id = 'peekTab';
-peekTab.textContent = '▾';
-peekTab.title = 'Show the search bar and tools';
-peekTab.setAttribute('aria-expanded', 'false');
-peekTab.hidden = true;
-
-//  The bar's own pieces:  ◀ 3 / 128 ▶   and   Exit ✕
-const peekPrev  = document.createElement('button');
-const peekCount = document.createElement('span');
-const peekNext  = document.createElement('button');
-const peekExit  = document.createElement('button');
-peekPrev.type = peekNext.type = peekExit.type = 'button';
-peekPrev.className = peekNext.className = 'peek-step';
-peekPrev.textContent = '◀';  peekPrev.title = 'The match before';
-peekNext.textContent = '▶';  peekNext.title = 'The next match';
-peekCount.id = 'peekCount';
-peekExit.id = 'peekExit';
-peekExit.textContent = 'Exit ✕';
-peekExit.title = 'Leave focus mode  (Esc)';
-
-document.body.appendChild(peekBar);
-document.body.appendChild(peekTab);
+//  THE INFO STRIP:   sales.csv  ·  Rows 1–31 of 2,000
+const focusInfo = document.createElement('div');
+focusInfo.id = 'focusInfo';
+focusInfo.hidden = true;
+const focusName = document.createElement('span');
+focusName.id = 'focusName';
+focusInfo.appendChild(focusName);
+document.body.appendChild(focusInfo);
 
 
-//  The REAL controls that move into the bar  (in this order),  and a bookmark where each one lives normally.
+//  THE PILL
+const pill = document.createElement('div');
+pill.id = 'pill';
+pill.setAttribute('role', 'toolbar');
+pill.setAttribute('aria-label', 'Focus mode tools');
+pill.hidden = true;
+document.body.appendChild(pill);
+
+//  A round icon button  (its picture comes from the CSS:  "THE PILL'S PICTURES").
+function pillButton(id, label) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.id = id;
+    b.className = 'pill-icon';
+    b.title = label;
+    b.setAttribute('aria-label', label);
+    return b;
+}
+
+//  A group:  an icon,  and the box that slides out of it.
+function pillGroup(id) {
+    const g = document.createElement('span');
+    g.id = id;
+    g.className = 'pill-group';
+    return g;
+}
+
+const pillSearch  = pillButton('pillSearch', 'Search  (/)');
+const pillPrev    = pillButton('pillPrev', 'The match before');
+const pillNext    = pillButton('pillNext', 'The next match');
+const pillRow     = pillButton('pillRow', 'Go to a row');
+const pillExit    = pillButton('pillExit', 'Leave focus mode  (Esc)');
+const pillCount   = document.createElement('span');
+pillCount.id = 'pillCount';
+
+const searchGroup = pillGroup('pillSearchGroup');      //  🔍 + the search bar
+const matchGroup  = pillGroup('pillMatches');          //  ◀ 3/128 ▶
+const rowGroup    = pillGroup('pillRowGroup');         //  #  + the Row # box
+
+
+//  The REAL controls that move into the pill and the strip,  and a bookmark where each one lives normally.
 //  (Missing on a page?  Skipped.)
-let peekHomes = [];
+let focusHomes = [];
 
-function movePeekPieces(intoBar) {
-
-    if (intoBar) {
-        peekBar.textContent = '';
-        peekHomes = [];
-        const pieces = [searchInput, peekPrev, peekCount, peekNext, dragBtn, jumpInput, jumpBtn, statusText, backBtn, peekExit];
-        for (const piece of pieces) {
-            if (!piece) continue;
-            if (piece.parentNode && !piece.id.startsWith('peek')) {         //  a real control:  leave a bookmark
-                const mark = document.createComment('focus mode borrowed this');
-                piece.parentNode.insertBefore(mark, piece);
-                peekHomes.push({ piece: piece, mark: mark });
-            }
-            peekBar.appendChild(piece);
-        }
-        copyAimCount();
-    } else {
-        for (const home of peekHomes) home.mark.replaceWith(home.piece);     //  back where they came from
-        peekHomes = [];
+function borrow(piece, into) {
+    if (!piece) return;
+    if (piece.parentNode) {
+        const mark = document.createComment('focus mode borrowed this');
+        piece.parentNode.insertBefore(mark, piece);
+        focusHomes.push({ piece: piece, mark: mark });
     }
+    into.appendChild(piece);
 }
 
-//  The bar's "3 / 128" copies the snap menu's,  and its ◀ ▶ turn off when the snap menu's do.
-function copyAimCount() {
-    peekCount.textContent = aimCount.textContent;
-    peekPrev.disabled = aimPrev.disabled;
-    peekNext.disabled = aimNext.disabled;
+function movePieces(intoFocus) {
+
+    if (!intoFocus) {
+        for (const home of focusHomes) home.mark.replaceWith(home.piece);     //  back where they came from
+        focusHomes = [];
+        return;
+    }
+
+    pill.textContent = '';
+    searchGroup.textContent = '';
+    matchGroup.textContent = '';
+    rowGroup.textContent = '';
+    focusHomes = [];
+
+    searchGroup.appendChild(pillSearch);  borrow(searchInput, searchGroup);
+    matchGroup.append(pillPrev, pillCount, pillNext);
+    rowGroup.appendChild(pillRow);        borrow(jumpInput, rowGroup);
+
+    pill.appendChild(searchGroup);
+    pill.appendChild(matchGroup);
+    borrow(dragBtn, pill);
+    pill.appendChild(rowGroup);
+    borrow(backBtn, pill);
+    pill.appendChild(pillExit);
+
+    borrow(statusText, focusInfo);
+
+    focusName.textContent = readingName.textContent;
+    showPillMatches();
 }
-new MutationObserver(function () { if (focusOn) copyAimCount(); })
+
+
+//  ◀ 3/128 ▶  only while you're searching.   Its "3 / 128" copies the snap menu's,  and its ◀ ▶ turn off when theirs do.
+function showPillMatches() {
+    matchGroup.hidden = searchInput.value.trim() === '';
+    pillCount.textContent = aimCount.textContent;
+    pillPrev.disabled = aimPrev.disabled;
+    pillNext.disabled = aimNext.disabled;
+}
+new MutationObserver(function () { if (focusOn) showPillMatches(); })
     .observe(aimCount.parentNode.parentNode, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['disabled'] });
+searchInput.addEventListener('input', function () { if (focusOn) showPillMatches(); });
 
-peekPrev.addEventListener('click', function () { aimStep(-1); });
-peekNext.addEventListener('click', function () { aimStep(1); });
-peekExit.addEventListener('click', function () { setFocus(false); });
+
+//  A group's box slides out  (true)  or back in  (false).
+//  The search bar stays out while it has words in it:  you can see what you searched for.
+function openGroup(group, open) {
+    group.classList.toggle('open', open);
+}
+
+pillSearch.addEventListener('click', function () {
+    const open = !searchGroup.classList.contains('open');
+    openGroup(searchGroup, open);
+    if (open) searchInput.focus();
+});
+pillRow.addEventListener('click', function () {
+    const open = !rowGroup.classList.contains('open');
+    openGroup(rowGroup, open);
+    if (open) jumpInput.focus();
+});
+
+//  Tabbed into a box?  It slides out.   Left it  (empty)?  It slides back in.
+searchInput.addEventListener('focus', function () { if (focusOn) openGroup(searchGroup, true); });
+jumpInput.addEventListener('focus', function () { if (focusOn) openGroup(rowGroup, true); });
+searchInput.addEventListener('blur', function () { if (focusOn && searchInput.value.trim() === '') openGroup(searchGroup, false); });
+jumpInput.addEventListener('blur', function () { if (focusOn) openGroup(rowGroup, false); });
+
+pillPrev.addEventListener('click', function () { aimStep(-1); });
+pillNext.addEventListener('click', function () { aimStep(1); });
+pillExit.addEventListener('click', function () { setFocus(false); });
+
+
+//  Awake  (showing)  or resting  (faded away).
+let pillTimer = null;
+
+function wakePill() {
+    if (!focusOn) return;
+    pill.classList.add('awake');
+    clearTimeout(pillTimer);
+    pillTimer = setTimeout(restPill, PILL_REST);
+}
+
+function restPill() {
+    clearTimeout(pillTimer);
+    pillTimer = null;
+    //  The mouse is on it,  or you're typing in it?  Not yet:  ask again in a moment.
+    if (pill.matches(':hover') || pill.contains(document.activeElement)) {
+        pillTimer = setTimeout(restPill, PILL_REST);
+        return;
+    }
+    pill.classList.remove('awake');
+}
+
+function pillAwake() { return pill.classList.contains('awake'); }
+
+document.addEventListener('mousemove', function () { if (focusOn && !dragging) wakePill(); }, { passive: true });
+outputBox.addEventListener('pointerdown', function (e) { if (focusOn && e.pointerType !== 'mouse') wakePill(); });
+pill.addEventListener('focusin', wakePill);                 //  (Tabbed to it?  It shows.)
 
 
 //  Focus mode on  (true)  or off  (false).
@@ -5185,15 +5283,19 @@ function setFocus(on) {
     focusOn = on;
     document.body.classList.toggle('focus', on);
     focusBtn.setAttribute('aria-pressed', on);
-    movePeekPieces(on);
-    peekTab.hidden = !on;
-    openPeek(false);
-    if (!on) focusBtn.focus();
+    movePieces(on);
+    pill.hidden = !on;
+    focusInfo.hidden = !on;
+    openGroup(searchGroup, on && searchInput.value.trim() !== '');
+    openGroup(rowGroup, false);
+    if (on) wakePill();                                         //  show the pill once,  so you know it's there
+    else { pill.classList.remove('awake'); focusBtn.focus(); }
 
     //  The window is a new size:  measure it,  and build the rows and columns that fit now.
     //  (Same top row as before:  you stay where you were.)
     const y = readViewY();
     sizeWindow();
+    placePill();
     updateColumns();
     setViewY(Math.min(y, Math.max(lowestViewY(), 0)));
     buildVisibleRows();
@@ -5202,42 +5304,11 @@ function setFocus(on) {
 
 focusBtn.addEventListener('click', function () { setFocus(true); });
 
-
-//  The peek bar:  down  (true)  or up  (false).
-let peekTimer = null;
-
-function openPeek(open) {
-    clearTimeout(peekTimer);
-    peekTimer = null;
-    peekBar.hidden = !(focusOn && open);
-    peekTab.setAttribute('aria-expanded', !peekBar.hidden);
-}
-
-function peekOpen() { return !peekBar.hidden; }
-
-peekTab.addEventListener('click', function () { openPeek(!peekOpen()); });
-
-//  The mouse:  at the top edge  ->  down.   Well away from the bar  (and not typing in it)  ->  up,  after a moment.
-document.addEventListener('mousemove', function (e) {
+//  The pill floats just inside the sheet's bottom edge.   How much space is UNDER the sheet?  (It changes with the screen.)
+function placePill() {
     if (!focusOn) return;
-    if (e.clientY <= PEEK_EDGE) { openPeek(true); return; }
-    if (!peekOpen()) return;
-
-    const away = e.clientY > peekBar.getBoundingClientRect().bottom + 30;
-    if (away && !peekBar.contains(document.activeElement)) {
-        if (peekTimer === null) peekTimer = setTimeout(function () { openPeek(false); }, PEEK_STAY);
-    } else {
-        clearTimeout(peekTimer);
-        peekTimer = null;
-    }
-}, { passive: true });
-
-//  Done typing  (the search bar lost the keyboard)  and the mouse is down on the sheet?  Up it goes.
-peekBar.addEventListener('focusout', function () {
-    setTimeout(function () {
-        if (focusOn && !peekBar.contains(document.activeElement) && !peekBar.matches(':hover')) openPeek(false);
-    }, PEEK_STAY);
-});
+    document.body.style.setProperty('--under-sheet', Math.max(0, window.innerHeight - outputBox.getBoundingClientRect().bottom) + 'px');
+}
 
 
 //  THE KEYBOARD WALK:  move  n  rows  (keeps you on whole rows,  inside the file).
@@ -5272,9 +5343,9 @@ document.addEventListener('keydown', function (e) {
 
     if (e.key === 'Escape') {
         if (!aimRow.hidden || dragging) return;                         //  (that Escape belongs to them)
-        if (peekOpen() && peekBar.contains(document.activeElement)) {   //  in the bar?  Just put the bar away.
+        if (pill.contains(document.activeElement)) {                    //  in the pill?  Just leave the pill.
             document.activeElement.blur();
-            openPeek(false);
+            restPill();
             return;
         }
         setFocus(false);
@@ -5295,7 +5366,8 @@ document.addEventListener('keydown', function (e) {
         case 'ArrowRight': outputBox.scrollLeft += 160; break;
         case 'ArrowLeft':  outputBox.scrollLeft -= 160; break;
         case '/':
-            openPeek(true);
+            wakePill();
+            openGroup(searchGroup, true);
             searchInput.focus();
             searchInput.select();
             break;
@@ -5309,6 +5381,7 @@ document.addEventListener('keydown', function (e) {
 window.addEventListener('resize', function () {
     if (!focusOn) return;
     sizeWindow();
+    placePill();
     updateColumns();
     buildVisibleRows();
     updatePosition();

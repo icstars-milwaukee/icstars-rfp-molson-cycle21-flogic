@@ -2765,10 +2765,17 @@ button:active {
         FOCUS MODE   (just the sheet,  as big as the screen)
 
         The brain puts  class="focus"  on the page  (see "FOCUS MODE" in scriptI.js).
-        Everything above the sheet folds away,  and the glass window
-        is glued to the screen,  14px in from every edge.
-        (If you change the 14px,  change FOCUS_GAP in scriptI.js too:
-         the brain uses it to count how many rows fit.)
+        Everything above the sheet folds away.  What's left:
+
+            sales.csv  ·  Rows 1–31 of 2,000           <-  the INFO STRIP  (24px,  always there)
+            ┌──────────────────────────────────────┐
+            │   the sheet,  edge to edge           │
+            │        ╭───────────────────╮         │   <-  the PILL  (floats up when you move the mouse)
+            └────────╰───────────────────╯─────────┘
+
+        The window is glued 26px from the top  (under the strip),  8px from the sides and the bottom.
+        (The brain MEASURES where the window starts,  so it always counts the right number of rows.
+         If you change the 8px at the bottom,  change FOCUS_GAP in scriptI.js too.)
 
     ==========================================================  */
 
@@ -2791,12 +2798,13 @@ body.focus #topBtn {
 
 body.focus #output {
     position: fixed;
-    top: 14px;
+    top: 26px;                      /*  right under the info strip  */
     left: 0;
     right: 0;
-    margin: 0 auto;                 /*  still in the middle  */
-    width: calc(100vw - 28px);      /*  as WIDE as the screen too  (minus the gaps),  like a spreadsheet app  */
+    margin: 0 auto;                 /*  in the middle  */
+    width: calc(100vw - 18px);      /*  as WIDE as the screen too  (8px each side,  + its 1px edges),  like a spreadsheet app  */
     max-width: none;
+    border-radius: 12px;            /*  a little less round:  more room in the corners  */
     animation: none;                /*  no bobbing:  it's glued down  */
 
     /*  The browser's "scroll anchoring" must stay OUT of this:  when the brain swaps rows in and out,
@@ -2808,7 +2816,7 @@ body.focus #output {
 /*  The Details panel  (click a cell)  still works:  it drops down over the top of the sheet.  */
 body.focus #fileArea {
     position: fixed;
-    top: 8px;
+    top: 30px;
     left: 16px;
     right: 16px;
     width: auto;
@@ -2818,89 +2826,209 @@ body.focus #fileArea {
 }
 
 
-/*  THE PEEK BAR:  slides down from the top edge.
-        [ Search...  ] ◀ 3 / 128 ▶  [Row #][Go]  Rows 1–30 of 100  [Exit ✕]   */
-#peekBar {
+/*  THE INFO STRIP:   sales.csv  ·  Rows 1–31 of 2,000
+    Thin,  quiet words.  No buttons:  it's for READING  (the cell you're on comes here later).  */
+#focusInfo {
     position: fixed;
     top: 0;
+    left: 14px;
+    right: 14px;
+    height: 26px;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    overflow: hidden;
+    white-space: nowrap;
+    font-family: "Segoe UI", system-ui, Arial, sans-serif;
+    font-size: 12px;
+    color: var(--text-soft);
+}
+
+#focusName {
+    font-weight: 600;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 45vw;
+}
+
+#focusName:not(:empty)::after {
+    content: "·";
+    margin-left: 10px;
+    font-weight: 400;
+    color: var(--text-soft);
+}
+
+#focusInfo #status {
+    margin: 0;
+    font-size: 12px;
+    text-align: left;
+}
+
+
+/*  THE PILL:  a small glass pill,  floating at the bottom in the middle.
+        ╭────────────────────────────────────────────╮
+        │ 🔍 [search...] │ ◀ 3/128 ▶ │ ✥ │ # │ ✕    │
+        ╰────────────────────────────────────────────╯
+    Resting:  see-through and out of the way  (clicks go through to the sheet).
+    Awake  (class="awake"):  it floats up.  */
+#pill {
+    position: fixed;
     left: 50%;
+    /*  Fully INSIDE the sheet,  14px up from its bottom edge  (not half on it,  half off).
+        The space under the window changes with the screen  (only WHOLE rows fit),
+        so the brain measures it:  --under-sheet.  */
+    bottom: calc(var(--under-sheet, 8px) + 14px);
     translate: -50% 0;
     z-index: 40;                    /*  over the sheet,  and over the Details  */
     display: flex;
     align-items: center;
-    flex-wrap: wrap;                /*  a narrow screen?  2 lines  */
-    justify-content: center;
-    gap: 6px;
-    width: max-content;
+    gap: 2px;
     max-width: calc(100vw - 16px);
     box-sizing: border-box;
-    padding: 6px 10px;
+    padding: 4px;
+    border-radius: 999px;           /*  round ends  */
 
-    /*  The same glass as the Details panel  (it floats over the sheet,  so the blur is real here)  */
-    background: linear-gradient(135deg, var(--glass-top), var(--glass-bottom));
-    backdrop-filter: blur(12px);
+    /*  Glass you can READ:  mostly the page's color,  so the sheet's words don't show through it  */
+    background: var(--page);
+    background: color-mix(in srgb, var(--page) 80%, transparent);
+    backdrop-filter: blur(18px) saturate(1.4);
     border: 1px solid var(--glass-edge);
-    border-top: none;
-    border-radius: 0 0 14px 14px;
     box-shadow:
-        0 12px 40px rgba(0, 0, 0, 0.18),
-        inset 0 -1px 0 var(--shine, rgba(255, 255, 255, 0.9));
-    animation: peek-drop 0.18s ease-out;
+        0 10px 32px rgba(0, 0, 0, 0.28),
+        inset 0 1px 0 var(--shine, rgba(255, 255, 255, 0.6));
+
+    opacity: 0;
+    transform: translateY(10px);
+    pointer-events: none;
+    transition: opacity 0.25s ease, transform 0.25s ease;
 }
 
-@keyframes peek-drop {
-    from { opacity: 0; transform: translateY(-100%); }
+#pill.awake {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
 }
 
-#peekBar button { margin: 0; }
-
-#peekBar #searchInput {
-    flex: 1 1 220px;
-    width: 280px;
-    max-width: 360px;
+.pill-group {
+    display: inline-flex;
+    align-items: center;
 }
 
-#peekBar .peek-step {
-    padding: 0 10px;
+/*  The round icon buttons  (and Drag mode,  which wears the same look in here)  */
+#pill .pill-icon,
+#pill #dragBtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    margin: 0;
+    font-size: 0;                   /*  (Drag mode's words hide:  a screen reader still reads them)  */
+    color: var(--ink, var(--text));
+    background: transparent;
+    border: none;
+    border-radius: 50%;
+    box-shadow: none;
+    text-shadow: none;
+    transition: background 0.15s;
 }
 
-#peekCount {
-    min-width: 54px;
+#pill .pill-icon:hover,
+#pill #dragBtn:hover {
+    filter: none;
+    background: var(--control-accent);
+}
+
+#pill .pill-icon:disabled {
+    opacity: 0.35;
+    background: transparent;
+    cursor: default;
+}
+
+/*  Drag mode ON:  a dark circle,  white picture  */
+#pill #dragBtn[aria-pressed="true"] {
+    color: #fff;
+    background: var(--square-dark);
+}
+
+/*  THE PILL'S PICTURES:  little line drawings  (SVG),  painted in the button's own color  */
+#pill .pill-icon::before,
+#pill #dragBtn::before {
+    content: "";
+    width: 18px;
+    height: 18px;
+    background-color: currentColor;
+    -webkit-mask: var(--icon) center / contain no-repeat;
+    mask: var(--icon) center / contain no-repeat;
+}
+
+#pillSearch { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20 20l-3.5-3.5'/%3E%3C/svg%3E"); }
+#pillPrev   { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 6l-6 6 6 6'/%3E%3C/svg%3E"); }
+#pillNext   { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 6l6 6-6 6'/%3E%3C/svg%3E"); }
+#pill #dragBtn { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3'/%3E%3C/svg%3E"); }
+#pillRow    { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 9h14M5 15h14M10 4L8 20M16 4l-2 16'/%3E%3C/svg%3E"); }
+#pillExit   { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 6l12 12M18 6L6 18'/%3E%3C/svg%3E"); }
+
+/*  The boxes that slide OUT of their icon  (the search bar out of 🔍,  the Row # box out of #).
+    Folded:  no width at all.   Open  (class="open"):  they slide out.  */
+#pill #searchInput,
+#pill #jumpInput {
+    width: 0;
+    min-width: 0;
+    max-width: none;
+    padding: 0;
+    margin: 0;
+    line-height: 30px;
+    font-size: 14px;
+    border: none;
+    border-radius: 999px;
+    opacity: 0;
+    box-shadow: none;
+    transition: width 0.2s ease, padding 0.2s ease, opacity 0.2s ease;
+}
+
+#pill .open #searchInput {
+    width: 220px;
+    padding: 0 12px;
+    opacity: 1;
+}
+
+#pill .open #jumpInput {
+    width: 90px;
+    padding: 0 12px;
+    opacity: 1;
+}
+
+/*  ◀ 3 / 128 ▶  */
+#pillCount {
+    min-width: 48px;
     text-align: center;
-    font-size: 13px;
+    font-family: "Segoe UI", system-ui, Arial, sans-serif;
+    font-size: 12px;
     font-variant-numeric: tabular-nums;
     color: var(--text-soft);
 }
 
-#peekBar #status {
-    margin: 0 4px;
-    font-size: 13px;
-    white-space: nowrap;
-}
-
-/*  THE LITTLE TAB  ( ▾ ):  for touch screens and keyboards,  which can't "move to the top".
-    Faint,  until you point at it.  */
-#peekTab {
-    position: fixed;
-    top: 0;
-    left: 50%;
-    translate: -50% 0;
-    z-index: 39;
+/*  "← Back to file"  (only when an answer is showing):  a small round-ended button  */
+#pill #backBtn {
     margin: 0;
-    padding: 0 18px;
-    line-height: 16px;
-    font-size: 11px;
-    border-top: none;
-    border-radius: 0 0 10px 10px;
-    opacity: 0.55;
+    padding: 0 12px;
+    line-height: 30px;
+    font-size: 13px;
+    border-radius: 999px;
 }
 
-#peekTab:hover,
-#peekTab:focus-visible {
-    opacity: 1;
+/*  A narrow screen  (a phone)?  The search bar slides out a little less.  */
+@media (max-width: 520px) {
+    #pill .open #searchInput { width: 140px; }
 }
 
-/*  Someone turned off motion?  The bar just appears.  */
+/*  Someone turned off motion?  It just appears,  and the boxes just open.  */
 @media (prefers-reduced-motion: reduce) {
-    #peekBar { animation: none; }
+    #pill,
+    #pill #searchInput,
+    #pill #jumpInput { transition: none; }
 }

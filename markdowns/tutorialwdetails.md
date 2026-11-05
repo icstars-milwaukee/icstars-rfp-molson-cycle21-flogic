@@ -18876,23 +18876,26 @@ The 15-row glass window is good for a quick look. But a person working a ticket 
 
 ```text
    Normal                                   Focus mode  (press F)
-   ┌──────────────────────────────┐         ┌────────────────────[ ▾ ]───────────────────┐
-   │ CSV Reader                   │         │ id   │ name        │ city        │ ...     │
-   │ [Choose File][ snap ][Ask]   │         │ 1    │ Person 1    │ City 1      │         │
-   │ [ Search...               ]  │   ->    │ 2    │ Person 2    │ City 2      │         │
+   ┌──────────────────────────────┐          incidents.csv · Rows 1–21 of 3,000        <- the INFO STRIP
+   │ CSV Reader                   │         ┌────────────────────────────────────────────┐
+   │ [Choose File][ snap ][Ask]   │         │ Ticket    │ Opened     │ Assigned to │ ... │
+   │ [ Search...               ]  │   ->    │ INC0041001│ 2026-10-02 │ Ben Cho     │     │
    │ Rows 1–15 of 2000            │         │ ...  (a whole SCREEN of rows,  edge to edge)│
-   │ [Drag][Row #][Go][Expand]... │         │                                            │
-   │ ┌──── 15 rows ────┐          │         │                                            │
-   │ └─────────────────┘          │         └────────────────────────────────────────────┘
+   │ [Drag][Row #][Go][Expand]... │         │        ╭──────────────────────────╮        │
+   │ ┌──── 15 rows ────┐          │         │        │ 🔍 │ ◀ 1/750 ▶ │ ✥ │ # │ ✕ │        │ <- the PILL
+   │ └─────────────────┘          │         └────────╰──────────────────────────╯────────┘
    └──────────────────────────────┘
 ```
 
 | | Normal | Focus mode |
 |---|---|---|
-| The window | 15 rows, up to 900 px wide, bobbing | the whole screen (14 px in from every edge), as many WHOLE rows as fit |
-| Search, Row #, Drag mode, "Rows ..." | always showing | in the **peek bar**: touch the top edge of the screen (or click the little **▾** tab) |
+| The window | 15 rows, up to 900 px wide, bobbing | the whole screen (8 px from the sides and bottom, under a 26 px info strip), as many WHOLE rows as fit |
+| The file name, "Rows ..." | under the file bar | in the **info strip**: thin, quiet words across the top. No buttons: it's for reading. |
+| Search, ◀ ▶, Drag mode, Row # | always showing | in the **pill**: it floats up when you move the mouse (or tap the sheet), and fades after 2 seconds |
 | Moving around | mouse wheel, scrollbar, drag mode | all of those, plus the **keyboard walk** (↓ ↑ PageDown PageUp Home End ← →) |
-| Get in / out | | **Focus mode** button (end of the controls), **F**, or **Esc** / **F** / **Exit ✕** to leave |
+| Get in / out | | **Focus mode** button (end of the controls), **F**, or **Esc** / **F** / the pill's **✕** to leave |
+
+Why a pill and a strip, and not a toolbar? The first try was a "peek bar" across the top with 9 controls in a row (search, ◀, count, ▶, Drag mode, Row #, Go, the status words, Exit). It worked, but it looked clunky and took space from the table. Now the tools are 5 small round icons that get out of the way, and the words you READ live in a strip you never have to open.
 
 ### Step 13.1: "15 rows" becomes "however many fit"
 
@@ -18901,18 +18904,19 @@ Three places in the brain said `WINDOW_SIZE` (15): sizing the window, the "Rows 
 ```js
 let focusOn   = false;           //  FOCUS MODE on?
 let focusRows = WINDOW_SIZE;     //  ...and then how many rows fit on the screen
-const FOCUS_GAP = 14;            //  the gap between the window and the screen's edges  (px)
+const FOCUS_GAP = 8;             //  the gap under the window  (px)
 
 function windowRows() {
     return focusOn ? focusRows : WINDOW_SIZE;
 }
 ```
 
-And `sizeWindow` counts how many rows fit: the screen, minus the gaps, the header, the edges and the sideways scrollbar, cut down to WHOLE rows (never half a row at the bottom):
+And `sizeWindow` counts how many rows fit: from where the window really STARTS (it measures it, so the info strip's height is counted for free) down to the gap at the bottom, minus the header, the edges and the sideways scrollbar, cut down to WHOLE rows (never half a row at the bottom):
 
 ```js
 if (focusOn) {
-    const room = window.innerHeight - 2 * FOCUS_GAP - headerBox.offsetHeight - scrollbar - borders;
+    const top  = outputBox.getBoundingClientRect().top;
+    const room = window.innerHeight - top - FOCUS_GAP - headerBox.offsetHeight - scrollbar - borders;
     focusRows = Math.max(3, Math.floor(room / rowHeight));
 }
 const rowsToShow = Math.min(windowRows(), matches.length);
@@ -18929,35 +18933,54 @@ body.focus h1, body.focus #fileBar, body.focus #controls, ...  { display: none !
 
 body.focus #output {
     position: fixed;
-    top: 14px;  left: 0;  right: 0;  margin: 0 auto;
-    width: calc(100vw - 28px);              /*  WIDE too,  not just tall  */
+    top: 26px;  left: 0;  right: 0;  margin: 0 auto;     /*  right under the info strip  */
+    width: calc(100vw - 18px);              /*  WIDE too:  8px each side,  + its 1px edges  */
     max-width: none;
     animation: none;                        /*  no bobbing:  it's glued down  */
-    overflow-anchor: none;                  /*  see Step 13.5  */
+    overflow-anchor: none;                  /*  see Step 13.6  */
 }
 ```
 
-> 🧠 The first try only set `max-width`. The window kept its normal `width: fit-content` ("only as wide as the sheet needs"), so it grew TALL but not WIDE. `width: calc(100vw - 28px)` fixed it: like a spreadsheet app, the grid fills the screen even when the file has 3 columns.
+> 🧠 The first try only set `max-width`. The window kept its normal `width: fit-content` ("only as wide as the sheet needs"), so it grew TALL but not WIDE. Setting `width` fixed it: like a spreadsheet app, the grid fills the screen even when the file has 3 columns. And why `- 18px`, not `- 16px`? The window's 1px edges sit OUTSIDE its width (`box-sizing: content-box`). The test measured 7px on each side, not 8. Switching to `border-box` would have fixed the width but shrunk the HEIGHT by 2px too, cutting into the last row.
 
-### Step 13.3: The peek bar borrows the REAL controls
+### Step 13.3: The pill and the strip borrow the REAL controls
 
-The peek bar doesn't have its own search box. It **borrows** the real ones: the search bar, Drag mode, Row #, Go, the "Rows ..." words and "← Back to file". Each one leaves a bookmark (an HTML comment) where it lives, moves into the bar, and goes back to its bookmark when you leave focus mode. Same element, same listeners, so search works exactly like always, with no second copy to keep in step.
+The pill doesn't have its own search box. It **borrows** the real ones: the search bar, Drag mode, the Row # box and "← Back to file". The info strip borrows the "Rows ..." words. Each one leaves a bookmark (an HTML comment) where it lives, moves in, and goes back to its bookmark when you leave focus mode. Same element, same listeners, so search works exactly like always, with no second copy to keep in step.
 
 ```js
-const mark = document.createComment('focus mode borrowed this');
-piece.parentNode.insertBefore(mark, piece);         //  the bookmark
-peekBar.appendChild(piece);                         //  into the bar
+function borrow(piece, into) {
+    const mark = document.createComment('focus mode borrowed this');
+    piece.parentNode.insertBefore(mark, piece);         //  the bookmark
+    focusHomes.push({ piece: piece, mark: mark });
+    into.appendChild(piece);                            //  into the pill  (or the strip)
+}
 ...
-home.mark.replaceWith(home.piece);                  //  later:  back where it came from
+for (const home of focusHomes) home.mark.replaceWith(home.piece);     //  later:  back where they came from
 ```
 
-The bar's own pieces are only ◀ ▶ (they call the snap menu's `aimStep`), a "3 / 128" that copies the snap menu's count (a `MutationObserver` watches it), and **Exit ✕**.
+The pill's own pieces are only the icons, ◀ ▶ (they call the snap menu's `aimStep`), and a "1 / 750" that copies the snap menu's count (a `MutationObserver` watches it).
 
-The bar slides down when the mouse touches the top 8 px of the screen (`PEEK_EDGE`), and slides back up 0.35 s after the mouse moves well away (`PEEK_STAY`). Never while you're typing in it. The **▾** tab is for touch screens and keyboards, which can't "move to the top".
+> 🧠 The pill, the strip and the Focus mode button are built by the BRAIN (`document.createElement`), not written in `testI.html`. Why: the test pages are copies of `testI.html`'s skeleton. If the brain expected a `<div id="pill">` in the skeleton, every older test page would break.
 
-> 🧠 The bar and the tab are built by the BRAIN (`document.createElement`), not written in `testI.html`. Why: the test pages are copies of `testI.html`'s skeleton. If the brain expected a `<div id="peekBar">` in the skeleton, every older test page would break.
+### Step 13.4: The pill
 
-### Step 13.4: The keyboard walk
+```text
+   ╭──────────────────────────────────────────────╮
+   │ 🔍 [Cy Okafor     ] │ ◀ 1/750 ▶ │ ✥ │ # │ ✕ │
+   ╰──────────────────────────────────────────────╯
+     │                    │            │   │   └─ leave focus mode
+     │                    │            │   └─ the Row # box slides out:  type a row,  Enter
+     │                    │            └─ Drag mode  (a dark circle when it's on)
+     │                    └─ only while you're searching
+     └─ the search bar slides out of the icon   ( / does too)
+```
+
+- **Awake and resting.** Any mouse move (or a tap on the sheet) wakes it: `class="awake"`, it floats up. After 2 seconds of stillness (`PILL_REST`) it fades away, and `pointer-events: none` lets clicks go straight through it to the sheet. It never rests while the mouse is ON it, or while you're typing in it (`restPill` checks `:hover` and `document.activeElement`, and asks again later).
+- **Boxes that slide out.** The search bar and the Row # box sit inside the pill at `width: 0`. Click their icon (or Tab to them) and they get `class="open"`: they slide out to 220px / 90px. An empty box slides back in when you leave it. A search with words in it stays out, so you can see what you searched for.
+- **The pictures** are little line drawings (SVG) used as a `mask`, painted with `background-color: currentColor`. So they're always the button's own color: dark in the light themes, light in Neo-Dark. Drag mode wears the same look in here (`font-size: 0` hides its words; a screen reader still reads them).
+- **Where it floats.** Fully INSIDE the sheet, 14px up from its bottom edge. The space under the sheet changes with the screen (only WHOLE rows fit), so the brain measures it and hands it to the CSS: `--under-sheet`, and `bottom: calc(var(--under-sheet) + 14px)`. (With a fixed `bottom`, it sat half on the sheet's edge, half off.)
+
+### Step 13.5: The keyboard walk
 
 | Key | Does |
 |---|---|
@@ -18965,8 +18988,8 @@ The bar slides down when the mouse touches the top 8 px of the screen (`PEEK_EDG
 | PageDown PageUp | a screenful, keeping 1 row you already saw |
 | Home End (or Ctrl + Home / End) | the top / the bottom |
 | ← → | sideways, 160 px |
-| / | opens the peek bar, with the search bar ready to type in |
-| F, Esc | leave focus mode |
+| / | wakes the pill, with the search bar out and ready to type in |
+| F, Esc | leave focus mode (Esc inside the pill only leaves the pill) |
 
 ```js
 function walkRows(n) {
@@ -18981,9 +19004,9 @@ It goes through `setViewY`, so it works on the SQUEEZED scrollbar of a 1,000,000
 
 The key listener runs in the **capture** phase (`addEventListener('keydown', ..., true)`), so it runs BEFORE the other Escape listeners. An Escape that closes the Details panel, or stops a drag, does only that. It doesn't ALSO throw you out of focus mode. And none of the keys do anything while you're typing in a box (`typingIn`).
 
-### Step 13.5: The bug the test found: the browser moved the scrollbar by itself
+### Step 13.6: 2 bugs the tests found
 
-On the 1,000,000-row file, in focus mode, ONE ↓ press in the middle of the file jumped **back 89 rows**. A probe printed the scrollbar before and after:
+**1. The browser moved the scrollbar by itself.** On the 1,000,000-row file, in focus mode, ONE ↓ press in the middle of the file jumped **back 89 rows**. A probe printed the scrollbar before and after:
 
 ```text
 down:   row = 500001.00    scrollTop = 2000468     <- the brain put it here
@@ -18992,13 +19015,26 @@ down:   row = 500001.00    scrollTop = 2000468     <- the brain put it here
 
 Nothing in the brain moved it. It was the browser's **scroll anchoring**: when content above what you're looking at changes size, the browser moves the scrollbar to "keep the same thing in place". The brain swaps rows in and out on every move, so the browser kept "helping". Outside focus mode it never happened. Fix: one line, `overflow-anchor: none`, for the focus window. The brain already puts every row exactly.
 
+**2. Two functions with the same name.** After the pill went in, EVERY file opened to "This file only has a header row". No error anywhere. The pill had a helper called `showMatches()` (show ◀ ▶ while searching). But the brain ALREADY had a `showMatches(wanted, list)`: the one that draws the rows! In one script, two `function showMatches` means the LAST one wins, silently, everywhere. So opening a file called the pill's little helper instead of drawing anything. Renamed to `showPillMatches()`.
+
+> 🧠 Before naming a new function in `scriptI.js` (5,000+ lines), search for the name first: `grep -n "function yourName(" DIRECTORY/*.js`. The test pages share the same trap: a test helper called `loadFile` replaced the brain's own `loadFile`, and the file never opened.
+
 ### ✅ Test it
 
-1. **The page:** `sh tools/run-tests.sh realfile-focus` → **54 / 54** (the bars fold away, the window size in whole rows, the borrowed controls going home, the peek bar, the walk, Drag mode in focus mode, Escape's order, Expand + focus, and the 1,000,000-row file `big-1m.csv`: End builds the very last row, ↓ and PageDown are exact in the middle, 60 held ↓ land exactly 60 rows on). `realfile-drag` 37, `realfile-view` 42, `realfile-ask` 58: still pass. (`realfile-views` fails the same way it did BEFORE this part: `views.js:88`.)
-2. Open any CSV. Press **F**. The title, file bar, search bar and buttons fold away, and the sheet fills the screen, wide AND tall.
-3. Press ↓ a few times, then PageDown, End, Home. Each lands on a whole row.
-4. Move the mouse to the very top edge: the bar slides down. Move away: it slides back up. Press **/**: it comes down, ready to type. Search something, then ▶: the match lands in the MIDDLE of the big window.
-5. In the bar, turn on **Drag mode** and drag the sheet. Press **Esc**: out of focus mode, and every control is back in its own place.
+1. **The page:** `sh tools/run-tests.sh realfile-focus` → **64 / 64**:
+   - the bars fold away, and the info strip is thin and has the file's name
+   - the window: right under the strip, 8px from each side, whole rows
+   - the borrowed controls go home
+   - the pill: it rests after 2 s, wakes on a mouse move, sits inside the sheet, small; the search bar slides out and stays while you type; ◀ ▶ only while searching; the Row # box goes to row 1000
+   - the walk, Drag mode in focus mode, Escape's order, Expand + focus
+   - the 1,000,000-row file `big-1m.csv`: End builds the very last row, ↓ and PageDown are exact in the middle, and 60 held ↓ land exactly 60 rows on
+
+   `realfile-drag` 37, `realfile-view` 42, `realfile-ask` 58 and `realfile-deadends` 51 still pass. (`realfile-views` fails the same way it did BEFORE this part: `views.js:88`.)
+2. Open any CSV. Press **F**. The title, file bar, search bar and buttons fold away. The sheet fills the screen, wide AND tall, with the file name and "Rows ..." in a thin line on top.
+3. Leave the mouse still: the pill fades. Move it: the pill floats up at the bottom.
+4. Press ↓ a few times, then PageDown, End, Home. Each lands on a whole row.
+5. Press **/** (or click 🔍): the search bar slides out. Search something, then ▶: the match lands in the MIDDLE of the big window. Click **#**, type `1000`, Enter.
+6. Click **✥** (Drag mode) and drag the sheet. Press **Esc**: out of focus mode, and every control is back in its own place.
 
 <br>
 
