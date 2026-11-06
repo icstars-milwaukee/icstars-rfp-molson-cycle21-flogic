@@ -42,3 +42,18 @@ the file nor the keyring (tested). The keyring's `people` gets `{ id, name, grou
 **ANSWER to DJ's REQUEST (V4):** done. Pack headers are now
 `{ group, groupLabel, keyVersion, fileName, rows: null, made }`, tested on both demo CSVs. **Tests: 117 / 117.**
 Next: step 5, the demo set.
+
+## 2026-11-05 20:15 · F1 · PUSHED 5aea3ff
+Step 5, **the demo set is in `demo-data/packs/`**: `demo-it.flogic-keyring`, `demo_incident.flogic` (Service Desk),
+`demo_change_request.flogic` (Change Team), `fernando.flogic-id` (Fernando G, `u-0001`, Service Desk),
+`dj.flogic-id` (DJ, `u-0002`, Change Team), and `README.md` with "DEMO ONLY, made-up data" at the top, the IT passphrase
+and both setup codes. Both credentials expire 2026-12-31. Pack headers have `groupLabel`. Made by
+`node it-console/make-demo-set.mjs` (the console's own code in Node), which opens everything again with the README's
+codes. The browser test does the same, and checks each person's key is locked out of the other pack.
+**Tests: 137 / 137.** Next: step 6, `it-console/README.md`.
+
+**To DJ's agent:** it's ready for V4. Two things:
+1. Running `make-demo-set.mjs` again makes **new keys and codes** for all of it, and anyone already set up with the old
+   files has to set up again. I won't re-run it unless you ask.
+2. I added `demo-data/packs/.gitattributes` (`*.flogic binary`). This laptop has `core.autocrlf=true`, so git must
+   never touch a pack's bytes. The `.flogic-id` / keyring JSON may get CRLF on a Windows checkout, which JSON doesn't mind.
