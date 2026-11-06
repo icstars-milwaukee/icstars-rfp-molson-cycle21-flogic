@@ -160,8 +160,8 @@ async function testPackLogic() {
     const p = await ITConsole.packFile(s, 'demo_incident.csv', csv, 'service-desk', '2026-11-05');
     check('Pack: named demo_incident.flogic', p.name === 'demo_incident.flogic', p.name);
     const h = VaultCore.readPackHeader(p.bytes).header;
-    check('Pack: readPackHeader shows the right group, file name, rows: null and the date',
-          h.group === 'service-desk' && h.keyVersion === 1 && h.fileName === 'demo_incident.csv' && h.rows === null && h.made === '2026-11-05',
+    check('Pack: readPackHeader shows the right group (id and label), file name, rows: null and the date',
+          h.group === 'service-desk' && h.groupLabel === 'Service Desk' && h.keyVersion === 1 && h.fileName === 'demo_incident.csv' && h.rows === null && h.made === '2026-11-05',
           JSON.stringify(h));
     check('Pack: openPack with the group key gives the exact same bytes',
           sameBytes(await VaultCore.openPack(p.bytes, s.keys['service-desk'].key), csv));
@@ -442,7 +442,7 @@ async function testPackPage() {
     check('Page: Pack downloads demo_change_request.flogic', saved[0] && saved[0].name === 'demo_change_request.flogic', saved[0] && saved[0].name);
     const pack = new Uint8Array(await (await saved[0].blob).arrayBuffer());
     check('Page: the pack is for Change Team, and opens to the same bytes',
-          VaultCore.readPackHeader(pack).header.group === 'change-team' &&
+          VaultCore.readPackHeader(pack).header.group === 'change-team' && VaultCore.readPackHeader(pack).header.groupLabel === 'Change Team' &&
           sameBytes(await VaultCore.openPack(pack, ring.keys['change-team'].key), csv));
     check('Page: it shows the size before and after', /\(\d+(\.\d)? (KB|MB)\) into demo_change_request\.flogic \(\d+(\.\d)? (KB|MB)\) for Change Team/
           .test($('pack-msg').textContent), $('pack-msg').textContent);

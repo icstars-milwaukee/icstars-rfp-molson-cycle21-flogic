@@ -219,7 +219,7 @@ const ITConsole = (function () {
     // ------------------------------------------------------
     //    3.  PACK A FILE      incident.csv   ->   incident.flogic   (locked with one group's key)
     //
-    //    The header  (readable without the key):   { group, keyVersion, fileName, rows: null, made }
+    //    The header  (readable without the key):   { group, groupLabel, keyVersion, fileName, rows: null, made }
     //    rows: null,  because the console has no reader.   The app counts the rows after it opens the pack.
     // ------------------------------------------------------
 
@@ -245,7 +245,9 @@ const ITConsole = (function () {
         if (problem) throw fail('bad-pack', problem);
         const g = s.groups.find(function (x) { return x.group === groupId; });
         if (!g) throw fail('bad-pack', 'Pick a group first.');
-        const header = { group: g.group, keyVersion: g.keyVersion, fileName: String(fileName), rows: null, made: made || today() };
+        //  groupLabel:  so the app can say "This pack is for Change Team"  before it has a key   (DJ's V4 request)
+        const header = { group: g.group, groupLabel: g.label, keyVersion: g.keyVersion, fileName: String(fileName),
+                         rows: null, made: made || today() };
         const pack = await VaultCore.makePack(bytes, header, s.keys[g.group].key);
         return { bytes: pack, name: packName(fileName), header: header };
     }
