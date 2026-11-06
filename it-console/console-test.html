@@ -106,6 +106,50 @@ async function testKeyringLogic() {
 }
 
 
+async function testGroupLogic() {
+    check('Slug: "Service Desk" -> service-desk', ITConsole.slugify('Service Desk') === 'service-desk');
+    check('Slug: "  Change  Team!! " -> change-team', ITConsole.slugify('  Change  Team!! ') === 'change-team');
+    check('Slug: "Café / Ops #2" -> cafe-ops-2', ITConsole.slugify('Café / Ops #2') === 'cafe-ops-2', ITConsole.slugify('Café / Ops #2'));
+    check('Id rule: a-z, 0-9 and dashes only',
+          ITConsole.groupIdProblem('service-desk') === '' && ITConsole.groupIdProblem('Service-Desk') !== '' &&
+          ITConsole.groupIdProblem('a|b') !== '' && ITConsole.groupIdProblem('a b') !== '' && ITConsole.groupIdProblem('') !== '' &&
+          ITConsole.groupIdProblem('-x') !== '' && ITConsole.groupIdProblem('x-') !== '' && ITConsole.groupIdProblem('~check') !== '');
+    check('Rules: export yes/no, auto-lock 1–240 whole minutes',
+          ITConsole.rulesProblem({ export: true, autoLockMin: 15 }) === '' && ITConsole.rulesProblem({ export: false, autoLockMin: 240 }) === '' &&
+          ITConsole.rulesProblem({ export: true, autoLockMin: 0 }) !== '' && ITConsole.rulesProblem({ export: true, autoLockMin: 241 }) !== '' &&
+          ITConsole.rulesProblem({ export: true, autoLockMin: 1.5 }) !== '' && ITConsole.rulesProblem({ export: 'yes', autoLockMin: 15 }) !== '');
+
+    const s = await ITConsole.newKeyring(PASS);
+    const sd = await ITConsole.addGroup(s, { label: ' Service Desk ', group: 'service-desk', rules: { export: true, autoLockMin: 15 } });
+    check('Make a group: the label is trimmed, keyVersion 1, a new key', sd.label === 'Service Desk' && sd.keyVersion === 1 &&
+          s.keys['service-desk'] && s.keys['service-desk'].key.algorithm.name === 'AES-GCM' && s.keys['service-desk'].key.extractable === true);
+    check('No duplicate ids', await throwsCode(ITConsole.addGroup(s, { label: 'Another', group: 'service-desk', rules: { export: true, autoLockMin: 5 } }), 'bad-group'));
+    check('A bad id is refused', await throwsCode(ITConsole.addGroup(s, { label: 'X', group: 'Bad Id', rules: { export: true, autoLockMin: 5 } }), 'bad-group'));
+    check('Bad rules are refused', await throwsCode(ITConsole.addGroup(s, { label: 'X', group: 'x', rules: { export: true, autoLockMin: 999 } }), 'bad-group'));
+    check('Nothing is added when refused', s.groups.length === 1 && Object.keys(s.keys).length === 1);
+
+    const ct = await ITConsole.addGroup(s, { label: 'Change Team', group: 'change-team', rules: { export: false, autoLockMin: 10 } });
+    const rawBefore = new Uint8Array(await crypto.subtle.exportKey('raw', s.keys['change-team'].key));
+    ITConsole.editGroup(s, 'change-team', { label: 'Change Team (CAB)', rules: { export: true, autoLockMin: 30 } });
+    const rawAfter = new Uint8Array(await crypto.subtle.exportKey('raw', s.keys['change-team'].key));
+    check('Edit a group: the label and rules change, the id and key don\'t',
+          ct.label === 'Change Team (CAB)' && ct.rules.export === true && ct.rules.autoLockMin === 30 && ct.group === 'change-team' &&
+          sameBytes(rawBefore, rawAfter));
+    check('Edit: bad rules are refused', (function () {
+        try { ITConsole.editGroup(s, 'change-team', { label: 'x', rules: { export: true, autoLockMin: 0 } }); return false; }
+        catch (e) { return e.code === 'bad-group' && ct.rules.autoLockMin === 30; }
+    })());
+
+    const back = await ITConsole.openKeyring(await ITConsole.keyringText(s), PASS);
+    check('Groups survive Save and Open (with their rules and keys)',
+          back.groups.length === 2 && back.groups[1].label === 'Change Team (CAB)' && back.groups[1].rules.autoLockMin === 30 &&
+          sameBytes(rawAfter, new Uint8Array(await crypto.subtle.exportKey('raw', back.keys['change-team'].key))));
+
+    const bad = JSON.parse(await ITConsole.keyringText(s)); bad.groups[0].rules.autoLockMin = 'lots';
+    check('A keyring with a broken group: refused as damaged', await throwsCode(ITConsole.openKeyring(JSON.stringify(bad), PASS), 'not-a-keyring'));
+}
+
+
 // ==========================================================
 //    PART B:  THE PAGE
 // ==========================================================
@@ -202,6 +246,78 @@ async function testKeyringPage() {
 }
 
 
+//  Opens a fresh,  empty keyring in the page.
+async function newPageKeyring() {
+    if (isOpen()) { $('lock-btn').click(); if (isOpen()) $('lock-btn').click(); }
+    type('new-pass', PASS); type('new-pass2', PASS);
+    $('new-btn').click();
+    await until(isOpen);
+}
+
+async function testGroupPage() {
+    await newPageKeyring();
+    check('Page: a new keyring shows "No groups yet"', visible('group-none') && $('group-list').children.length === 0);
+
+    type('g-label', 'Service Desk');
+    check('Page: the id fills in from the name', $('g-id').value === 'service-desk', $('g-id').value);
+    check('Page: export starts at No, auto-lock at 15', $('g-export').checked === false && $('g-autolock').value === '15');
+    $('g-export').checked = true;
+    $('g-add').click();
+    await until(function () { return $('group-list').children.length === 1; });
+    const row = $('group-list').children[0];
+    check('Page: Make group adds a row (name, id, export, auto-lock)', row && /Service Desk/.test(row.textContent) &&
+          /service-desk/.test(row.textContent) && /Yes/.test(row.textContent) && /15 min/.test(row.textContent), row && row.textContent);
+    check('Page: ...and the form empties', $('g-label').value === '' && $('g-id').value === '');
+
+    type('g-label', 'Service Desk');
+    $('g-add').click();
+    await until(function () { return /already/.test($('group-msg').textContent); });
+    check('Page: a duplicate id is refused', /already/.test($('group-msg').textContent) && $('group-list').children.length === 1);
+
+    type('g-label', 'Change Team');
+    type('g-id', 'Change Team');
+    $('g-add').click();
+    check('Page: a hand-typed bad id is refused', /small letters/.test($('group-msg').textContent) && $('group-list').children.length === 1,
+          $('group-msg').textContent);
+    type('g-id', '');
+    type('g-label', '<img src=x onerror="parent.__xss=1">');
+    $('g-add').click();
+    await until(function () { return $('group-list').children.length === 2; });
+    check('Page: a name with HTML in it shows as text, not as HTML',
+          !$('group-list').querySelector('img') && /<img/.test($('group-list').textContent) && !window.__xss);
+
+    //  Edit the first one
+    $('group-list').querySelector('button[data-group="service-desk"]').click();
+    check('Page: Edit fills the form and locks the id', $('g-label').value === 'Service Desk' && $('g-id').disabled && $('g-export').checked &&
+          visible('g-edit-note'));
+    type('g-label', 'Service Desk L1');
+    type('g-autolock', '300');
+    $('g-add').click();
+    check('Page: Edit refuses auto-lock over 240', /1 to 240/.test($('group-msg').textContent), $('group-msg').textContent);
+    type('g-autolock', '20');
+    $('g-add').click();
+    const row1 = $('group-list').children[0];
+    check('Page: Edit changes the name and rules, and keeps the id', /Service Desk L1/.test(row1.textContent) &&
+          /service-desk/.test(row1.textContent) && /20 min/.test(row1.textContent) && !$('g-id').disabled && visible('unsaved'));
+
+    //  Save,  Lock,  Open:  the groups are back
+    saved = [];
+    $('save-btn').click();
+    await until(function () { return saved.length === 1; });
+    const text = await (await saved[0].blob).text();
+    $('lock-btn').click();
+    pick('open-file', 'it.flogic-keyring', text);
+    type('open-pass', PASS);
+    $('open-btn').click();
+    await until(isOpen);
+    check('Page: the groups come back after Save, Lock and Open', $('group-list').children.length === 2 &&
+          /Service Desk L1/.test($('group-list').textContent));
+    $('lock-btn').click();
+    check('Page: Lock empties the groups list (not just hides it)', !isOpen() && $('group-list').children.length === 0 &&
+          $('g-label').value === '');
+}
+
+
 // ==========================================================
 //    LAST:  THE RULES FOR THIS PAGE
 // ==========================================================
@@ -224,7 +340,7 @@ async function testRules() {
 
 
 (async function run() {
-    const parts = [testKeyringLogic, testKeyringPage, testRules];
+    const parts = [testKeyringLogic, testGroupLogic, testKeyringPage, testGroupPage, testRules];
     for (const part of parts) {
         try { await part(); }
         catch (e) { check(part.name + ' finished', false, e.stack || e.message || e); }

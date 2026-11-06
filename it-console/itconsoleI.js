@@ -95,6 +95,16 @@ const ITConsole = (function () {
             !ids.every(function (id) { return typeof id === 'string' && lockedIds.indexOf(id) >= 0; })) {
             throw fail('not-a-keyring', 'This keyring file is damaged (its groups and keys don\'t match).');
         }
+        for (const g of k.groups) {
+            if (groupIdProblem(g.group) || typeof g.label !== 'string' || !Number.isInteger(g.keyVersion) || rulesProblem(g.rules)) {
+                throw fail('not-a-keyring', 'This keyring file is damaged (a group in it isn\'t right).');
+            }
+        }
+        for (const p of k.people) {
+            if (!p || typeof p.id !== 'string' || typeof p.name !== 'string' || !Array.isArray(p.groups)) {
+                throw fail('not-a-keyring', 'This keyring file is damaged (a person in it isn\'t right).');
+            }
+        }
         return k;
     }
 
@@ -112,8 +122,7 @@ const ITConsole = (function () {
         }
         return {
             groups: k.groups.map(function (g) {
-                return { group: g.group, label: String(g.label), keyVersion: g.keyVersion,
-                         rules: { export: g.rules.export === true, autoLockMin: g.rules.autoLockMin } };
+                return { group: g.group, label: g.label, keyVersion: g.keyVersion, rules: cleanRules(g.rules) };
             }),
             people: k.people.map(function (p) {
                 return { id: String(p.id), name: String(p.name), groups: p.groups.map(String), expires: p.expires, made: p.made };
@@ -132,6 +141,78 @@ const ITConsole = (function () {
         keys.push({ group: CHECK_ID, keyVersion: 1, key: s.check });
         const locked = await VaultCore.lockKeys(KEYRING_PERSON, keys, s.passphrase);
         return JSON.stringify({ flogic: 'keyring', v: KEYRING_VERSION, groups: s.groups, people: s.people, locked: locked }, null, 2);
+    }
+
+
+    // ------------------------------------------------------
+    //    2.  GROUPS
+    //
+    //    { group: 'service-desk',  label: 'Service Desk',  keyVersion: 1,
+    //      rules: { export: true / false,  autoLockMin: 1–240  (the most idle minutes before the app locks) } }
+    //
+    //    The label and the rules can change.   The id and the key never do.   (Key rotation:  "Nice",  not now.)
+    // ------------------------------------------------------
+
+    const ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;     //  a-z,  0-9,  dashes  (not at the ends)
+    const ID_MAX = 40;
+    const LABEL_MAX = 60;
+    const AUTOLOCK_DEFAULT = 15;
+
+    //  'Service Desk'  ->  'service-desk'
+    function slugify(label) {
+        return String(label).toLowerCase()
+            .normalize('NFKD').replace(/[̀-ͯ]/g, '')       //  é -> e
+            .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+            .slice(0, ID_MAX).replace(/-+$/, '');
+    }
+
+    function labelProblem(label) {
+        const l = String(label).trim();
+        if (!l) return 'Give the group a name.';
+        if (l.length > LABEL_MAX) return 'Keep the name under ' + LABEL_MAX + ' characters.';
+        return '';
+    }
+
+    function groupIdProblem(id, s) {
+        const g = String(id);
+        if (!g) return 'Give the group an id.';
+        if (g.length > ID_MAX) return 'Keep the id under ' + ID_MAX + ' characters.';
+        if (!ID_PATTERN.test(g)) return 'The id can only have small letters, numbers and dashes (not at the start or end).';
+        if (s && s.groups.some(function (x) { return x.group === g; })) return 'There\'s already a group with the id "' + g + '".';
+        return '';
+    }
+
+    function rulesProblem(rules) {
+        if (!rules || typeof rules.export !== 'boolean') return 'Say whether this group can export.';
+        const m = rules.autoLockMin;
+        if (!Number.isInteger(m) || m < 1 || m > 240) return 'Auto-lock has to be a whole number of minutes, 1 to 240.';
+        return '';
+    }
+
+    function cleanRules(rules) { return { export: rules.export, autoLockMin: rules.autoLockMin }; }
+
+    async function addGroup(s, g) {
+        const label = String(g.label).trim();
+        const problem = labelProblem(label) || groupIdProblem(g.group, s) || rulesProblem(g.rules);
+        if (problem) throw fail('bad-group', problem);
+        const group = { group: g.group, label: label, keyVersion: 1, rules: cleanRules(g.rules) };
+        s.keys[group.group] = { keyVersion: 1, key: await VaultCore.newGroupKey() };
+        s.groups.push(group);
+        s.unsaved = true;
+        return group;
+    }
+
+    //  Only the label and the rules.
+    function editGroup(s, id, change) {
+        const group = s.groups.find(function (x) { return x.group === id; });
+        if (!group) throw fail('bad-group', 'There\'s no group "' + id + '".');
+        const label = String(change.label).trim();
+        const problem = labelProblem(label) || rulesProblem(change.rules);
+        if (problem) throw fail('bad-group', problem);
+        group.label = label;
+        group.rules = cleanRules(change.rules);
+        s.unsaved = true;
+        return group;
     }
 
 
@@ -181,6 +262,14 @@ const ITConsole = (function () {
         refresh();
     }
 
+    //  A new element,  with its text set the safe way.
+    function el(tag, text, className) {
+        const e = document.createElement(tag);
+        if (text !== undefined && text !== null) e.textContent = String(text);
+        if (className) e.className = className;
+        return e;
+    }
+
     function refresh() {
         const open = session !== null;
         show('start', !open);
@@ -190,6 +279,108 @@ const ITConsole = (function () {
         $('unsaved').hidden = !session.unsaved;
         $('keyring-counts').textContent = session.groups.length + (session.groups.length === 1 ? ' group' : ' groups') + ' · ' +
                                           session.people.length + (session.people.length === 1 ? ' person' : ' people');
+        drawGroups();
+    }
+
+
+    // ------------------------------------------------------
+    //    2.  GROUPS
+    // ------------------------------------------------------
+
+    let editingId = null;           //  the group being edited  (null = making a new one)
+    let idTouched = false;          //  IT typed the id by hand:  stop filling it in from the name
+
+    function drawGroups() {
+        const body = $('group-list');
+        body.replaceChildren();
+        for (const g of session.groups) {
+            const tr = el('tr');
+            tr.appendChild(el('td', g.label));
+            tr.appendChild(el('td', g.group, 'mono'));
+            const ex = el('td');
+            ex.appendChild(el('span', g.rules.export ? 'Yes' : 'No', g.rules.export ? 'yes' : 'no'));
+            tr.appendChild(ex);
+            tr.appendChild(el('td', g.rules.autoLockMin + ' min'));
+            const td = el('td');
+            const edit = el('button', 'Edit', 'small');
+            edit.dataset.group = g.group;
+            edit.addEventListener('click', function () { startEdit(g.group); });
+            td.appendChild(edit);
+            tr.appendChild(td);
+            body.appendChild(tr);
+        }
+        $('group-none').hidden = session.groups.length > 0;
+    }
+
+    function readGroupForm() {
+        return {
+            label: $('g-label').value,
+            group: $('g-id').value.trim(),
+            rules: { export: $('g-export').checked, autoLockMin: Number($('g-autolock').value) },
+        };
+    }
+
+    function resetGroupForm() {
+        editingId = null;
+        idTouched = false;
+        $('g-label').value = '';
+        $('g-id').value = '';
+        $('g-id').disabled = false;
+        $('g-export').checked = false;      //  the cautious default:  no export,  until IT says so
+        $('g-autolock').value = String(AUTOLOCK_DEFAULT);
+        $('group-form-title').textContent = 'Make a group';
+        $('g-add').textContent = 'Make group';
+        $('g-cancel').hidden = true;
+        $('g-edit-note').hidden = true;
+        $('g-id-hint').textContent = 'Small letters, numbers and dashes. It can\'t change later.';
+    }
+
+    function startEdit(id) {
+        const g = session.groups.find(function (x) { return x.group === id; });
+        if (!g) return;
+        editingId = id;
+        $('g-label').value = g.label;
+        $('g-id').value = g.group;
+        $('g-id').disabled = true;
+        $('g-export').checked = g.rules.export;
+        $('g-autolock').value = String(g.rules.autoLockMin);
+        $('group-form-title').textContent = 'Edit "' + g.label + '"';
+        $('g-add').textContent = 'Save changes';
+        $('g-cancel').hidden = false;
+        $('g-edit-note').hidden = false;
+        $('g-id-hint').textContent = 'A group\'s id never changes.';
+        say('group-msg', '');
+        $('g-label').focus();
+    }
+
+    async function onGroupSave() {
+        const form = readGroupForm();
+        if (editingId) {
+            try {
+                const g = editGroup(session, editingId, form);
+                resetGroupForm();
+                markUnsaved();
+                say('group-msg', 'Changed "' + g.label + '". Save the keyring to keep it.', 'good');
+            } catch (e) { say('group-msg', e.message, 'bad'); }
+            return;
+        }
+        //  Say what's wrong right away  (addGroup checks again).
+        const problem = labelProblem(form.label) || groupIdProblem(form.group, session) || rulesProblem(form.rules);
+        if (problem) { say('group-msg', problem, 'bad'); return; }
+        await busy($('g-add'), 'group-msg', async function () {
+            const g = await addGroup(session, form);
+            resetGroupForm();
+            markUnsaved();
+            say('group-msg', 'Made "' + g.label + '" (' + g.group + '), with a new key. Save the keyring to keep it.', 'good');
+        });
+    }
+
+    function onLabelInput() {
+        if (!editingId && !idTouched) $('g-id').value = slugify($('g-label').value);
+    }
+
+    function onIdInput() {
+        idTouched = $('g-id').value !== '';
     }
 
 
@@ -206,6 +397,8 @@ const ITConsole = (function () {
         $('new-pass2').value = '';
         say('start-msg', '');
         say('keyring-msg', '');
+        resetGroupForm();
+        say('group-msg', '');
         refresh();
     }
 
@@ -253,6 +446,9 @@ const ITConsole = (function () {
         keyringName = 'it.flogic-keyring';
         $('open-file').value = '';
         say('keyring-msg', '');
+        resetGroupForm();
+        say('group-msg', '');
+        $('group-list').replaceChildren();      //  hidden isn't enough:  take the names off the page
         refresh();
         say('start-msg', 'Locked. The keys are gone from this page.', 'good');
     }
@@ -271,6 +467,11 @@ const ITConsole = (function () {
         $('new-btn').addEventListener('click', onNew);
         $('save-btn').addEventListener('click', onSave);
         $('lock-btn').addEventListener('click', onLock);
+        $('g-add').addEventListener('click', onGroupSave);
+        $('g-cancel').addEventListener('click', function () { resetGroupForm(); say('group-msg', ''); });
+        $('g-label').addEventListener('input', onLabelInput);
+        $('g-id').addEventListener('input', onIdInput);
+        resetGroupForm();
         window.addEventListener('beforeunload', function (e) {
             if (session && session.unsaved) { e.preventDefault(); e.returnValue = ''; }
         });
@@ -287,6 +488,7 @@ const ITConsole = (function () {
         KEYRING_PERSON: KEYRING_PERSON,
         today: today,
         newKeyring: newKeyring, readKeyring: readKeyring, openKeyring: openKeyring, keyringText: keyringText,
+        slugify: slugify, groupIdProblem: groupIdProblem, rulesProblem: rulesProblem, addGroup: addGroup, editGroup: editGroup,
     });
 
 })();
