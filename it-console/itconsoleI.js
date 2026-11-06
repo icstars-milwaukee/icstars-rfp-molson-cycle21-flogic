@@ -216,6 +216,48 @@ const ITConsole = (function () {
     }
 
 
+    // ------------------------------------------------------
+    //    3.  PACK A FILE      incident.csv   ->   incident.flogic   (locked with one group's key)
+    //
+    //    The header  (readable without the key):   { group, keyVersion, fileName, rows: null, made }
+    //    rows: null,  because the console has no reader.   The app counts the rows after it opens the pack.
+    // ------------------------------------------------------
+
+    const PACK_TYPES = ['.csv', '.xlsx', '.sql'];
+
+    function extension(fileName) {
+        const m = /\.[^.\\/]+$/.exec(String(fileName));
+        return m ? m[0].toLowerCase() : '';
+    }
+
+    function packProblem(fileName) {
+        if (PACK_TYPES.indexOf(extension(fileName)) < 0) return 'Only .csv, .xlsx and .sql files can be packed.';
+        return '';
+    }
+
+    //  'demo_incident.csv'  ->  'demo_incident.flogic'
+    function packName(fileName) {
+        return String(fileName).replace(/\.[^.\\/]+$/, '') + '.flogic';
+    }
+
+    async function packFile(s, fileName, bytes, groupId, made) {
+        const problem = packProblem(fileName);
+        if (problem) throw fail('bad-pack', problem);
+        const g = s.groups.find(function (x) { return x.group === groupId; });
+        if (!g) throw fail('bad-pack', 'Pick a group first.');
+        const header = { group: g.group, keyVersion: g.keyVersion, fileName: String(fileName), rows: null, made: made || today() };
+        const pack = await VaultCore.makePack(bytes, header, s.keys[g.group].key);
+        return { bytes: pack, name: packName(fileName), header: header };
+    }
+
+    //  1627725  ->  '1.6 MB'
+    function size(n) {
+        if (n < 1024) return n + ' bytes';
+        if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+        return (n / 1024 / 1024).toFixed(1) + ' MB';
+    }
+
+
     // ======================================================
     //    THE PAGE
     //
@@ -280,6 +322,48 @@ const ITConsole = (function () {
         $('keyring-counts').textContent = session.groups.length + (session.groups.length === 1 ? ' group' : ' groups') + ' · ' +
                                           session.people.length + (session.people.length === 1 ? ' person' : ' people');
         drawGroups();
+        drawGroupChoices();
+    }
+
+
+    // ------------------------------------------------------
+    //    3.  PACK A FILE
+    // ------------------------------------------------------
+
+    //  The group list for "Pack":  rebuilt when the groups change,  keeping the choice.
+    function drawGroupChoices() {
+        const select = $('p-group');
+        const was = select.value;
+        select.replaceChildren();
+        if (session.groups.length === 0) {
+            select.appendChild(el('option', 'Make a group first'));
+            select.disabled = true;
+            $('p-btn').disabled = true;
+            return;
+        }
+        for (const g of session.groups) {
+            const o = el('option', g.label + ' (' + g.group + ')');
+            o.value = g.group;
+            select.appendChild(o);
+        }
+        if (session.groups.some(function (g) { return g.group === was; })) select.value = was;
+        select.disabled = false;
+        $('p-btn').disabled = false;
+    }
+
+    async function onPack() {
+        const file = $('p-file').files[0];
+        if (!file) { say('pack-msg', 'Pick a data file first.', 'bad'); return; }
+        const problem = packProblem(file.name);
+        if (problem) { say('pack-msg', problem, 'bad'); return; }
+        const groupId = $('p-group').value;
+        await busy($('p-btn'), 'pack-msg', async function () {
+            const p = await packFile(session, file.name, await file.arrayBuffer(), groupId);
+            download(p.name, new Blob([p.bytes], { type: 'application/octet-stream' }));
+            const g = session.groups.find(function (x) { return x.group === groupId; });
+            say('pack-msg', 'Packed ' + file.name + ' (' + size(file.size) + ') into ' + p.name + ' (' + size(p.bytes.length) +
+                ') for ' + g.label + '.', 'good');
+        });
     }
 
 
@@ -399,6 +483,8 @@ const ITConsole = (function () {
         say('keyring-msg', '');
         resetGroupForm();
         say('group-msg', '');
+        $('p-file').value = '';
+        say('pack-msg', '');
         refresh();
     }
 
@@ -449,6 +535,9 @@ const ITConsole = (function () {
         resetGroupForm();
         say('group-msg', '');
         $('group-list').replaceChildren();      //  hidden isn't enough:  take the names off the page
+        $('p-group').replaceChildren();
+        $('p-file').value = '';
+        say('pack-msg', '');
         refresh();
         say('start-msg', 'Locked. The keys are gone from this page.', 'good');
     }
@@ -471,6 +560,8 @@ const ITConsole = (function () {
         $('g-cancel').addEventListener('click', function () { resetGroupForm(); say('group-msg', ''); });
         $('g-label').addEventListener('input', onLabelInput);
         $('g-id').addEventListener('input', onIdInput);
+        $('p-btn').addEventListener('click', onPack);
+        $('p-file').addEventListener('change', function () { say('pack-msg', ''); });
         resetGroupForm();
         window.addEventListener('beforeunload', function (e) {
             if (session && session.unsaved) { e.preventDefault(); e.returnValue = ''; }
@@ -489,6 +580,7 @@ const ITConsole = (function () {
         today: today,
         newKeyring: newKeyring, readKeyring: readKeyring, openKeyring: openKeyring, keyringText: keyringText,
         slugify: slugify, groupIdProblem: groupIdProblem, rulesProblem: rulesProblem, addGroup: addGroup, editGroup: editGroup,
+        packProblem: packProblem, packName: packName, packFile: packFile,
     });
 
 })();

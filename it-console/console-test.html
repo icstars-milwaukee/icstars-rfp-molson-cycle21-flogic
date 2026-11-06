@@ -150,6 +150,36 @@ async function testGroupLogic() {
 }
 
 
+async function testPackLogic() {
+    const s = await ITConsole.newKeyring(PASS);
+    await ITConsole.addGroup(s, { label: 'Service Desk', group: 'service-desk', rules: { export: true, autoLockMin: 15 } });
+    await ITConsole.addGroup(s, { label: 'Change Team', group: 'change-team', rules: { export: false, autoLockMin: 10 } });
+
+    const csv = await readBytes('../demo-data/demo_incident.csv');
+    check('The demo CSV is there to pack', csv.length > 100000, csv.length);
+    const p = await ITConsole.packFile(s, 'demo_incident.csv', csv, 'service-desk', '2026-11-05');
+    check('Pack: named demo_incident.flogic', p.name === 'demo_incident.flogic', p.name);
+    const h = VaultCore.readPackHeader(p.bytes).header;
+    check('Pack: readPackHeader shows the right group, file name, rows: null and the date',
+          h.group === 'service-desk' && h.keyVersion === 1 && h.fileName === 'demo_incident.csv' && h.rows === null && h.made === '2026-11-05',
+          JSON.stringify(h));
+    check('Pack: openPack with the group key gives the exact same bytes',
+          sameBytes(await VaultCore.openPack(p.bytes, s.keys['service-desk'].key), csv));
+    check('Pack: another group\'s key can\'t open it',
+          await throwsCode(VaultCore.openPack(p.bytes, s.keys['change-team'].key), 'locked-out'));
+    const text = new TextDecoder().decode(p.bytes);
+    check('Pack: the data isn\'t readable in the file', text.indexOf('INC1000000') < 0 && text.indexOf('Short description') < 0);
+
+    check('Pack: today\'s date when none is given', (await ITConsole.packFile(s, 'a.sql', new Uint8Array([1, 2]), 'change-team')).header.made === ITConsole.today());
+    check('Pack: .CSV in capitals is fine, .txt and no extension aren\'t',
+          ITConsole.packProblem('X.CSV') === '' && ITConsole.packProblem('a.xlsx') === '' && ITConsole.packProblem('notes.txt') !== '' &&
+          ITConsole.packProblem('csv') !== '');
+    check('Pack: a .txt file is refused', await throwsCode(ITConsole.packFile(s, 'notes.txt', new Uint8Array(3), 'service-desk'), 'bad-pack'));
+    check('Pack: an unknown group is refused', await throwsCode(ITConsole.packFile(s, 'a.csv', new Uint8Array(3), 'nobody'), 'bad-pack'));
+    check('Pack name: "my.data.v2.xlsx" -> my.data.v2.flogic', ITConsole.packName('my.data.v2.xlsx') === 'my.data.v2.flogic');
+}
+
+
 // ==========================================================
 //    PART B:  THE PAGE
 // ==========================================================
@@ -318,6 +348,45 @@ async function testGroupPage() {
 }
 
 
+async function testPackPage() {
+    await newPageKeyring();
+    check('Page: Pack is off until there\'s a group', $('p-btn').disabled && $('p-group').disabled);
+    type('g-label', 'Service Desk'); $('g-export').checked = true; $('g-add').click();
+    await until(function () { return $('group-list').children.length === 1; });
+    type('g-label', 'Change Team'); $('g-add').click();
+    await until(function () { return $('group-list').children.length === 2; });
+    check('Page: the Pack group list has both groups', $('p-group').options.length === 2 && !$('p-btn').disabled);
+
+    saved = [];
+    $('save-btn').click();
+    await until(function () { return saved.length === 1; });
+    const ring = await ITConsole.openKeyring(await (await saved[0].blob).text(), PASS);
+
+    $('p-btn').click();
+    check('Page: Pack with no file says so', /Pick a data file/.test($('pack-msg').textContent));
+    pick('p-file', 'notes.txt', 'hello');
+    $('p-btn').click();
+    check('Page: Pack refuses a .txt file', /Only \.csv/.test($('pack-msg').textContent));
+
+    const csv = await readBytes('../demo-data/demo_change_request.csv');
+    pick('p-file', 'demo_change_request.csv', csv, 'text/csv');
+    $('p-group').value = 'change-team';
+    saved = [];
+    $('p-btn').click();
+    await until(function () { return saved.length === 1; });
+    check('Page: Pack downloads demo_change_request.flogic', saved[0] && saved[0].name === 'demo_change_request.flogic', saved[0] && saved[0].name);
+    const pack = new Uint8Array(await (await saved[0].blob).arrayBuffer());
+    check('Page: the pack is for Change Team, and opens to the same bytes',
+          VaultCore.readPackHeader(pack).header.group === 'change-team' &&
+          sameBytes(await VaultCore.openPack(pack, ring.keys['change-team'].key), csv));
+    check('Page: it shows the size before and after', /\(\d+(\.\d)? (KB|MB)\) into demo_change_request\.flogic \(\d+(\.\d)? (KB|MB)\) for Change Team/
+          .test($('pack-msg').textContent), $('pack-msg').textContent);
+    check('Page: packing doesn\'t mark the keyring unsaved', !visible('unsaved'));
+    $('lock-btn').click();
+    check('Page: Lock empties the Pack form', $('p-group').options.length === 0 && $('p-file').files.length === 0 && $('pack-msg').textContent === '');
+}
+
+
 // ==========================================================
 //    LAST:  THE RULES FOR THIS PAGE
 // ==========================================================
@@ -340,7 +409,7 @@ async function testRules() {
 
 
 (async function run() {
-    const parts = [testKeyringLogic, testGroupLogic, testKeyringPage, testGroupPage, testRules];
+    const parts = [testKeyringLogic, testGroupLogic, testPackLogic, testKeyringPage, testGroupPage, testPackPage, testRules];
     for (const part of parts) {
         try { await part(); }
         catch (e) { check(part.name + ' finished', false, e.stack || e.message || e); }

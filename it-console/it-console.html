@@ -83,6 +83,20 @@
             <button id="g-cancel" hidden>Cancel</button>
             <p id="group-msg" class="msg" role="status"></p>
         </section>
+
+
+        <!-- ======================  3.  PACK A FILE  ====================== -->
+        <section class="card" id="pack">
+            <h2>Pack a file</h2>
+            <p class="hint">Locks a data file for one group. Only that group's people can open the <code>.flogic</code> file it makes.
+               Anyone can still see which group it's for, and the file's name.</p>
+            <div class="form-row">
+                <label>Data file (.csv, .xlsx, .sql) <input type="file" id="p-file" accept=".csv,.xlsx,.sql"></label>
+                <label>For the group <select id="p-group"></select></label>
+            </div>
+            <button id="p-btn" class="primary">Pack</button>
+            <p id="pack-msg" class="msg" role="status"></p>
+        </section>
     </main>
 
 </div>
