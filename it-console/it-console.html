@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!--  No network,  no outside code:  only this folder's files and  ../DIRECTORY/vaultcoreI.js  -->
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+    <title>Flogic IT console</title>
+    <link rel="stylesheet" href="itconsoleI.css">
+</head>
+<body>
+<div id="it-app">
+
+    <header class="top">
+        <h1>Flogic IT console</h1>
+        <p class="sub">Plays Molson IT for the demo: access groups, data packs, and credential files.
+           Nothing is saved in this browser.</p>
+    </header>
+
+
+    <!-- ======================  THE FIRST SCREEN:  OPEN OR NEW  ====================== -->
+    <main id="start">
+        <section class="card">
+            <h2>Open keyring</h2>
+            <label>Keyring file <input type="file" id="open-file" accept=".flogic-keyring,application/json"></label>
+            <label>IT passphrase <input type="password" id="open-pass" autocomplete="off"></label>
+            <button id="open-btn" class="primary">Open keyring</button>
+        </section>
+
+        <section class="card">
+            <h2>New keyring</h2>
+            <p class="hint">At least 12 characters, or 4 words. There's no way to get it back if it's lost.</p>
+            <label>IT passphrase <input type="password" id="new-pass" autocomplete="new-password"></label>
+            <label>Type it again <input type="password" id="new-pass2" autocomplete="new-password"></label>
+            <button id="new-btn">New keyring</button>
+        </section>
+
+        <p id="start-msg" class="msg" role="status"></p>
+    </main>
+
+
+    <!-- ======================  THE KEYRING IS OPEN  ====================== -->
+    <main id="main" hidden>
+        <section class="bar">
+            <span class="keyring">🔓 <strong id="keyring-name"></strong>
+                <span id="keyring-counts" class="hint"></span>
+                <span id="unsaved" class="tag warn" hidden>unsaved changes</span></span>
+            <span class="actions">
+                <button id="save-btn" class="primary">Save keyring</button>
+                <button id="lock-btn">🔒 Lock</button>
+            </span>
+        </section>
+        <p id="keyring-msg" class="msg" role="status"></p>
+    </main>
+
+</div>
+
+<script src="../DIRECTORY/vaultcoreI.js"></script>
+<script src="itconsoleI.js"></script>
+</body>
+</html>

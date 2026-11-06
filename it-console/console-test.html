@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>IT console: tests</title>
+    <style>
+        body { font: 14px/1.5 system-ui, sans-serif; margin: 20px; }
+        .ok { color: #1d7a3a; } .fail { color: #b3261e; font-weight: 600; }
+        iframe { width: 1000px; height: 700px; border: 1px solid #ccc; }
+    </style>
+</head>
+<body>
+<!--
+    The IT console's tests.   Headless:   node it-console/run-console-test.mjs
+    (or open this page in Chrome started with  --allow-file-access-from-files,  and watch).
+
+    Part A calls  ITConsole  directly  (the logic).
+    Part B drives the real page,  it-console.html,  in the frame below:  typing,  clicking,  picking files.
+-->
+<h1>IT console: tests</h1>
+<p id="summary">Running…</p>
+<ol id="list"></ol>
+<iframe id="frame" title="the console under test"></iframe>
+
+<script src="../DIRECTORY/vaultcoreI.js"></script>
+<script src="itconsoleI.js"></script>
+<script>
+'use strict';
+
+window.__results = [];
+window.__done = false;
+
+function check(name, ok, detail) {
+    window.__results.push({ name: name, ok: !!ok, detail: ok ? '' : String(detail === undefined ? '' : detail) });
+    const li = document.createElement('li');
+    li.className = ok ? 'ok' : 'fail';
+    li.textContent = (ok ? 'ok   ' : 'FAIL ') + name + (ok || detail === undefined ? '' : '   (' + detail + ')');
+    document.getElementById('list').appendChild(li);
+}
+
+async function throwsCode(promiseOrFn, code) {
+    try { await (typeof promiseOrFn === 'function' ? promiseOrFn() : promiseOrFn); return 'no error'; }
+    catch (e) { return e.code === code ? true : 'code ' + e.code + ': ' + e.message; }
+}
+
+function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+async function until(fn, ms) {
+    const end = Date.now() + (ms || 20000);
+    while (Date.now() < end) { if (fn()) return true; await wait(50); }
+    return false;
+}
+
+async function readText(url) { return (await fetch(url)).text(); }
+async function readBytes(url) { return new Uint8Array(await (await fetch(url)).arrayBuffer()); }
+
+function sameBytes(a, b) {
+    a = new Uint8Array(a); b = new Uint8Array(b);
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+}
+
+const PASS = 'correct horse battery staple';
+
+
+// ==========================================================
+//    PART A:  THE LOGIC
+// ==========================================================
+
+async function testKeyringLogic() {
+    check('A weak IT passphrase is refused', await throwsCode(ITConsole.newKeyring('short'), 'weak-passphrase'));
+
+    const s = await ITConsole.newKeyring(PASS);
+    check('A new keyring starts empty and unsaved', s.groups.length === 0 && s.people.length === 0 && s.unsaved === true);
+
+    //  An EMPTY keyring still refuses a wrong passphrase  (its check key)
+    const empty = await ITConsole.keyringText(s);
+    check('An empty keyring: a wrong passphrase is refused', await throwsCode(ITConsole.openKeyring(empty, 'not the right passphrase'), 'wrong-secret'));
+    const noCheck = JSON.parse(empty); noCheck.locked.keys = [];
+    check('A keyring without its check key: refused as damaged', await throwsCode(ITConsole.openKeyring(JSON.stringify(noCheck), PASS), 'not-a-keyring'));
+
+    //  a group key,  by hand  (step 2 adds the real way)
+    s.groups.push({ group: 'service-desk', label: 'Service Desk', keyVersion: 1, rules: { export: true, autoLockMin: 15 } });
+    s.keys['service-desk'] = { keyVersion: 1, key: await VaultCore.newGroupKey() };
+
+    const text = await ITConsole.keyringText(s);
+    const file = JSON.parse(text);
+    check('The keyring file has the F1 shape',
+          file.flogic === 'keyring' && file.v === 1 && file.groups.length === 1 && Array.isArray(file.people) &&
+          file.locked && file.locked.rounds === VaultCore.ROUNDS && file.locked.keys.length === 2, text.slice(0, 200));
+    check('The keyring file has no passphrase in it', text.indexOf(PASS) < 0);
+
+    const back = await ITConsole.openKeyring(text, PASS);
+    const raw1 = new Uint8Array(await crypto.subtle.exportKey('raw', s.keys['service-desk'].key));
+    const raw2 = new Uint8Array(await crypto.subtle.exportKey('raw', back.keys['service-desk'].key));
+    check('Saved, then opened with the passphrase: the same key comes back', sameBytes(raw1, raw2) && back.unsaved === false);
+
+    check('Opened with a wrong passphrase: refused', await throwsCode(ITConsole.openKeyring(text, 'not the right passphrase'), 'wrong-secret'));
+    check('Not a keyring (a credential): refused', await throwsCode(ITConsole.openKeyring('{"flogic":"credential"}', PASS), 'not-a-keyring'));
+    check('Not JSON: refused', await throwsCode(ITConsole.openKeyring('hello', PASS), 'not-a-keyring'));
+    const newer = JSON.parse(text); newer.v = 2;
+    check('A newer keyring: refused', await throwsCode(ITConsole.openKeyring(JSON.stringify(newer), PASS), 'bad-version'));
+    const odd = JSON.parse(text); odd.groups.push({ group: 'change-team', label: 'x', keyVersion: 1, rules: {} });
+    check('Groups and keys that don\'t match: refused', await throwsCode(ITConsole.openKeyring(JSON.stringify(odd), PASS), 'not-a-keyring'));
+}
+
+
+// ==========================================================
+//    PART B:  THE PAGE
+// ==========================================================
+
+let W = null;           //  the frame's window
+let saved = [];         //  what the page "downloaded":  [{ name, blob  (a promise) }]
+
+function $(id) { return W.document.getElementById(id); }
+
+function type(id, value) {
+    const el = $(id);
+    el.value = value;
+    el.dispatchEvent(new W.Event('input', { bubbles: true }));
+    el.dispatchEvent(new W.Event('change', { bubbles: true }));
+}
+
+function pick(id, name, content, mime) {
+    const dt = new W.DataTransfer();
+    dt.items.add(new W.File([content], name, { type: mime || '' }));
+    $(id).files = dt.files;
+    $(id).dispatchEvent(new W.Event('change', { bubbles: true }));
+}
+
+function visible(id) { const el = $(id); return !!el && !el.hidden && el.offsetParent !== null; }
+
+async function loadPage() {
+    const frame = document.getElementById('frame');
+    await new Promise(function (r) { frame.onload = r; frame.src = 'it-console.html'; });
+    W = frame.contentWindow;
+    //  Catch the page's downloads where they happen  (<a download>.click()),  and read the Blob
+    //  right away,  before the page revokes its URL.
+    W.HTMLAnchorElement.prototype.click = function () {
+        if (this.download && this.href.indexOf('blob:') === 0) {
+            saved.push({ name: this.download, blob: fetch(this.href).then(function (r) { return r.blob(); }) });
+        }
+    };
+}
+
+function isOpen() { return visible('main') && !visible('start'); }
+
+async function testKeyringPage() {
+    await loadPage();
+    check('The page starts on the first screen', visible('start') && !visible('main'));
+
+    //  New keyring:  a weak passphrase,  then two that don't match,  then a good one
+    type('new-pass', 'short'); type('new-pass2', 'short');
+    $('new-btn').click();
+    check('Page: its scripts run (the CSP lets them in), and a weak passphrase is refused',
+          /12 characters/.test($('start-msg').textContent) && !visible('main'), $('start-msg').textContent);
+    type('new-pass', PASS); type('new-pass2', PASS + 'x');
+    $('new-btn').click();
+    check('Page: passphrases that don\'t match are refused', /don.t match/.test($('start-msg').textContent) && !visible('main'));
+    type('new-pass2', PASS);
+    $('new-btn').click();
+    await until(function () { return visible('main'); });
+    check('Page: New keyring opens it, marked unsaved', visible('main') && visible('unsaved'));
+
+    //  Save
+    saved = [];
+    $('save-btn').click();
+    await until(function () { return saved.length === 1; });
+    check('Page: Save keyring downloads it, and the unsaved mark goes', saved.length === 1 && !visible('unsaved') &&
+          /\.flogic-keyring$/.test(saved[0] && saved[0].name), saved[0] && saved[0].name);
+    const keyringFile = saved[0] ? await (await saved[0].blob).text() : '';
+    check('Page: the saved file opens with the passphrase', (await ITConsole.openKeyring(keyringFile, PASS)).groups.length === 0);
+
+    //  Lock  (saved:  no warning)
+    $('lock-btn').click();
+    check('Page: Lock goes back to the first screen and forgets the keyring', !isOpen() && /Locked/.test($('start-msg').textContent));
+
+    //  Lock with unsaved changes warns first   (a new keyring is unsaved)
+    type('new-pass', PASS); type('new-pass2', PASS);
+    $('new-btn').click();
+    await until(isOpen);
+    $('lock-btn').click();
+    check('Page: Lock with unsaved changes warns first', isOpen() && /unsaved changes/.test($('keyring-msg').textContent));
+    $('lock-btn').click();
+    check('Page: ...and the second click locks', !isOpen());
+
+    //  Open with a wrong passphrase,  then the right one
+    pick('open-file', 'it.flogic-keyring', keyringFile, 'application/json');
+    type('open-pass', 'wrong wrong wrong wrong');
+    $('open-btn').click();
+    await until(function () { return /doesn.t open/.test($('start-msg').textContent); });
+    check('Page: a wrong passphrase says so, and shows nothing', /doesn.t open/.test($('start-msg').textContent) && !isOpen(),
+          $('start-msg').textContent + ' / open: ' + isOpen());
+
+    type('open-pass', PASS);
+    $('open-btn').click();
+    await until(function () { return visible('main'); });
+    check('Page: the right passphrase opens it, saved (no unsaved mark)', visible('main') && !visible('unsaved'));
+    check('Page: the passphrase box is emptied after opening', $('open-pass').value === '', $('open-pass').value);
+    $('lock-btn').click();
+}
+
+
+// ==========================================================
+//    LAST:  THE RULES FOR THIS PAGE
+// ==========================================================
+
+async function testRules() {
+    let src = await readText('itconsoleI.js');
+    src = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');       //  the code,  without its comments
+    check('No fetch / XMLHttpRequest in itconsoleI.js', !/\bfetch\s*\(|XMLHttpRequest|WebSocket|sendBeacon/.test(src));
+    check('No IndexedDB / localStorage / sessionStorage in itconsoleI.js', !/indexedDB|localStorage|sessionStorage/.test(src));
+    check('No innerHTML in itconsoleI.js', !/innerHTML|outerHTML|insertAdjacentHTML|document\.write/.test(src));
+
+    const html = await readText('it-console.html');
+    const outside = html.match(/(src|href)\s*=\s*"(https?:)?\/\/[^"]*"/g);
+    check('it-console.html loads nothing from the internet', !outside, outside);
+
+    const dbs = indexedDB.databases ? await indexedDB.databases() : [];
+    check('Nothing in IndexedDB or localStorage afterward', dbs.length === 0 && localStorage.length === 0 && W.localStorage.length === 0,
+          dbs.length + ' databases, ' + localStorage.length + ' localStorage');
+}
+
+
+(async function run() {
+    const parts = [testKeyringLogic, testKeyringPage, testRules];
+    for (const part of parts) {
+        try { await part(); }
+        catch (e) { check(part.name + ' finished', false, e.stack || e.message || e); }
+    }
+    const passed = window.__results.filter(function (r) { return r.ok; }).length;
+    document.getElementById('summary').textContent = passed + ' / ' + window.__results.length + ' passed';
+    window.__done = true;
+})();
+</script>
+</body>
+</html>
