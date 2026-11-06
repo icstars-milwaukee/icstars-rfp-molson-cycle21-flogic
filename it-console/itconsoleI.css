@@ -130,4 +130,27 @@ label .hint { display: block; font-weight: 400; margin: 4px 0 0; }
 td .yes { color: var(--good); }
 td .no { color: var(--bad); }
 
+fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px 0; margin: 0 0 14px; }
+legend { font-weight: 600; font-size: 0.92rem; padding: 0 4px; }
+#c-groups label.inline { margin-bottom: 8px; }
+
+.code-panel {
+    margin-top: 12px;
+    padding: 16px;
+    border: 2px solid var(--warn);
+    border-radius: 10px;
+    background: var(--warn-bg);
+}
+.code-panel[hidden] { display: none; }
+.code-for { margin: 0; }
+.setup-code {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    margin: 8px 0 12px;
+    word-break: break-all;
+    user-select: all;
+}
+.code-note { margin: 0 0 12px; }
+
 code, .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }

@@ -180,6 +180,71 @@ async function testPackLogic() {
 }
 
 
+async function rawKey(key) { return new Uint8Array(await crypto.subtle.exportKey('raw', key)); }
+
+async function testPersonLogic() {
+    const s = await ITConsole.newKeyring(PASS);
+    await ITConsole.addGroup(s, { label: 'Service Desk', group: 'service-desk', rules: { export: true, autoLockMin: 15 } });
+    await ITConsole.addGroup(s, { label: 'Change Team', group: 'change-team', rules: { export: false, autoLockMin: 10 } });
+
+    check('Person id: the first is u-0001', ITConsole.nextPersonId(s) === 'u-0001');
+    check('Person id: one more than the biggest', ITConsole.nextPersonId({ people: [{ id: 'u-0001' }, { id: 'u-0007' }, { id: 'x' }] }) === 'u-0008');
+    check('Expiry: defaults to Dec 31 of this year', ITConsole.defaultExpiry() === new Date().getFullYear() + '-12-31' &&
+          ITConsole.expiryProblem(ITConsole.defaultExpiry()) === '');
+    check('Expiry: Feb 30, a past date, and junk are refused',
+          ITConsole.expiryProblem(new Date().getFullYear() + 1 + '-02-30') !== '' && ITConsole.expiryProblem('2020-01-01') !== '' &&
+          ITConsole.expiryProblem('soon') !== '' && ITConsole.expiryProblem(ITConsole.today()) === '');
+    check('File name: first name, small letters', ITConsole.credentialFileName('Fernando G', 'u-0001') === 'fernando.flogic-id' &&
+          ITConsole.credentialFileName('DJ', 'u-0002') === 'dj.flogic-id' && ITConsole.credentialFileName('  José María ', 'u-9') === 'jose.flogic-id');
+    check('File name: no usable first name -> the id', ITConsole.credentialFileName('李 雷', 'u-0003') === 'u-0003.flogic-id' &&
+          ITConsole.credentialFileName('../../etc', 'u-0004') === 'etc.flogic-id');
+
+    const expires = ITConsole.defaultExpiry();
+    const made = await ITConsole.makePerson(s, { name: ' Fernando G ', groups: ['service-desk'], expires: expires });
+    const fileText = JSON.stringify(made.credential, null, 2);
+    const cred = VaultCore.readCredential(fileText);
+    check('Credential: the right shape (id, name, groups with rules, expiry)', cred.id === 'u-0001' && cred.name === 'Fernando G' &&
+          cred.expires === expires && cred.groups.length === 1 && cred.groups[0].group === 'service-desk' &&
+          cred.groups[0].label === 'Service Desk' && cred.groups[0].rules.export === true && cred.groups[0].rules.autoLockMin === 15,
+          fileText.slice(0, 300));
+    check('Credential: the file is named fernando.flogic-id', made.fileName === 'fernando.flogic-id');
+    check('Setup code: 15 symbols, in groups of 5', /^[2-9A-HJKMNP-Z]{5}-[2-9A-HJKMNP-Z]{5}-[2-9A-HJKMNP-Z]{5}$/.test(made.setupCode), made.setupCode);
+
+    const opened = await VaultCore.openCredential(cred, made.setupCode);
+    check('openCredential with the setup code gives exactly the person\'s groups',
+          opened.length === 1 && opened[0].group === 'service-desk' && opened[0].keyVersion === 1);
+    check('...and it\'s the group\'s real key', sameBytes(await rawKey(opened[0].key), await rawKey(s.keys['service-desk'].key)));
+    const typed = VaultCore.normalizeCode(made.setupCode).toLowerCase().replace(/(.{3})/g, '$1 ');
+    check('The setup code typed in small letters with spaces still opens it', (await VaultCore.openCredential(cred, typed)).length === 1);
+    check('A wrong setup code: refused', await throwsCode(VaultCore.openCredential(cred, VaultCore.makeCode(15)), 'wrong-secret'));
+
+    const plain = VaultCore.normalizeCode(made.setupCode);
+    check('The setup code isn\'t in the credential file', fileText.indexOf(plain) < 0 && fileText.indexOf(made.setupCode) < 0);
+    const ringText = await ITConsole.keyringText(s);
+    check('The setup code isn\'t in the keyring', ringText.indexOf(plain) < 0 && ringText.indexOf(made.setupCode) < 0);
+    const p = s.people[0];
+    check('The keyring remembers the person: id, name, group ids, expiry, made (no keys, no code)',
+          s.people.length === 1 && p.id === 'u-0001' && p.name === 'Fernando G' && p.groups.join() === 'service-desk' &&
+          p.expires === expires && p.made === ITConsole.today() && Object.keys(p).sort().join() === 'expires,groups,id,made,name' &&
+          s.unsaved === true, JSON.stringify(p));
+
+    const both = await ITConsole.makePerson(s, { name: 'DJ', groups: ['change-team', 'service-desk'], expires: expires });
+    const opened2 = await VaultCore.openCredential(both.credential, both.setupCode);
+    check('Two groups: both keys, and a new id (u-0002)', both.credential.id === 'u-0002' && opened2.length === 2 &&
+          opened2.map(function (k) { return k.group; }).sort().join() === 'change-team,service-desk');
+    check('Every credential gets its own setup code', both.setupCode !== made.setupCode);
+
+    check('No groups: refused', await throwsCode(ITConsole.makePerson(s, { name: 'X', groups: [], expires: expires }), 'bad-person'));
+    check('A group not in the keyring: refused', await throwsCode(ITConsole.makePerson(s, { name: 'X', groups: ['service-desk', 'nope'], expires: expires }), 'bad-person'));
+    check('No name: refused', await throwsCode(ITConsole.makePerson(s, { name: '  ', groups: ['service-desk'], expires: expires }), 'bad-person'));
+    check('A past expiry: refused', await throwsCode(ITConsole.makePerson(s, { name: 'X', groups: ['service-desk'], expires: '2020-01-01' }), 'bad-person'));
+    check('Nothing is added when refused', s.people.length === 2);
+
+    const back = await ITConsole.openKeyring(await ITConsole.keyringText(s), PASS);
+    check('People survive Save and Open, and the next id goes on (u-0003)', back.people.length === 2 && ITConsole.nextPersonId(back) === 'u-0003');
+}
+
+
 // ==========================================================
 //    PART B:  THE PAGE
 // ==========================================================
@@ -387,6 +452,68 @@ async function testPackPage() {
 }
 
 
+async function testPersonPage() {
+    await newPageKeyring();
+    check('Page: Make credential is off until there\'s a group', $('c-btn').disabled && visible('person-none'));
+    check('Page: expiry starts at Dec 31 of this year', $('c-expires').value === new Date().getFullYear() + '-12-31', $('c-expires').value);
+    type('g-label', 'Service Desk'); $('g-add').click();
+    await until(function () { return $('group-list').children.length === 1; });
+    type('g-label', 'Change Team'); $('g-export').checked = false; $('g-add').click();
+    await until(function () { return $('group-list').children.length === 2; });
+    check('Page: one checkbox per group', $('c-groups').querySelectorAll('input[type=checkbox]').length === 2 && !$('c-btn').disabled);
+
+    type('c-name', 'Fernando G');
+    $('c-btn').click();
+    await until(function () { return /at least one group/.test($('person-msg').textContent); });
+    check('Page: no group ticked: refused', /at least one group/.test($('person-msg').textContent) && !visible('code-panel'));
+
+    $('c-groups').querySelector('input[value="service-desk"]').checked = true;
+    saved = [];
+    $('c-btn').click();
+    await until(function () { return visible('code-panel'); });
+    const code = $('setup-code').textContent;
+    check('Page: the setup code shows, big, in groups of 5', visible('code-panel') && /^[2-9A-Z]{5}-[2-9A-Z]{5}-[2-9A-Z]{5}$/.test(code) &&
+          parseFloat(W.getComputedStyle($('setup-code')).fontSize) >= 24, code);
+    check('Page: with the warning about how to hand it over', /never in the same email as the file/.test($('code-panel').textContent) &&
+          /one-time/.test($('code-panel').textContent));
+    check('Page: it downloads fernando.flogic-id', saved.length === 1 && saved[0].name === 'fernando.flogic-id', saved[0] && saved[0].name);
+    const credText = await (await saved[0].blob).text();
+    const cred = VaultCore.readCredential(credText);
+    const keys = await VaultCore.openCredential(cred, code);
+    check('Page: the downloaded file opens with the shown code, to Service Desk only', keys.length === 1 && keys[0].group === 'service-desk');
+    check('Page: the code isn\'t in the downloaded file', credText.indexOf(VaultCore.normalizeCode(code)) < 0 && credText.indexOf(code) < 0);
+    check('Page: the person is listed, and the keyring is unsaved', $('person-list').children.length === 1 &&
+          /u-0001/.test($('person-list').textContent) && /Fernando G/.test($('person-list').textContent) &&
+          /Service Desk/.test($('person-list').textContent) && visible('unsaved'));
+    check('Page: the form empties for the next person', $('c-name').value === '' &&
+          $('c-groups').querySelectorAll('input:checked').length === 0);
+
+    $('copy-btn').click();
+    await until(function () { return $('copy-msg').textContent !== ''; });
+    check('Page: Copy says it copied (or selected it)', /Copied|Selected/.test($('copy-msg').textContent), $('copy-msg').textContent);
+
+    saved = [];
+    $('save-btn').click();
+    await until(function () { return saved.length === 1; });
+    const ringText = await (await saved[0].blob).text();
+    check('Page: the code isn\'t in the saved keyring', ringText.indexOf(VaultCore.normalizeCode(code)) < 0 && /Fernando G/.test(ringText));
+
+    $('code-done').click();
+    check('Page: "Hide it" takes the code off the page', !visible('code-panel') && $('setup-code').textContent === '');
+
+    //  Show one more code,  then Lock:  it goes
+    type('c-name', 'DJ');
+    $('c-groups').querySelector('input[value="change-team"]').checked = true;
+    saved = [];
+    $('c-btn').click();
+    await until(function () { return visible('code-panel'); });
+    check('Page: DJ gets u-0002 and dj.flogic-id', saved[0] && saved[0].name === 'dj.flogic-id' && /u-0002/.test($('person-list').textContent));
+    $('lock-btn').click(); $('lock-btn').click();
+    check('Page: Lock takes the code and the people off the page', !isOpen() && $('setup-code').textContent === '' &&
+          $('person-list').children.length === 0 && $('c-groups').children.length === 0);
+}
+
+
 // ==========================================================
 //    LAST:  THE RULES FOR THIS PAGE
 // ==========================================================
@@ -409,7 +536,8 @@ async function testRules() {
 
 
 (async function run() {
-    const parts = [testKeyringLogic, testGroupLogic, testPackLogic, testKeyringPage, testGroupPage, testPackPage, testRules];
+    const parts = [testKeyringLogic, testGroupLogic, testPackLogic, testPersonLogic,
+                   testKeyringPage, testGroupPage, testPackPage, testPersonPage, testRules];
     for (const part of parts) {
         try { await part(); }
         catch (e) { check(part.name + ' finished', false, e.stack || e.message || e); }

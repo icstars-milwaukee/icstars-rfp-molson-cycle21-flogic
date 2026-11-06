@@ -97,6 +97,45 @@
             <button id="p-btn" class="primary">Pack</button>
             <p id="pack-msg" class="msg" role="status"></p>
         </section>
+
+
+        <!-- ======================  4.  PEOPLE:  CREDENTIAL FILES  ====================== -->
+        <section class="card" id="people">
+            <h2>People</h2>
+            <p class="hint">A credential file (<code>.flogic-id</code>) holds a person's group keys, locked with a setup code.
+               They open it once in Flogic, with the code, and pick their own passphrase.</p>
+
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Id</th><th>Name</th><th>Groups</th><th>Expires</th><th>Made</th></tr></thead>
+                    <tbody id="person-list"></tbody>
+                </table>
+            </div>
+            <p id="person-none" class="hint">No one yet.</p>
+
+            <h3>Make a credential</h3>
+            <div class="form-row">
+                <label>Name <input type="text" id="c-name" maxlength="80" placeholder="Fernando G"></label>
+                <label>Expires <input type="date" id="c-expires"></label>
+            </div>
+            <fieldset id="c-groups-box">
+                <legend>Groups (at least one)</legend>
+                <div id="c-groups"></div>
+            </fieldset>
+            <button id="c-btn" class="primary">Make credential</button>
+            <p id="person-msg" class="msg" role="status"></p>
+
+            <!--  The setup code:  shown once  -->
+            <div id="code-panel" class="code-panel" hidden>
+                <p class="code-for">Setup code for <strong id="code-for"></strong></p>
+                <p id="setup-code" class="setup-code mono"></p>
+                <p class="code-note"><strong>Give this to the person in person or over Teams, never in the same email as the file.
+                   Treat it as one-time.</strong> It isn't saved anywhere, not even in the keyring. If it's lost, make a new credential.</p>
+                <button id="copy-btn">Copy</button>
+                <button id="code-done">I've handed it over. Hide it.</button>
+                <span id="copy-msg" class="hint"></span>
+            </div>
+        </section>
     </main>
 
 </div>

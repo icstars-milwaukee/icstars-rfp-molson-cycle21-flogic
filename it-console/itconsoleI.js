@@ -258,6 +258,78 @@ const ITConsole = (function () {
     }
 
 
+    // ------------------------------------------------------
+    //    4.  A PERSON'S CREDENTIAL   (.flogic-id)   and their SETUP CODE
+    //
+    //    The credential file holds the person's group keys,  locked with the setup code.
+    //    The setup code is shown ONCE,  and saved nowhere   (not in the keyring either).
+    //    Lost?   Make a new credential.
+    //
+    //    The keyring only remembers WHO has one:   { id, name, groups: [group ids], expires, made }   (no keys,  no code)
+    // ------------------------------------------------------
+
+    const NAME_MAX = 80;
+    const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+    //  u-0001,  u-0002, ...   (one more than the biggest so far)
+    function nextPersonId(s) {
+        let n = 0;
+        for (const p of s.people) {
+            const m = /^u-(\d+)$/.exec(p.id);
+            if (m) n = Math.max(n, Number(m[1]));
+        }
+        return 'u-' + String(n + 1).padStart(4, '0');
+    }
+
+    //  Dec 31 of this year
+    function defaultExpiry() { return new Date().getFullYear() + '-12-31'; }
+
+    function expiryProblem(text) {
+        const m = DATE_PATTERN.exec(String(text));
+        const d = m && new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+        if (!m || ymd(d) !== text) return 'Pick an expiry date.';
+        if (text < today()) return 'The expiry date is already past.';
+        return '';
+    }
+
+    function nameProblem(name) {
+        const n = String(name).trim();
+        if (!n) return 'Type the person\'s name.';
+        if (n.length > NAME_MAX) return 'Keep the name under ' + NAME_MAX + ' characters.';
+        return '';
+    }
+
+    //  'Fernando G'  ->  'fernando.flogic-id'      (no usable first name?  the id:  'u-0003.flogic-id')
+    function credentialFileName(name, id) {
+        const first = String(name).trim().split(/\s+/)[0] || '';
+        const clean = first.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9-]+/g, '');
+        return (clean || id) + '.flogic-id';
+    }
+
+    //  who = { name, groups: [group ids], expires }
+    async function makePerson(s, who) {
+        const name = String(who.name).trim();
+        const ids = Array.isArray(who.groups) ? who.groups : [];
+        const groups = s.groups.filter(function (g) { return ids.indexOf(g.group) >= 0; });
+        let problem = nameProblem(name) || expiryProblem(who.expires);
+        if (!problem && groups.length === 0) problem = 'Pick at least one group.';
+        if (!problem && groups.length !== new Set(ids).size) problem = 'One of those groups isn\'t in this keyring.';
+        if (problem) throw fail('bad-person', problem);
+
+        const id = nextPersonId(s);
+        const person = {
+            id: id, name: name, expires: who.expires,
+            groups: groups.map(function (g) { return { group: g.group, label: g.label, rules: cleanRules(g.rules) }; }),
+        };
+        const keys = groups.map(function (g) { return { group: g.group, keyVersion: g.keyVersion, key: s.keys[g.group].key }; });
+        const made = await VaultCore.makeCredential(person, keys);
+
+        s.people.push({ id: id, name: name, groups: groups.map(function (g) { return g.group; }), expires: who.expires, made: today() });
+        s.unsaved = true;
+        return { credential: made.credential, setupCode: made.setupCode, fileName: credentialFileName(name, id) };
+    }
+
+
     // ======================================================
     //    THE PAGE
     //
@@ -323,6 +395,99 @@ const ITConsole = (function () {
                                           session.people.length + (session.people.length === 1 ? ' person' : ' people');
         drawGroups();
         drawGroupChoices();
+        drawPeople();
+        drawPersonGroups();
+    }
+
+
+    // ------------------------------------------------------
+    //    4.  PEOPLE
+    // ------------------------------------------------------
+
+    function drawPeople() {
+        const body = $('person-list');
+        body.replaceChildren();
+        for (const p of session.people) {
+            const labels = p.groups.map(function (id) {
+                const g = session.groups.find(function (x) { return x.group === id; });
+                return g ? g.label : id;
+            });
+            const tr = el('tr');
+            tr.appendChild(el('td', p.id, 'mono'));
+            tr.appendChild(el('td', p.name));
+            tr.appendChild(el('td', labels.join(', ')));
+            tr.appendChild(el('td', p.expires));
+            tr.appendChild(el('td', p.made));
+            body.appendChild(tr);
+        }
+        $('person-none').hidden = session.people.length > 0;
+    }
+
+    //  One checkbox per group,  keeping what's ticked.
+    function drawPersonGroups() {
+        const box = $('c-groups');
+        const ticked = Array.from(box.querySelectorAll('input:checked')).map(function (i) { return i.value; });
+        box.replaceChildren();
+        if (session.groups.length === 0) box.appendChild(el('p', 'Make a group first.', 'hint'));
+        for (const g of session.groups) {
+            const label = el('label', null, 'inline');
+            const input = el('input');
+            input.type = 'checkbox';
+            input.value = g.group;
+            input.checked = ticked.indexOf(g.group) >= 0;
+            label.appendChild(input);
+            label.appendChild(document.createTextNode(' ' + g.label));
+            box.appendChild(label);
+        }
+        $('c-btn').disabled = session.groups.length === 0;
+    }
+
+    function resetPersonForm() {
+        $('c-name').value = '';
+        $('c-expires').value = defaultExpiry();
+        for (const i of $('c-groups').querySelectorAll('input')) i.checked = false;
+    }
+
+    function hideCode() {
+        $('setup-code').textContent = '';
+        $('code-for').textContent = '';
+        $('copy-msg').textContent = '';
+        $('code-panel').hidden = true;
+    }
+
+    async function onMakePerson() {
+        const who = {
+            name: $('c-name').value,
+            expires: $('c-expires').value,
+            groups: Array.from($('c-groups').querySelectorAll('input:checked')).map(function (i) { return i.value; }),
+        };
+        hideCode();
+        await busy($('c-btn'), 'person-msg', async function () {
+            const made = await makePerson(session, who);
+            download(made.fileName, new Blob([JSON.stringify(made.credential, null, 2)], { type: 'application/json' }));
+            $('code-for').textContent = made.credential.name + ' (' + made.fileName + ')';
+            $('setup-code').textContent = made.setupCode;
+            $('code-panel').hidden = false;
+            resetPersonForm();
+            markUnsaved();
+            say('person-msg', 'Made ' + made.fileName + ' for ' + made.credential.name + ' (' + made.credential.id + '). Save the keyring to remember them.', 'good');
+        });
+    }
+
+    async function onCopy() {
+        const code = $('setup-code').textContent;
+        try {
+            await navigator.clipboard.writeText(code);
+            $('copy-msg').textContent = 'Copied.';
+        } catch (e) {
+            //  No clipboard here:  select it,  so Ctrl + C works.
+            const range = document.createRange();
+            range.selectNodeContents($('setup-code'));
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            $('copy-msg').textContent = 'Selected. Press Ctrl + C to copy.';
+        }
     }
 
 
@@ -485,6 +650,10 @@ const ITConsole = (function () {
         say('group-msg', '');
         $('p-file').value = '';
         say('pack-msg', '');
+        $('c-groups').replaceChildren();
+        resetPersonForm();
+        hideCode();
+        say('person-msg', '');
         refresh();
     }
 
@@ -538,6 +707,11 @@ const ITConsole = (function () {
         $('p-group').replaceChildren();
         $('p-file').value = '';
         say('pack-msg', '');
+        $('person-list').replaceChildren();
+        $('c-groups').replaceChildren();
+        resetPersonForm();
+        hideCode();
+        say('person-msg', '');
         refresh();
         say('start-msg', 'Locked. The keys are gone from this page.', 'good');
     }
@@ -562,6 +736,10 @@ const ITConsole = (function () {
         $('g-id').addEventListener('input', onIdInput);
         $('p-btn').addEventListener('click', onPack);
         $('p-file').addEventListener('change', function () { say('pack-msg', ''); });
+        $('c-btn').addEventListener('click', onMakePerson);
+        $('copy-btn').addEventListener('click', onCopy);
+        $('code-done').addEventListener('click', function () { hideCode(); say('person-msg', ''); });
+        resetPersonForm();
         resetGroupForm();
         window.addEventListener('beforeunload', function (e) {
             if (session && session.unsaved) { e.preventDefault(); e.returnValue = ''; }
@@ -581,6 +759,8 @@ const ITConsole = (function () {
         newKeyring: newKeyring, readKeyring: readKeyring, openKeyring: openKeyring, keyringText: keyringText,
         slugify: slugify, groupIdProblem: groupIdProblem, rulesProblem: rulesProblem, addGroup: addGroup, editGroup: editGroup,
         packProblem: packProblem, packName: packName, packFile: packFile,
+        nextPersonId: nextPersonId, defaultExpiry: defaultExpiry, expiryProblem: expiryProblem,
+        credentialFileName: credentialFileName, makePerson: makePerson,
     });
 
 })();
