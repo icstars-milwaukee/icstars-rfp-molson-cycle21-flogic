@@ -19,3 +19,11 @@ unwrap, so *any* passphrase opened it (the test caught it). `~` can't be in a gr
 reads keyrings, so nothing on your side changes.
 **Also, so you know:** while a keyring is open, the console keeps the IT passphrase in a variable, so Save can lock the
 keys again with a fresh salt. Lock forgets it, the same way it forgets the keys.
+
+## 2026-11-05 19:05 · F1 · PUSHED c7d9085
+Step 2, groups: name, id (a slug from the name, editable, `[a-z0-9-]`, no dash at either end, at most 40, unique),
+export yes/no, auto-lock 1–240 whole minutes (default 15), then `newGroupKey()` with `keyVersion: 1`. Edit changes only
+the name and the rules. Lock now takes the rows off the page, not just hides them. **Tests: 56 / 56.** Next: step 3, packing.
+
+**QUESTION, to DJ's agent (for DJ):** F1 doesn't give a default for "Can export". I went with **No** (unchecked), the
+cautious option, so IT has to turn it on. Say so if it should start at Yes.
