@@ -19401,6 +19401,71 @@ The card reads the browser vault first ("who set up here?"). If that read never 
 ---
 
 
+# PART 17: The Vault, Step 3: Opening Data Packs (`.flogic`) 📦
+
+Signed in, you can now open a **data pack**: a file IT locked for one group (IT's console makes them, in `it-console/`).
+
+```text
+  pick  incident.flogic
+        │
+        ▼
+  read its LABEL (no key needed)    { "group": "service-desk", "groupLabel": "Service Desk", "fileName": "incident.csv", ... }
+        │
+        ├── not signed in?           "… is a locked data pack for Service Desk.  Sign in to open it."
+        ├── not your group?          "This pack is for Change Team.  You're not in that group."
+        ├── a newer key than yours?  "… locked with a newer Service Desk key.  Ask IT for a new credential file."
+        ▼
+  unlock it IN MEMORY  ──► changed even one bit?  "… can't be opened with your key.  It may have been changed …"
+        │
+        ▼
+  new File([bytes], "incident.csv")  ──►  loadFile   (the reader, the search, the Query menu, the dashboard: same as any file)
+```
+
+The pack on disk never changes: it stays locked. The unlocked copy lives only on the page, and **Lock** takes it away (`closeFile`).
+
+### Step 17.1: The vault gets the file first
+
+The brain listens for a picked file on the file picker. The vault listens on the **whole page**, in the **capture** phase, which runs first:
+
+```js
+document.addEventListener('change', function (e) {
+    if (e.target !== fileInput) return;
+    const file = fileInput.files[0];
+    if (!/\.flogic$/i.test(file.name)) return;      //  a plain file:  the brain opens it,  as always
+    e.stopImmediatePropagation();                   //  a pack:  the brain never sees the locked bytes
+    openPackFile(file);
+}, true);
+```
+
+Same trick as focus mode's keys (Part 13): capture runs before everyone else, so nothing in `scriptI.js` changes.
+
+### Step 17.2: The label tells you who it's for, and it can't be faked
+
+The label (`readPackHeader`) is readable without a key, so the app can say who a pack is for before trying anything. It's also the AES-GCM `additionalData` (Part 15), so editing it ("change-team" → "service-desk") makes the unlock fail. `groupLabel` ("Service Desk") is there for people to read. An older pack without one falls back to the id.
+
+### Step 17.3: Tags and the export rule
+
+| On screen | When |
+|---|---|
+| `Reading from... incident.csv  🔒 Service Desk` | a pack is open |
+| `Reading from... sales.csv  not locked` | signed in, with a plain file (anyone with that file can read it) |
+
+**Save as CSV** (the Query menu) follows the pack's group rule. With a pack whose group can't export, it says *"Change Team can't export. (IT sets this for each group.)"* The dashboard's **Export report** reads the same `FlogicVault.canExport()`. It's a polite rule: DevTools can get around it. What nobody can get around is "no key, no data".
+
+### ✅ Test it
+
+`sh tools/run-tests.sh realfile-vault` → **60 / 60** (the 43 from Part 16, plus 17 for packs). It uses Fernando's made-up `demo_incident.csv` (2,400 rows), packed by the test:
+- the picker also shows `.flogic` files; not signed in, a pack says "Sign in to open it"
+- Service Desk opens its pack: 2,400 × 44, shown as `demo_incident.csv`, tagged 🔒 Service Desk, with the stamp `Test Fernando · Service Desk · Nov 5, 2026 · demo_incident.csv  (2,400 rows)`; the Query menu gets it like any file
+- Change Team's pack, an old pack with no label, a newer key, one changed bit, a CSV renamed `.flogic`: each gets its own message, and the open file stays open
+- a plain file after a pack: "not locked", no stamp; Lock with a pack open: the file is gone
+- DJ (Change Team) opens his pack, can't open Service Desk's, and **Save as CSV** is refused (Change Team can't export)
+
+<br>
+
+---
+
+
 ## Change stuff yourself
 
 | I want to... | Do this |

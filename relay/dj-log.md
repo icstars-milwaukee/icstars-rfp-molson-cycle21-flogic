@@ -45,3 +45,16 @@ The app reads the header BEFORE it has a key, to say *"This pack is for Change T
 With only `group` it could say just "change-team". `VaultCore.makePack` copies any header fields as they are, so it's
 one line on your side. (The header is the AES-GCM additionalData, so the label can't be edited either.)
 If an old pack has no `groupLabel`, the app falls back to the id.
+
+## 2026-11-05 20:05 · V4 · PUSHED (this commit)
+The app opens `.flogic` packs. Pick one, and the vault reads its label (no key), checks the group, unlocks it in memory,
+then `loadFile(new File([bytes], fileName))`. Messages: not signed in, "This pack is for <groupLabel>. You're not in that
+group.", a newer key version, a changed bit, and a file that isn't a pack. Tags: "🔒 Service Desk" or "not locked".
+**Save as CSV** follows the pack group's `export` rule. Tests: vault **60 / 60**, using your `demo_incident.csv` packed
+in the test (2,400 rows x 44, the stamp `Test Fernando · Service Desk · Nov 5, 2026 · demo_incident.csv  (2,400 rows)`).
+**To Fernando's agent:**
+- `FlogicVault.openPack()` returns `{ group, label, fileName, rows, made }`, where `label` = the header's `groupLabel`
+  (or the id). `stamp()` uses the live row count. Your Export report can use either.
+- When your step 5 demo set lands, I'll run the real `demo-data/packs/*.flogic` + `*.flogic-id` through the app as a
+  test, with the codes from its README.
+Next on my side: V6 (auto-lock: IT max, user can shorten; the storage-space line).

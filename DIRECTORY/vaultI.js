@@ -47,6 +47,7 @@
     const listeners = [];
 
     function changed() {
+        showTag();
         for (const fn of listeners.slice()) {
             try { fn(); } catch (e) { console.warn('FlogicVault: an onChange listener failed:', e); }
         }
@@ -421,9 +422,11 @@
 
     //  LOCK:  forget the keys,  the person,  and the open file  (closeFile),  and put the card back up.
     function lock(fromOtherTab) {
+        openId++;                               //  a pack still unlocking?  It's dropped.
         keys = null;
         me = null;
         pack = null;
+        say('');
         closeFile();
         if (!fromOtherTab) tell('lock');
         showCard();
@@ -440,6 +443,94 @@
         chip.hidden = false;
         changed();
     }
+
+
+    // ---- OPENING DATA PACKS  (.flogic) ----
+    //
+    //    Pick a .flogic file  ->  the VAULT opens it  (the brain never sees the locked bytes):
+    //       1.  read its label  (no key needed)          "group": "service-desk",  "fileName": "incident.csv" ...
+    //       2.  do you hold that group's key?             no  ->  "This pack is for Change Team.  You're not in that group."
+    //       3.  unlock it,  in memory                     ->  new File([bytes], "incident.csv")  ->  loadFile,  like any file
+    //    A plain file  (.csv  .xlsx  .sql)  goes to the brain as always,  and gets a small "not locked" tag.
+
+    let openId = 0;                                 //  counts packs being opened  (Lock in the middle?  the old one is dropped)
+
+    fileInput.accept = fileInput.accept ? fileInput.accept + ',.flogic' : '.flogic';
+
+    const note = el('p', { id: 'vaultNote', role: 'status' });      //  what the vault has to say about a pack
+    note.hidden = true;
+    readingFrom.after(note);
+    const tag = el('span', { id: 'vaultTag' });                     //  "Reading from... incident.csv  🔒 Service Desk"
+    readingFrom.appendChild(tag);
+
+    function say(words) {
+        note.textContent = words;
+        note.hidden = words === '';
+    }
+
+    function showTag() {
+        tag.classList.toggle('plain', pack === null);
+        tag.textContent = state !== 'unlocked' ? '' : pack !== null ? '🔒 ' + pack.label : 'not locked';
+        tag.title = pack !== null ? 'A locked data pack for ' + pack.label + '.  It stays locked on disk.'
+                                  : 'A plain file:  not a locked data pack.  Anyone with the file can read it.';
+    }
+
+    //  Capture,  on the whole page:  this runs BEFORE the brain's own listener on the file picker.
+    document.addEventListener('change', function (e) {
+        if (e.target !== fileInput) return;
+        const file = fileInput.files[0];
+        if (!file) return;
+        say('');
+        if (!/\.flogic$/i.test(file.name)) {        //  a plain file:  the brain opens it
+            openId++;
+            if (pack !== null) { pack = null; changed(); }
+            return;
+        }
+        e.stopImmediatePropagation();               //  a pack:  the vault opens it
+        openPackFile(file);
+    }, true);
+
+    async function openPackFile(file) {
+        const myOpen = ++openId;
+        fileInput.value = '';                       //  (so picking the same pack again still counts)
+        let bytes, label;
+        try {
+            bytes = new Uint8Array(await file.arrayBuffer());
+            label = V.readPackHeader(bytes).header;
+        } catch (e) {
+            say(e.code === 'bad-version' ? e.message : '"' + file.name + '" isn\'t a Flogic data pack.');
+            return;
+        }
+        const name = label.groupLabel || label.group;
+        if (state !== 'unlocked') { say('"' + file.name + '" is a locked data pack for ' + name + '.  Sign in to open it.'); return; }
+        const mine = keys.get(label.group);
+        if (!mine) { say('This pack is for ' + name + '.  You\'re not in that group.'); return; }
+        if (mine.keyVersion !== label.keyVersion) {
+            say('This pack was locked with a newer ' + name + ' key.  Ask IT for a new credential file.');
+            return;
+        }
+        let plain;
+        try { plain = await V.openPack(bytes, mine.key); }
+        catch (e) { say('"' + file.name + '" can\'t be opened with your key.  It may have been changed since IT made it.'); return; }
+        bytes = null;
+        if (myOpen !== openId || state !== 'unlocked') return;          //  locked  (or another file picked)  meanwhile
+
+        pack = { group: label.group, label: name, fileName: label.fileName || file.name.replace(/\.flogic$/i, ''),
+                 rows: label.rows, made: label.made };
+        changed();
+        loadFile(new File([plain], pack.fileName), null);
+    }
+
+
+    // ---- THE EXPORT RULE on the Query menu's "Save as CSV"   (the dashboard's Export report reads canExport itself) ----
+    //    A polite rule:  someone with DevTools can get around it.   What they CAN'T get around:  no key,  no data.
+    document.addEventListener('click', function (e) {
+        if (e.target !== queryExport || window.FlogicVault.canExport()) return;
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        const g = pack !== null ? pack.label : 'your group';
+        if (typeof setQueryStatus === 'function') setQueryStatus(g + ' can\'t export.  (IT sets this for each group.)', true);
+    }, true);
 
 
     // ---- OTHER TABS  (BroadcastChannel:  in this browser only,  no network) ----

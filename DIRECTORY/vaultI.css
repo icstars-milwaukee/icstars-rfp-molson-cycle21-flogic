@@ -132,3 +132,33 @@ body.vault-up { overflow: hidden; }
 #vaultChip:hover { color: var(--text, #222); }
 #vaultChip[hidden],
 body.focus #vaultChip { display: none; }
+
+
+/*  "Reading from...  incident.csv   🔒 Service Desk"   (a pack)     or     "not locked"   (a plain file,  while signed in)  */
+#vaultTag:not(:empty) {
+    margin-left: 10px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--formula, #217346);
+    border: 1px solid currentColor;
+    white-space: nowrap;
+}
+
+#vaultTag.plain:not(:empty) {
+    color: var(--text-soft, #666);
+    font-weight: 400;
+}
+
+/*  What the vault says about a pack:  "This pack is for Change Team.  You're not in that group."  */
+#vaultNote {
+    margin: 6px 0;
+    padding: 8px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--warn, #c90);
+    color: var(--text, #222);
+    font-size: 14px;
+}
+
+#vaultNote[hidden] { display: none; }
