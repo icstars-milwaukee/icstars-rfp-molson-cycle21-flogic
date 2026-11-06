@@ -110,11 +110,38 @@ body.vault-up { overflow: hidden; }
 
 
 /*  THE LOCK CHIP:  bottom-left corner,  small.   (Focus mode keeps the screen for the sheet:  it hides there.)  */
-#vaultChip {
+#vaultBar {
     position: fixed;
     left: 12px;
     bottom: 12px;
     z-index: 50;
+    display: flex;
+    gap: 6px;
+    max-width: calc(100vw - 24px);
+}
+
+#vaultBar[hidden],
+body.focus #vaultBar { display: none; }
+
+#vaultTimer {
+    font: 12px "Segoe UI", system-ui, Arial, sans-serif;
+    padding: 5px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--glass-edge, rgba(0, 0, 0, 0.15));
+    background: color-mix(in srgb, var(--page, #fff) 85%, transparent);
+    color: var(--text-soft, #555);
+    cursor: pointer;
+}
+
+#vaultTimer[hidden] { display: none; }
+
+.vault-reason {
+    font-weight: 600;
+    color: var(--text, #222) !important;
+}
+
+#vaultChip {
+    min-width: 0;
     font: 12px "Segoe UI", system-ui, Arial, sans-serif;
     padding: 6px 11px;
     border-radius: 999px;
@@ -123,15 +150,13 @@ body.vault-up { overflow: hidden; }
     backdrop-filter: blur(8px);
     color: var(--text-soft, #555);
     cursor: pointer;
-    max-width: calc(100vw - 24px);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 #vaultChip:hover { color: var(--text, #222); }
-#vaultChip[hidden],
-body.focus #vaultChip { display: none; }
+
 
 
 /*  "Reading from...  incident.csv   🔒 Service Desk"   (a pack)     or     "not locked"   (a plain file,  while signed in)  */

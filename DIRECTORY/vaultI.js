@@ -145,10 +145,16 @@
     card.appendChild(box);
     document.body.appendChild(card);
 
+    //  Bottom left:   [ 🔒 Lock · Fernando G · Service Desk ] [ ⏱ 15 min ▾ ]
+    const bar  = el('div', { id: 'vaultBar' });
     const chip = el('button', { id: 'vaultChip', type: 'button', title: 'Lock: the keys and the open file leave the page' });
-    chip.hidden = true;
-    document.body.appendChild(chip);
-    chip.addEventListener('click', function () { lock(); });
+    const timer = el('select', { id: 'vaultTimer', title: 'Lock by itself after this many minutes with no mouse or keys', 'aria-label': 'Auto-lock after' });
+    bar.append(chip, timer);
+    bar.hidden = true;
+    document.body.appendChild(bar);
+    chip.addEventListener('click', function () { lock(false, ''); });
+
+    let lockReason = '';        //  why the card is back  ("Locked after 15 minutes with no mouse or keys.")
 
     //  The rest of the page can't be clicked or tabbed to while the card is up.
     function pageInert(on) {
@@ -162,6 +168,7 @@
         box.textContent = '';
         box.appendChild(el('div', { class: 'vault-lock', 'aria-hidden': 'true', text: '🔒' }));
         box.appendChild(el('h2', { id: 'vaultTitle', text: title }));
+        if (lockReason) box.appendChild(el('p', { class: 'vault-reason', text: lockReason }));
         for (const line of lines) box.appendChild(typeof line === 'string' ? el('p', { text: line }) : line);
         for (const c of controls) box.appendChild(c);
         const first = box.querySelector('input, button');
@@ -197,7 +204,7 @@
 
     function showCard() {
         state = 'locked';
-        chip.hidden = true;
+        bar.hidden = true;
         card.hidden = false;
         document.body.classList.add('vault-up');
         pageInert(true);
@@ -206,6 +213,7 @@
     }
 
     function hideCard() {
+        box.textContent = '';                   //  empty it:  a hidden card must not keep a recovery code  (or anything else typed or shown)
         card.hidden = true;
         document.body.classList.remove('vault-up');
         pageInert(false);
@@ -261,6 +269,7 @@
                    function () { unlockScreen(person, !byRecovery); }, 'vault-quiet'),
             el('p', { class: 'vault-small', text: 'Forgot both?  Ask IT for a new credential file, then set up again.' }),
             button('Someone else', startScreenAll, 'vault-quiet'),
+            button('Open a plain file without signing in', plainMode, 'vault-quiet'),
         ]);
     }
 
@@ -413,15 +422,19 @@
         for (const k of opened) keys.set(k.group, { keyVersion: k.keyVersion, key: k.key });
         pack = null;
         state = 'unlocked';
+        lockReason = '';
         chip.textContent = '🔒 Lock  ·  ' + me.name + '  ·  ' + me.groups.map(function (g) { return g.label; }).join(', ');
-        chip.hidden = false;
+        bar.hidden = false;
+        startIdle();
         hideCard();
         changed();
         tell('lock-others');                    //  one person at a time:  another tab that's open locks
     }
 
     //  LOCK:  forget the keys,  the person,  and the open file  (closeFile),  and put the card back up.
-    function lock(fromOtherTab) {
+    function lock(fromOtherTab, reason) {
+        lockReason = reason || (fromOtherTab ? 'Locked from another tab.' : '');
+        stopIdle();
         openId++;                               //  a pack still unlocking?  It's dropped.
         keys = null;
         me = null;
@@ -438,9 +451,12 @@
         me = null;
         pack = null;
         state = 'off';
+        lockReason = '';
+        stopIdle();
         hideCard();
         chip.textContent = '🔒 Sign in';
-        chip.hidden = false;
+        timer.hidden = true;
+        bar.hidden = false;
         changed();
     }
 
@@ -533,13 +549,83 @@
     }, true);
 
 
+    // ---- AUTO-LOCK   (IT sets the most minutes;  you can pick fewer) ----
+    //
+    //    IT's number is each group's  rules.autoLockMin.   In 2 groups?  The STRICTER one counts  (the smaller number).
+    //    Your pick is kept in your record in the browser  (prefs.autoLockMin):  just a number,  nothing secret.
+    //    "Idle"  =  no mouse,  no keys,  no wheel,  no touch,  in this tab.
+
+    const TIMER_CHOICES = [1, 5, 10, 15, 30, 60, 120, 240];
+    let idleSince = Date.now();
+    let idleTimer = null;
+
+    function itMax() {
+        let most = Infinity;
+        for (const g of me.groups) {
+            const m = Number(g.rules && g.rules.autoLockMin);
+            if (m > 0 && m < most) most = m;
+        }
+        return most === Infinity ? 240 : most;
+    }
+
+    function idleMinutes() {
+        const max = itMax();
+        const mine = Number(me.prefs && me.prefs.autoLockMin);
+        return mine > 0 && mine <= max ? mine : max;
+    }
+
+    function fillTimer() {
+        const max = itMax(), now = idleMinutes();
+        timer.textContent = '';
+        const choices = TIMER_CHOICES.filter(function (m) { return m < max; }).concat([max]);
+        for (const m of choices) {
+            const o = el('option', { value: String(m), text: '⏱ ' + (m < 60 ? m + ' min' : (m / 60) + ' h') + (m === max ? '  (IT\'s limit)' : '') });
+            if (m === now) o.selected = true;
+            timer.appendChild(o);
+        }
+        timer.hidden = false;
+    }
+
+    timer.addEventListener('change', async function () {
+        if (me === null) return;
+        const m = Number(timer.value);
+        me.prefs = Object.assign({}, me.prefs, { autoLockMin: m });
+        idleSince = Date.now();
+        try {
+            const people = await allPeople();
+            const record = people.find(function (p) { return p.id === me.id; });
+            if (record) { record.prefs = Object.assign({}, record.prefs, { autoLockMin: m }); await savePerson(record); }
+        } catch (e) { console.warn('Vault: could not save the auto-lock choice:', e); }
+    });
+
+    function startIdle() {
+        fillTimer();
+        idleSince = Date.now();
+        clearInterval(idleTimer);
+        idleTimer = setInterval(function () {
+            if (state !== 'unlocked') return;
+            const m = idleMinutes();
+            if (Date.now() - idleSince >= m * 60000) lock(false, 'Locked after ' + m + ' minute' + (m === 1 ? '' : 's') + ' with no mouse or keys.');
+        }, 5000);
+    }
+
+    function stopIdle() {
+        clearInterval(idleTimer);
+        idleTimer = null;
+    }
+
+    ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart'].forEach(function (kind) {
+        document.addEventListener(kind, function () { idleSince = Date.now(); }, { passive: true, capture: true });
+    });
+
+
     // ---- OTHER TABS  (BroadcastChannel:  in this browser only,  no network) ----
 
     const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('flogic-vault') : null;
     function tell(what) { if (channel) channel.postMessage(what); }
     if (channel) {
         channel.onmessage = function (e) {
-            if ((e.data === 'lock' || e.data === 'lock-others') && state === 'unlocked') lock(true);
+            if ((e.data === 'lock' || e.data === 'lock-others') && state === 'unlocked') lock(true, '');
         };
     }
 
