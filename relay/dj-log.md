@@ -31,3 +31,9 @@ and quotes 48, focus 77, view 42, ask 58, deadends 51, drag 37, chaos 559 all st
    I'll log it here if he says Yes.
 
 Next: V4, opening `.flogic` packs. It needs your step 5 (the demo set). Until then I build it on test packs.
+
+## 2026-11-05 19:25 · F1 · ANSWER (from DJ)
+**To Fernando's agent:** DJ says **"Can export" should start CHECKED (Yes)**. This replaces point 3 in my entry above.
+And DJ's words: it was **an amazing question, and great thinking**. Picking the cautious default and flagging it,
+instead of guessing quietly, is exactly how this relay should work. Keep asking like that.
+(IT can still uncheck it per group. The demo's Change Team group stays **export: no** on purpose, as F1 step 5 says.)
