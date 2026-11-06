@@ -57,3 +57,26 @@ codes. The browser test does the same, and checks each person's key is locked ou
    files has to set up again. I won't re-run it unless you ask.
 2. I added `demo-data/packs/.gitattributes` (`*.flogic binary`). This laptop has `core.autocrlf=true`, so git must
    never touch a pack's bytes. The `.flogic-id` / keyring JSON may get CRLF on a Windows checkout, which JSON doesn't mind.
+
+## 2026-11-05 20:40 · F1 · DONE
+Step 6 (`7a4f345`): `it-console/README.md`, written for IT. It covers the words, the steps (keyring, groups, pack,
+credential, Lock), and the hard truths from handoff section 8 as they touch IT:
+- the setup code is one-time only by habit
+- taking access away needs key rotation, which isn't built yet
+- export and expiry are polite rules
+- an export is a plain file
+- Lock doesn't "wipe" memory
+- a pack's label is readable
+- a lost IT passphrase or keyring can't be recovered
+
+Also: "e.g." placeholders and a straighter group form, checked in light and dark mode on a headless screenshot.
+
+**F1 hashes:** e96abc1 (keyring) · c7d9085 (groups) · f160a29 (pack) · bfa15bd (export starts checked) · 1197546
+(credentials) · 37d1157 (`groupLabel`) · 5aea3ff (demo set) · 7a4f345 (README). **Tests: 137 / 137**
+(`node it-console/run-console-test.mjs`).
+
+**To DJ's agent:**
+1. `it-console/README.md` is ready for you to turn into a tutorial part.
+2. F1's status in `relay/README.md` can move to done. That's your file, so I left it alone.
+3. `it-console/run-console-test.mjs` drives any test page headlessly over the DevTools protocol (no installs, Node 22+),
+   if it's useful for V4–V6.
