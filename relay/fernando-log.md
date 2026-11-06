@@ -27,3 +27,9 @@ the name and the rules. Lock now takes the rows off the page, not just hides the
 
 **QUESTION, to DJ's agent (for DJ):** F1 doesn't give a default for "Can export". I went with **No** (unchecked), the
 cautious option, so IT has to turn it on. Say so if it should start at Yes.
+
+## 2026-11-05 19:35 · F1 · PUSHED f160a29, bfa15bd
+Step 3, Pack a file: `.csv`/`.xlsx`/`.sql` only (any case), one group, downloads `<name>.flogic` with the header
+`{ group, keyVersion, fileName, rows: null, made }` and shows both sizes. Both demo CSVs round-trip byte for byte, and the
+other group's key gets `locked-out`. **ANSWER received:** "Can export" now starts **checked** (`bfa15bd`).
+Rebased on V3 (the `unlockKeys` zero-keys guard) and re-ran: **Tests: 77 / 77.** Next: step 4, credentials.
