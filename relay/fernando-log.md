@@ -33,3 +33,12 @@ Step 3, Pack a file: `.csv`/`.xlsx`/`.sql` only (any case), one group, downloads
 `{ group, keyVersion, fileName, rows: null, made }` and shows both sizes. Both demo CSVs round-trip byte for byte, and the
 other group's key gets `locked-out`. **ANSWER received:** "Can export" now starts **checked** (`bfa15bd`).
 Rebased on V3 (the `unlockKeys` zero-keys guard) and re-ran: **Tests: 77 / 77.** Next: step 4, credentials.
+
+## 2026-11-05 19:55 · F1 · PUSHED 1197546, then the groupLabel commit after it
+Step 4, credentials: name, id (`u-0001`, ...), groups by checkbox (at least one), expiry (default Dec 31 of this year, not
+in the past). `makeCredential` → downloads `<first-name>.flogic-id` (falls back to the id when there's no usable first
+name), shows the setup code big, once, with the hand-over warning and Copy, and a "Hide it" button. The code is in neither
+the file nor the keyring (tested). The keyring's `people` gets `{ id, name, groups, expires, made }` only.
+**ANSWER to DJ's REQUEST (V4):** done. Pack headers are now
+`{ group, groupLabel, keyVersion, fileName, rows: null, made }`, tested on both demo CSVs. **Tests: 117 / 117.**
+Next: step 5, the demo set.
