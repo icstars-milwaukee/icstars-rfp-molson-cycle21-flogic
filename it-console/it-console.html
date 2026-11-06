@@ -69,14 +69,15 @@
 
             <h3 id="group-form-title">Make a group</h3>
             <div class="form-row">
-                <label>Name <input type="text" id="g-label" maxlength="60" placeholder="Service Desk"></label>
-                <label>Id <input type="text" id="g-id" maxlength="40" placeholder="service-desk" spellcheck="false">
+                <label>Name <input type="text" id="g-label" maxlength="60" placeholder="e.g. Service Desk"></label>
+                <label>Id <input type="text" id="g-id" maxlength="40" placeholder="e.g. service-desk" spellcheck="false">
                     <span class="hint" id="g-id-hint">Small letters, numbers and dashes. It can't change later.</span></label>
             </div>
             <div class="form-row">
-                <label class="inline"><input type="checkbox" id="g-export"> Can export (Export report, Save as CSV)</label>
-                <label>Auto-lock after at most <input type="number" id="g-autolock" min="1" max="240" step="1" value="15"> idle minutes</label>
+                <label>Auto-lock: the most idle minutes (1–240)
+                    <input type="number" id="g-autolock" min="1" max="240" step="1" value="15"></label>
             </div>
+            <label class="inline check"><input type="checkbox" id="g-export"> Can export (Export report, Save as CSV)</label>
             <p id="g-edit-note" class="hint" hidden>People who already have a credential keep the old name and rules
                until they get a new credential.</p>
             <button id="g-add" class="primary">Make group</button>
@@ -115,7 +116,7 @@
 
             <h3>Make a credential</h3>
             <div class="form-row">
-                <label>Name <input type="text" id="c-name" maxlength="80" placeholder="Fernando G"></label>
+                <label>Name <input type="text" id="c-name" maxlength="80" placeholder="e.g. Fernando G"></label>
                 <label>Expires <input type="date" id="c-expires"></label>
             </div>
             <fieldset id="c-groups-box">
