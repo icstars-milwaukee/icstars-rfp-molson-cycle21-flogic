@@ -771,6 +771,63 @@ function swapIn(table, look) {
 }
 
 
+//  CLOSE THE FILE:  back to the page you saw before you picked one  ("Pick a CSV file to get started.").
+//  The vault's Lock button uses this  (vaultI.js):  the rows,  the search,  the query menu,  the dashboard,
+//  all gone from the page.   (The browser frees the memory when it's ready:  nothing on the page points at it.)
+function closeFile() {
+
+    loadId++;                               //  a file still loading?  It stops  (it checks loadId)
+    searchId++;                             //  ...and so does a search still going
+    if (focusOn) setFocus(false);
+    if (outputBox.classList.contains('expanded')) expandBtn.click();
+    showRow(false);                         //  the Details panel
+    closeQueryMenu();
+    hideTag();
+    finishLoading();
+
+    headerCells = [];
+    fileText    = '';
+    rowStart    = new Uint32Array(1);
+    rowCount    = 0;
+    rowCache    = new Map();
+    cacheCells  = 0;
+    xlsxInfo    = null;
+    sqlInfo     = null;
+    gridCell    = null;
+    fileNote    = '';
+    searchText  = null;
+    allRows     = null;
+    doneQuery   = null;
+    doneMatches = null;
+    picked      = null;
+    query       = '';
+    matches     = [];
+    excelLook   = false;
+    fileTable   = null;
+    answer      = null;
+
+    rowsBox.textContent = '';               //  no rows  ->  the window hides itself
+    headerBox.textContent = '';
+    builtStart = 0;
+    builtEnd   = 0;
+    outputBox.style.height = '';
+
+    searchInput.value    = '';
+    searchInput.disabled = true;
+    jumpInput.value      = '';
+    fileInput.value      = '';              //  (so picking the SAME file again still counts as a change)
+    readingName.textContent = '';
+    readingFrom.hidden = true;
+    controls.hidden    = true;
+    applyLook();                            //  (no file:  the badge and the sheet tabs go away)
+    fileBadge.hidden   = true;
+    statusText.textContent = 'Pick a CSV file to get started.';
+
+    aimReset();                             //  the snap menu:  "Ready"
+    queryFileChanged();                     //  the Query menu  (and the dashboard,  which listens to this)  empty out
+}
+
+
 
 // ----------------------------------------------------------
 //
@@ -3772,6 +3829,21 @@ function queryCatalog(isCurrent) {
 //  ---- A NEW FILE  (or sheet)  IS OPEN ----
 
 function queryFileChanged() {
+
+    //  No file open any more  (closeFile:  the vault's Lock)?   The menu empties,  and Ask turns off.
+    if (fileTable === null) {
+        queryBtn.disabled = true;
+        answer = null;
+        queryExport.disabled = true;
+        build = newBuild();
+        limitOpen = false;
+        setTypeMode(false);
+        showFixes([], []);
+        queryTry.textContent = '';
+        queryTitle.textContent = 'Ask';
+        setQueryStatus('', false);
+        return;
+    }
 
     const name = mainTableName();
     fileTable.engine = engineTable(fileTable.table, name);

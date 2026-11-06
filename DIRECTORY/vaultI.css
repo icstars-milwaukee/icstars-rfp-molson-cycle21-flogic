@@ -1,0 +1,134 @@
+/*  ==========================================================
+
+        vaultI.css   -   the unlock card and the Lock chip   (vaultI.js builds them)
+
+        The card covers the WHOLE page until you unlock:  nothing of the app shows behind it.
+        It uses the theme's own colors  (--page,  --text ...),  so it fits every theme.
+
+    ==========================================================  */
+
+#vaultCard {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;                  /*  over everything:  focus mode,  the pill,  the menus  */
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    background: var(--page, #f4f4f4);
+    overflow-y: auto;
+}
+
+#vaultCard[hidden] { display: none; }
+
+body.vault-up { overflow: hidden; }
+
+.vault-box {
+    width: min(380px, 100%);
+    padding: 28px 28px 22px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, var(--glass-top, #fff), var(--glass-bottom, #f6f6f6));
+    border: 1px solid var(--glass-edge, rgba(0, 0, 0, 0.12));
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+    color: var(--text, #222);
+    font-family: "Segoe UI", system-ui, Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.vault-lock { font-size: 28px; line-height: 1; }
+
+.vault-box h2 { margin: 0; font-size: 22px; }
+
+.vault-box p { margin: 0; color: var(--text-soft, #555); font-size: 14px; line-height: 1.45; }
+
+.vault-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-soft, #555); }
+
+.vault-field input {
+    font: inherit;
+    font-size: 15px;
+    color: var(--text, #222);
+    padding: 9px 11px;
+    border-radius: 10px;
+    border: 1px solid var(--glass-edge, rgba(0, 0, 0, 0.2));
+    background: var(--page, #fff);
+}
+
+.vault-field input[type="file"] { padding: 7px; font-size: 13px; }
+
+.vault-box button {
+    font: inherit;
+    font-size: 14px;
+    padding: 9px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--glass-edge, rgba(0, 0, 0, 0.2));
+    background: transparent;
+    color: var(--text, #222);
+    cursor: pointer;
+    text-align: center;
+}
+
+.vault-box button.vault-main {
+    background: var(--square-dark, #222);
+    color: var(--square-light, #fff);
+    border-color: transparent;
+    font-weight: 600;
+}
+
+.vault-box button.vault-quiet { border-color: transparent; color: var(--text-soft, #555); padding: 4px; }
+
+.vault-box button.vault-person { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; font-weight: 600; }
+.vault-person small { font-weight: 400; color: var(--text-soft, #555); }
+
+.vault-box button:disabled { opacity: 0.5; cursor: default; }
+
+.vault-box button:focus-visible,
+.vault-field input:focus-visible { outline: 2px solid var(--formula, #217346); outline-offset: 2px; }
+
+.vault-problem { color: var(--warn-dark, #a33) !important; min-height: 0; }
+.vault-problem:empty { display: none; }
+
+.vault-small { font-size: 12px !important; }
+
+.vault-who { font-weight: 600; color: var(--text, #222) !important; }
+.vault-who:empty { display: none; }
+
+/*  The recovery code:  big,  easy to copy by hand.  */
+.vault-code {
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 19px !important;
+    letter-spacing: 0.06em;
+    text-align: center;
+    padding: 12px 8px;
+    border-radius: 10px;
+    border: 1px dashed var(--glass-edge, rgba(0, 0, 0, 0.3));
+    color: var(--text, #222) !important;
+    user-select: all;
+}
+
+.vault-tick { display: flex; gap: 8px; align-items: center; font-size: 14px; }
+
+
+/*  THE LOCK CHIP:  bottom-left corner,  small.   (Focus mode keeps the screen for the sheet:  it hides there.)  */
+#vaultChip {
+    position: fixed;
+    left: 12px;
+    bottom: 12px;
+    z-index: 50;
+    font: 12px "Segoe UI", system-ui, Arial, sans-serif;
+    padding: 6px 11px;
+    border-radius: 999px;
+    border: 1px solid var(--glass-edge, rgba(0, 0, 0, 0.15));
+    background: color-mix(in srgb, var(--page, #fff) 85%, transparent);
+    backdrop-filter: blur(8px);
+    color: var(--text-soft, #555);
+    cursor: pointer;
+    max-width: calc(100vw - 24px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#vaultChip:hover { color: var(--text, #222); }
+#vaultChip[hidden],
+body.focus #vaultChip { display: none; }

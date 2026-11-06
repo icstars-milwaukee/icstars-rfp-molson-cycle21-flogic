@@ -19305,6 +19305,102 @@ The label is plain, so the app can say *"This pack is for Change Team"* without 
 ---
 
 
+# PART 16: The Vault, Step 2: Signing In and Lock (`vaultI.js`) 🔑
+
+Part 15 made the locks and keys. This part puts a door on the app: a full-screen **unlock card** that comes up before anything else, a **Lock** button, and the browser vault that remembers who set up here (only **locked** keys).
+
+```text
+  first time (setup)                                        every time after
+  ──────────────────                                        ────────────────
+  ┌─────────────────────────┐                               ┌─────────────────────────┐
+  │ 🔒 Set up                │  credential file + setup code │ 🔒 Test Fernando         │
+  │ [fernando.flogic-id   ] │ ─────────────►               │ Service Desk            │
+  │ [setup code           ] │  pick a passphrase           │ [passphrase ••••••••  ] │
+  │ [        Next         ] │ ─────────────►               │ [       Unlock        ] │
+  └─────────────────────────┘  your RECOVERY CODE, once    │ Forgot it?  Use my      │
+                               "Write this down and keep   │ recovery code           │
+                                it safe, or save it in     └─────────────────────────┘
+                                your phone."  ☐ I wrote it down
+```
+
+| You do | It does |
+|---|---|
+| Open the app | the card covers everything. The page behind it can't be clicked or tabbed to (`inert`). |
+| Set up | credential file → setup code → passphrase (twice) → recovery code (once, with a tick box) |
+| Unlock | passphrase, or "Forgot it? Use my recovery code" |
+| **🔒 Lock** (the chip, bottom left) | the keys, the person and the open file leave the page; the card comes back |
+| "Open a plain file without signing in" | the vault steps aside (`'off'`): the app works like before, with a "🔒 Sign in" chip |
+| A second person on the same browser | "Someone else" → set up. With 2 people, the card asks "Who's unlocking?" |
+| Lock in another tab | every tab locks (`BroadcastChannel`, inside this browser only) |
+
+### Step 16.1: What the browser keeps
+
+One record per person, in IndexedDB `flogic-vault`:
+
+```text
+{ id, name, groups (+ rules), expires, prefs,
+  byPassphrase: { salt, rounds, keys: [ locked ] },
+  byRecovery:   { salt, rounds, keys: [ locked ] } }
+```
+
+No passphrase. No recovery code. No setup code. No data. An unlocked key never leaves a variable. The test reads IndexedDB straight back and checks all of that.
+
+> 🧠 **Why unlock AGAIN after setup?** At setup, the group keys come out of the credential file *readable* (`extractable: true`), because they have to be locked again twice. Those readable copies are thrown away: the app unlocks the passphrase copy the normal way, and gets keys that can't be read out.
+
+> 🧠 **Zero keys = no check.** A passphrase is "right" when it unlocks a locked key. With NO locked keys, nothing gets unlocked, so ANY passphrase would pass. Fernando's agent found this in IT's keyring. `unlockKeys` now refuses an empty list, and `readCredential` refuses a credential with no keys.
+
+### Step 16.2: `closeFile()`: Lock has to close the file
+
+Before this part, nothing could close a file: the app only ever swapped one file for the next. `closeFile()` (in `scriptI.js`, next to `swapIn`) puts the page back to "Pick a CSV file to get started.": no rows, no search, no Details, no focus mode, the Query menu reset, and the dashboard empty.
+
+It ends with `queryFileChanged()`, and that one is now ready for **no file at all**:
+
+```js
+function queryFileChanged() {
+    if (fileTable === null) {           //  closeFile  (Lock):  the menu empties,  Ask turns off
+        queryBtn.disabled = true;
+        ...
+        return;
+    }
+    ...
+```
+
+(Fernando found that: it used to read `fileTable.table` first, and crashed.) It's called by its NAME, on purpose: `dashI.js` wraps `queryFileChanged` with its own version, so calling it by name runs the dashboard's `dashClear()` too.
+
+### Step 16.3: `window.FlogicVault`: one frozen object
+
+```js
+window.FlogicVault = Object.freeze({ state, person, openPack, canExport, stamp, onChange });
+```
+
+The dashboard reads it to turn Export on or off and to stamp the report. Nothing in it hands out a key. `state()`:
+
+| state | means | Export |
+|---|---|---|
+| `'locked'` | the card is up | no |
+| `'unlocked'` | someone signed in | a plain file: yes; a pack (Part 17): the group's `export` rule |
+| `'off'` | "without signing in" (or the vault couldn't start) | yes, with no stamp |
+
+### Step 16.4: Never stuck on a blank card
+
+The card reads the browser vault first ("who set up here?"). If that read never answers (Firefox on `file://` may not keep IndexedDB), the card gives up after 3 seconds and acts like nobody has set up yet, instead of staying blank forever. It says "Opening…" while it waits.
+
+### ✅ Test it
+
+`sh tools/run-tests.sh realfile-vault` → **43 / 43** (made-up people and data):
+- it starts locked, the page behind is inert, and `FlogicVault` has exactly its 6 parts
+- plain mode: Export allowed, a plain CSV opens; the chip → `closeFile` empties the rows, the header, the search, Ask, the window and the dashboard
+- setup: junk file, expired credential and wrong setup code are all refused; short or mismatched passphrases are refused; the recovery code shows once, and Continue waits for the tick
+- IndexedDB: 1 person, keys locked twice, no passphrase, no codes, no data
+- Lock, a wrong passphrase, the right one (unlocks in about 0.1 s), the recovery code
+- 2 people on one browser: "Who's unlocking?", and DJ's passphrase doesn't open Fernando
+- a "lock" from another tab locks this one, and its file is gone
+
+<br>
+
+---
+
+
 ## Change stuff yourself
 
 | I want to... | Do this |

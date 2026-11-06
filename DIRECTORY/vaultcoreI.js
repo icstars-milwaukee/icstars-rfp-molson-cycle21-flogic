@@ -184,6 +184,11 @@ const VaultCore = (function () {
 
     //  ...and open them again.   "extractable":  true only at SETUP  (to lock them again with the passphrase).
     async function unlockKeys(personId, locked, secret, extractable) {
+        //  No locked keys at all?  Then NOTHING checks the secret:  any passphrase would "work".   Refuse instead.
+        //  (Fernando's agent found this in the IT keyring,  Nov 5.)
+        if (!locked || !Array.isArray(locked.keys) || locked.keys.length === 0) {
+            throw fail('wrong-secret', 'There are no locked keys here to check that against.');
+        }
         const kek = await keyFromSecret(secret, fromB64(locked.salt), locked.rounds);
         const out = [];
         for (const entry of locked.keys) {
@@ -224,7 +229,7 @@ const VaultCore = (function () {
         catch (e) { throw fail('not-a-credential', 'That isn\'t a credential file.'); }
         if (!c || c.flogic !== 'credential') throw fail('not-a-credential', 'That isn\'t a credential file.');
         if (c.v > VERSION) throw fail('bad-version', 'This credential file is from a newer version of the app.');
-        if (typeof c.id !== 'string' || !Array.isArray(c.groups) || !Array.isArray(c.keys) || !c.setup) {
+        if (typeof c.id !== 'string' || !Array.isArray(c.groups) || !Array.isArray(c.keys) || c.keys.length === 0 || !c.setup) {
             throw fail('not-a-credential', 'This credential file is damaged.');
         }
         return c;
