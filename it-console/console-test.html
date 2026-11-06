@@ -290,8 +290,7 @@ async function testGroupPage() {
 
     type('g-label', 'Service Desk');
     check('Page: the id fills in from the name', $('g-id').value === 'service-desk', $('g-id').value);
-    check('Page: export starts at No, auto-lock at 15', $('g-export').checked === false && $('g-autolock').value === '15');
-    $('g-export').checked = true;
+    check('Page: export starts at Yes (DJ\'s call), auto-lock at 15', $('g-export').checked === true && $('g-autolock').value === '15');
     $('g-add').click();
     await until(function () { return $('group-list').children.length === 1; });
     const row = $('group-list').children[0];
@@ -304,6 +303,7 @@ async function testGroupPage() {
     await until(function () { return /already/.test($('group-msg').textContent); });
     check('Page: a duplicate id is refused', /already/.test($('group-msg').textContent) && $('group-list').children.length === 1);
 
+    check('Page: export is back at Yes for the next group', $('g-export').checked === true);
     type('g-label', 'Change Team');
     type('g-id', 'Change Team');
     $('g-add').click();
