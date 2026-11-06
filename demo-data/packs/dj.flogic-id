@@ -1,0 +1,29 @@
+{
+  "flogic": "credential",
+  "v": 1,
+  "id": "u-0002",
+  "name": "DJ",
+  "groups": [
+    {
+      "group": "change-team",
+      "label": "Change Team",
+      "rules": {
+        "export": false,
+        "autoLockMin": 10
+      }
+    }
+  ],
+  "expires": "2026-12-31",
+  "setup": {
+    "salt": "PGqZ9m2+EV0PKTTrk0dLqg==",
+    "rounds": 600000
+  },
+  "keys": [
+    {
+      "group": "change-team",
+      "keyVersion": 1,
+      "iv": "adv23u3x3dalKwVV",
+      "wrapped": "jPnyoKgA1ZsLBek1wa9FGQHUrW7Le/Ha9pmagMQbpb93h5pyUN9xERoKJZcs9fMY"
+    }
+  ]
+}

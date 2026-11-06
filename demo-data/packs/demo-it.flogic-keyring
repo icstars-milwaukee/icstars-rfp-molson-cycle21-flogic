@@ -1,0 +1,68 @@
+{
+  "flogic": "keyring",
+  "v": 1,
+  "groups": [
+    {
+      "group": "service-desk",
+      "label": "Service Desk",
+      "keyVersion": 1,
+      "rules": {
+        "export": true,
+        "autoLockMin": 15
+      }
+    },
+    {
+      "group": "change-team",
+      "label": "Change Team",
+      "keyVersion": 1,
+      "rules": {
+        "export": false,
+        "autoLockMin": 10
+      }
+    }
+  ],
+  "people": [
+    {
+      "id": "u-0001",
+      "name": "Fernando G",
+      "groups": [
+        "service-desk"
+      ],
+      "expires": "2026-12-31",
+      "made": "2026-11-05"
+    },
+    {
+      "id": "u-0002",
+      "name": "DJ",
+      "groups": [
+        "change-team"
+      ],
+      "expires": "2026-12-31",
+      "made": "2026-11-05"
+    }
+  ],
+  "locked": {
+    "salt": "M3AOfjEe7wfgfdIn+5qhgg==",
+    "rounds": 600000,
+    "keys": [
+      {
+        "group": "service-desk",
+        "keyVersion": 1,
+        "iv": "fC6RSRpdTjeWw5st",
+        "wrapped": "xJjDh/OMXiRP71vc9khm+e+I7l+snRAuoveSNz8cEq6OIm7nCwdoLZcchxNWj/xi"
+      },
+      {
+        "group": "change-team",
+        "keyVersion": 1,
+        "iv": "ir/JGyUO7dgWlfvI",
+        "wrapped": "1EOa4Pm3La1JdBWRHNe4csYyfb9NvpNiS6zUGSyx461SXDWlD++nmp90WmrmniqU"
+      },
+      {
+        "group": "~check",
+        "keyVersion": 1,
+        "iv": "OGNL1xvBESXwNQwl",
+        "wrapped": "tcnx/0hBBIBi62bP0dsFZjjGTGh5pEVZVu4japjnIWt6Z1Ozsphu3UXbtc7TiJsA"
+      }
+    ]
+  }
+}

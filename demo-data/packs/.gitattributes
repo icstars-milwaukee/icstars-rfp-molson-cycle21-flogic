@@ -1,0 +1,2 @@
+# Data packs are raw bytes: never change their line endings.
+*.flogic binary

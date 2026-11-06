@@ -515,6 +515,70 @@ async function testPersonPage() {
 
 
 // ==========================================================
+//    PART C:  THE DEMO SET   (demo-data/packs/),  opened with the codes in its README
+// ==========================================================
+
+async function testDemoSet() {
+    const dir = '../demo-data/packs/';
+    const readme = await readText(dir + 'README.md');
+    check('Demo README: says DEMO ONLY, made-up data, at the top', /^# .*DEMO ONLY, made-up data/.test(readme));
+    const pass = /\| `demo-it\.flogic-keyring` \| `([^`]+)` \|/.exec(readme);
+    function codeFor(file) {
+        const m = new RegExp('\\| `' + file.replace('.', '\\.') + '` \\|[^\\n]*\\| `([^`]+)` \\|').exec(readme);
+        return m && m[1];
+    }
+    check('Demo README: has the IT passphrase and both setup codes', !!pass && !!codeFor('fernando.flogic-id') && !!codeFor('dj.flogic-id'));
+
+    const ring = await ITConsole.openKeyring(await readText(dir + 'demo-it.flogic-keyring'), pass[1]);
+    const sd = ring.groups.find(function (g) { return g.group === 'service-desk'; });
+    const ct = ring.groups.find(function (g) { return g.group === 'change-team'; });
+    check('Demo keyring: opens with the README passphrase', ring.groups.length === 2);
+    check('Demo keyring: Service Desk, export yes, 15 min', sd && sd.label === 'Service Desk' && sd.rules.export === true && sd.rules.autoLockMin === 15);
+    check('Demo keyring: Change Team, export NO, 10 min', ct && ct.label === 'Change Team' && ct.rules.export === false && ct.rules.autoLockMin === 10);
+    check('Demo keyring: lists Fernando G (Service Desk) and DJ (Change Team)', ring.people.length === 2 &&
+          ring.people.some(function (p) { return p.name === 'Fernando G' && p.groups.join() === 'service-desk'; }) &&
+          ring.people.some(function (p) { return p.name === 'DJ' && p.groups.join() === 'change-team'; }));
+    check('Demo keyring: refuses a wrong passphrase', await throwsCode(ITConsole.openKeyring(await readText(dir + 'demo-it.flogic-keyring'), 'nope nope nope nope'), 'wrong-secret'));
+
+    const people = [
+        { file: 'fernando.flogic-id', name: 'Fernando G', group: 'service-desk', mine: 'demo_incident', other: 'demo_change_request', otherGroup: 'change-team' },
+        { file: 'dj.flogic-id', name: 'DJ', group: 'change-team', mine: 'demo_change_request', other: 'demo_incident', otherGroup: 'service-desk' },
+    ];
+    for (const p of people) {
+        const credText = await readText(dir + p.file);
+        const cred = VaultCore.readCredential(credText);
+        const code = codeFor(p.file);
+        const keys = await VaultCore.openCredential(cred, code);
+        check('Demo ' + p.file + ': ' + p.name + ', opens with its README code, to ' + p.group + ' only',
+              cred.name === p.name && keys.length === 1 && keys[0].group === p.group && cred.groups[0].group === p.group);
+        check('Demo ' + p.file + ': the code isn\'t in the file', credText.indexOf(VaultCore.normalizeCode(code)) < 0);
+        check('Demo ' + p.file + ': the same key as the keyring\'s', sameBytes(await rawKey(keys[0].key), await rawKey(ring.keys[p.group].key)));
+
+        const pack = await readBytes(dir + p.mine + '.flogic');
+        const csv = await readBytes('../demo-data/' + p.mine + '.csv');
+        const h = VaultCore.readPackHeader(pack).header;
+        check('Demo ' + p.mine + '.flogic: the label says ' + p.group + ', ' + p.mine + '.csv, rows: null',
+              h.group === p.group && h.groupLabel === ring.groups.find(function (g) { return g.group === p.group; }).label &&
+              h.fileName === p.mine + '.csv' && h.rows === null && h.keyVersion === 1 && /^\d{4}-\d{2}-\d{2}$/.test(h.made), JSON.stringify(h));
+        check('Demo ' + p.mine + '.flogic: ' + p.name + '\'s key opens it to the exact CSV bytes', sameBytes(await VaultCore.openPack(pack, keys[0].key), csv));
+        check('Demo ' + p.other + '.flogic: ' + p.name + '\'s key can\'t open it (it\'s for ' + p.otherGroup + ')',
+              VaultCore.readPackHeader(await readBytes(dir + p.other + '.flogic')).header.group === p.otherGroup &&
+              await throwsCode(VaultCore.openPack(await readBytes(dir + p.other + '.flogic'), keys[0].key), 'locked-out') === true);
+    }
+
+    //  And the page opens the demo keyring too
+    await loadPage();
+    pick('open-file', 'demo-it.flogic-keyring', await readText(dir + 'demo-it.flogic-keyring'));
+    type('open-pass', pass[1]);
+    $('open-btn').click();
+    await until(isOpen);
+    check('Page: opens the demo keyring (2 groups, 2 people)', isOpen() && $('group-list').children.length === 2 &&
+          $('person-list').children.length === 2 && /2 groups · 2 people/.test($('keyring-counts').textContent));
+    $('lock-btn').click();
+}
+
+
+// ==========================================================
 //    LAST:  THE RULES FOR THIS PAGE
 // ==========================================================
 
@@ -537,7 +601,7 @@ async function testRules() {
 
 (async function run() {
     const parts = [testKeyringLogic, testGroupLogic, testPackLogic, testPersonLogic,
-                   testKeyringPage, testGroupPage, testPackPage, testPersonPage, testRules];
+                   testKeyringPage, testGroupPage, testPackPage, testPersonPage, testDemoSet, testRules];
     for (const part of parts) {
         try { await part(); }
         catch (e) { check(part.name + ' finished', false, e.stack || e.message || e); }
