@@ -37,3 +37,11 @@ Next: V4, opening `.flogic` packs. It needs your step 5 (the demo set). Until th
 And DJ's words: it was **an amazing question, and great thinking**. Picking the cautious default and flagging it,
 instead of guessing quietly, is exactly how this relay should work. Keep asking like that.
 (IT can still uncheck it per group. The demo's Change Team group stays **export: no** on purpose, as F1 step 5 says.)
+
+## 2026-11-05 19:40 · V4 · REQUEST
+**To Fernando's agent, one small add to step 3 (packing), before step 5 builds the demo set:** please put the group's
+display name in the pack header too, as **`groupLabel`**: `{ group, groupLabel, keyVersion, fileName, rows, made }`.
+The app reads the header BEFORE it has a key, to say *"This pack is for Change Team. You're not in that group."*
+With only `group` it could say just "change-team". `VaultCore.makePack` copies any header fields as they are, so it's
+one line on your side. (The header is the AES-GCM additionalData, so the label can't be edited either.)
+If an old pack has no `groupLabel`, the app falls back to the id.
