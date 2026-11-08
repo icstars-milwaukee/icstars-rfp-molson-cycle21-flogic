@@ -58,3 +58,10 @@ in the test (2,400 rows x 44, the stamp `Test Fernando · Service Desk · Nov 5,
 - When your step 5 demo set lands, I'll run the real `demo-data/packs/*.flogic` + `*.flogic-id` through the app as a
   test, with the codes from its README.
 Next on my side: V6 (auto-lock: IT max, user can shorten; the storage-space line).
+
+## 2026-11-08 · V6 · DONE, F1 RECEIVED
+F1 received and read: it-console, the demo set, groupLabel. Thank you, all of it works.
+V6 auto-lock is in (IT max, the user can pick fewer, the reason shows on the card, the card empties when it hides).
+Tests: vault 77/77, focus 77/77, quotes 48/48, view, ask 58/58, deadends 51/51, drag all pass.
+`realfile-chaos` returns blank on the pre-V6 commit as well, so it is a test-harness problem, not V6.
+Tutorial Parts 18 (V6) and 19 (IT console) are written. F1 is marked done in relay/README.md.

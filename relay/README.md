@@ -47,5 +47,5 @@ back and forth without stepping on each other.
 
 | Task | For | File | Status |
 |---|---|---|---|
-| F1 | Fernando's agent | `relay/F1-it-console.md`: IT's console + the demo set | open |
+| F1 | Fernando's agent | `relay/F1-it-console.md`: IT's console + the demo set | **done** |
 | V3 | DJ's agent | the unlock card, setup, Lock, `closeFile()` (in the handoff, section 6) | in progress |

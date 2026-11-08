@@ -19788,3 +19788,50 @@ The label (`readPackHeader`) is readable without a key, so the app can say who a
 - **Super-wide sheets scroll fast sideways.** Past `MAX_SCROLL_WIDTH`, each pixel of scrollbar covers many pixels of sheet. On the million-column test file, one click of Shift + wheel jumps about 14 columns instead of 1 or 2. (Fine for zooming across a giant sheet, but not for reading cell by cell. A fix: catch Shift + wheel in the brain and move a set number of columns, like the vertical wheel moves a set number of rows.) (Or turn on drag mode: it moves in exact sheet pixels, at any speed you want, even on the million-column file.)
 - **Dragging the scrollbar on a HUGE file is coarse.** Past about 133,000 rows the scrollbar is squeezed, so one pixel of dragging jumps several rows. (The wheel and Go to row are still exact. It snaps to a whole row when you let go.)
 - **Really, REALLY huge files** (around 1 GB) may be too big for the browser to read at all. Everything up to a few hundred MB is fine.
+
+
+# PART 18: The Vault, Step 4: Auto-Lock ⏱
+
+A laptop left open is a key left in the door. Auto-lock puts the card back by itself when nobody has touched the page for a while.
+
+```text
+  IT's number     each group has  rules.autoLockMin   (15 = "lock after 15 idle minutes")
+        │            in 2 groups?  the STRICTER one (the smaller number) counts
+        ▼
+  your pick       the ⏱ menu next to the Lock chip lets you pick FEWER minutes, never more
+        │            kept in your record as  prefs.autoLockMin  (just a number, nothing secret)
+        ▼
+  idleMinutes()   your pick if you made one, else IT's number
+        │
+        ▼
+  startIdle()     every few seconds:  has it been  idleMinutes() × 60 000 ms  since a mouse, key, wheel or touch?
+        │
+        ▼
+  lock(false, "Locked after 1 minute with no mouse or keys.")   the card comes back and says WHY
+```
+
+### Step 18.1: Why the card says why
+
+`lock(fromOtherTab, reason)` stores the reason in `lockReason`, and the card draws it as a line (`vault-reason`). Then it clears it, so the next time the card shows with no reason, it is quiet. Reasons so far: idle time, "Locked from another tab.", or none (you pressed Lock).
+
+### Step 18.2: The card empties when it hides
+
+Setup shows a **recovery code**. Before V6 the text stayed in the page after the card hid. Now the card's contents are emptied when it hides, so no recovery code is left sitting in the page where a curious person could find it with the developer tools.
+
+### Step 18.3: A plain file from the passphrase screen
+
+The passphrase screen now has the same "Open a plain file without signing in" link as the setup screen. A plain file is tagged "not locked".
+
+**Test:** `realfile-vault` 77/77 (with a 90 second wait for the idle lock).
+
+
+# PART 19: IT's Console, in Plain Words 🗝
+
+Fernando's agent built `it-console/` (F1). It is the stand-in for a real identity system and it never ships inside `DIRECTORY/`. It makes access groups, packs data files, and makes each person's credential file and setup code. Its own step-by-step guide is `it-console/README.md`, and a ready-made demo set is in `demo-data/packs/` (its README has the demo passphrase and codes).
+
+The hard truths from that README, so nobody is surprised:
+
+- A setup code is one-time **by habit only**: nothing stops a second use yet.
+- There is **no revoking** yet.
+- IT's export and expiry rules are polite: they stop the app, not a determined person with a copy of the file.
+- A **lost keyring can't be recovered**. Keep it and its passphrase safe.
