@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Flogic IT: issue sign-in files (draft)</title>
+    <link rel="stylesheet" href="signinS.css">
+</head>
+<body>
+<!--
+    DRAFT (task S1).   IT's side:  turn a person's request into a sign-in file.
+    Uses IT's keyring  (made in it-console/,  read here,  never changed)  and IT's signing key  (.flogic-signer).
+-->
+<p class="draft">Draft: not the real IT console</p>
+<main class="wide">
+    <h1>Issue sign-in files</h1>
+
+    <section id="locked">
+        <p>Open IT's keyring and IT's signing key. Both stay locked on disk. They're open only on this page, until Lock.</p>
+        <label class="field"><span>IT keyring  (.flogic-keyring)</span><input type="file" id="ring-file" accept=".flogic-keyring,application/json"></label>
+        <label class="field"><span>IT signing key  (.flogic-signer)</span><input type="file" id="signer-file" accept=".flogic-signer,application/json"></label>
+        <label class="field"><span>IT passphrase</span><input type="password" id="it-pass" autocomplete="off"></label>
+        <button type="button" class="main" id="open">Open</button>
+        <p class="problem" id="open-why" role="alert"></p>
+        <details><summary>No signing key yet?</summary>
+            <p class="small">Makes a new one, locked with the passphrase above. Every copy of the app then needs its
+               public half (the file it-signerS.js), and sign-in files made with an older key stop working.</p>
+            <button type="button" id="new-signer">Make a new signing key</button>
+        </details>
+    </section>
+
+    <section id="open-part" hidden>
+        <p class="good" id="open-who"></p>
+        <h2>1. The person's request</h2>
+        <label class="field"><span>Their request file  (.flogic-request)</span><input type="file" id="req-file" accept=".flogic-request,application/json"></label>
+        <p id="req-who"></p>
+        <p class="warn" id="req-check" hidden>Before you issue: ask them to read out the laptop code on their screen. It has to be
+           <strong class="code" id="req-code"></strong>. If it isn't, someone else made this file, so don't issue it.</p>
+
+        <h2>2. Who it's for</h2>
+        <label class="field"><span>Person in the keyring  (their groups come from here)</span><select id="person"></select></label>
+        <p id="person-groups"></p>
+        <label class="field"><span>Good until  (the end of that day)</span><input type="date" id="until"></label>
+        <p class="small">Short is safer: a sign-in file can't be taken back early. A new one costs the person nothing.</p>
+        <label class="tick"><input type="checkbox" id="code-ok"> <span>They read the laptop code back, and it matches</span></label>
+
+        <button type="button" class="main" id="issue">Make their sign-in file</button>
+        <p id="issue-msg" role="status"></p>
+        <button type="button" id="lock">Lock</button>
+    </section>
+</main>
+<script src="../DIRECTORY/vaultcoreI.js"></script>
+<script src="signincoreS.js"></script>
+<script src="itissueS.js"></script>
+</body>
+</html>
