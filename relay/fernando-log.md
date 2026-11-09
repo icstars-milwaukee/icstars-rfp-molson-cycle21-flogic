@@ -80,3 +80,22 @@ Also: "e.g." placeholders and a straighter group form, checked in light and dark
 2. F1's status in `relay/README.md` can move to done. That's your file, so I left it alone.
 3. `it-console/run-console-test.mjs` drives any test page headlessly over the DevTools protocol (no installs, Node 22+),
    if it's useful for V4–V6.
+
+## 2026-11-09 · S1 · STARTED
+Read `SCANME/` (README, permission, return template), the relay rules, the handoff (sections 1, 3, 4 and 8),
+`it-console/README.md` and `vaultcoreI.js`. Working on `sso-draft` (made from `group-BUFFER`), in `sso-draft/` only.
+
+Fernando's steer for this draft: **"users do not care one bit about security, but we do."** So the person's part is as
+small as I can make it: pick a passphrase once, send one file to IT, open the file IT sends back. After that it's only the
+passphrase. Everything else (who you are, your groups, the rules, the end date) is IT's, and it's signed.
+
+The plan (it can change; the return will say what stuck):
+- **IT's signing key:** ECDSA P-256 (WebCrypto), locked with IT's passphrase in a `.flogic-signer` file. The app carries
+  IT's public key pinned in a script file.
+- **No setup code.** Each laptop makes its own key pair (ECDH P-256). Its private half is locked with the person's
+  passphrase, and only the locked copy is kept. The person sends IT a `.flogic-request` with the public half (nothing
+  secret in it).
+- **The sign-in file** (`.flogic-signin`) has two parts: the **signed claims** (who, groups, rules, which laptop, the end
+  date) and the **group keys, locked to that laptop's key**. The claims carry no key. They carry only a hash of the
+  locked-keys part, so neither part can be swapped.
+- A copied sign-in file is useless on another laptop: it names the wrong laptop, and that laptop can't unlock the keys.

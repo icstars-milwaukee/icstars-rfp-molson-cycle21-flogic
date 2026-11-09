@@ -1,0 +1,22 @@
+{
+  "flogic": "signer",
+  "v": 1,
+  "fingerprint": "X8FB-44UJ-APFN-VWCM",
+  "publicKey": {
+    "key_ops": [
+      "verify"
+    ],
+    "ext": true,
+    "kty": "EC",
+    "x": "tcTYH9i-vBQAJI1gOa2FJtvURQYJdtreG5NJIh4ezDk",
+    "y": "We_IBGqhXigHi-a7vFUKqa9EfHvmpTgfuluFKw5anlw",
+    "crv": "P-256"
+  },
+  "made": "2026-11-09",
+  "locked": {
+    "salt": "YTlAPv94qG+0DMLxa1C5/w==",
+    "rounds": 600000,
+    "iv": "NeCJA+SNNjcvPGth",
+    "wrapped": "+RzFGHQy1jJQV+Yx0iFjsWOvliOonxaPBrS5K9+UXjm+GZPZe0hg+u/erOtT1utNqrQnA9b8s87gMhy2Cfy5qRDHNho2adETsl0VcfWHGft3Cn+IEKpEtzA0R+BFMnQZSlYO9GifAAf15qLpZ2BaRj6FdomvA31/nhU3o99lQ2n0ZY4auzPFcGDgcKQHtXH+2QPIJy2qkrHQ6Q=="
+  }
+}
