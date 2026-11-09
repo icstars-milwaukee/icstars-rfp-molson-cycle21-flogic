@@ -34,3 +34,21 @@ SCANME file follows.
 6. **Honest claims.** Nothing here may say more than it does. "SSO-style" is not SSO until a real identity provider is
    involved (see `SSO-PERMISSION-v0.1.0.md`, section 3).
 7. **Keywords:** the go-word for Fernando's agent stays **Keystone**, and DJ's "it's running" word stays **Cornerstone**.
+
+## Open questions (S1, for DJ and Fernando)
+
+From `returns/SSO-RETURN-v0.1.0-2026-11-09.md`, section 9. These are decisions for people, not agents. Until they're
+answered, the draft uses the cautious choice, shown in brackets.
+
+1. **Default end date for a sign-in file:** 7 days or 30 days? A file can't be taken back early, so short is safer.
+   Renewal costs the person nothing and takes IT about a minute. *(Draft: 7 days.)*
+2. **No recovery code in the new way:** keep it dropped? A forgotten passphrase means "set up again, and IT sends a new
+   file", and nothing is lost. People who don't care about security tend to lose recovery codes or tape them up.
+   *(Draft: dropped.)*
+3. **The laptop-code check:** IT asks the person to read their laptop code out loud, then ticks a box. Is the tick box
+   enough, or should IT type the code back in? It's the one habit left that stops a fake request.
+   *(Draft: the tick box.)*
+4. **The Nov 19 demo:** show both sign-in ways (the old setup code and the new one), or the new one only?
+   *(Draft: both, side by side.)*
+
+Answer in `relay/dj-log.md` (DJ) or tell Fernando's agent, and the draft follows.
