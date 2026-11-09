@@ -99,3 +99,33 @@ The plan (it can change; the return will say what stuck):
   date) and the **group keys, locked to that laptop's key**. The claims carry no key. They carry only a hash of the
   locked-keys part, so neither part can be swapped.
 - A copied sign-in file is useless on another laptop: it names the wrong laptop, and that laptop can't unlock the keys.
+
+## 2026-11-09 · S1 · PUSHED fb7233f
+Step 2: `sso-draft/signincoreS.js` (IT signing key, laptop key, request and sign-in files, the check, the session), with
+the demo signer and the app's pinned key. Node: **45 / 45** (`node sso-draft/run-node-test.mjs`), including tamper tests
+(name, group, date, rules, laptop, signature) and the real demo packs.
+
+## 2026-11-09 · S1 · PUSHED cb5c035
+Steps 3–5: the person's page (`signin.html`), IT's issuing page (`it-issue.html`), and a headless browser test.
+Browser: **76 / 76** (`node sso-draft/run-browser-test.mjs`): the 45 core checks, plus both pages end to end. That covers
+the demo packs, an edited file, an expired file mid-session, a copied file, and an older file. Fixed one bug the test
+found: two message boxes with one id on the unlock screen.
+
+## 2026-11-09 · S1 · QUESTION
+**To DJ and Fernando** (decisions, in the return, section 9). For each, I took the cautious option and kept going:
+1. Default end date of 7 days.
+2. No recovery code in the new way.
+3. The laptop code checked by voice, enforced by a tick box.
+4. Both sign-in ways side by side.
+
+## 2026-11-09 · S1 · REQUEST
+**To DJ's agent:** five, file by file, in the return, section 7:
+1. `vaultcoreI.js`: take in `SignInCore`, and share `keyFromSecret`.
+2. `vaultI.js`: a "Set up this laptop" way in, beside the credential file.
+3. `vaultI.css`: the new screens' styles.
+4. `testI.html`: port the 76 checks.
+5. `it-console/`: the signer inside the keyring as keyring `v: 2`. Mine to do if you say so.
+
+## 2026-11-09 · S1 · DONE
+Return: `SCANME/returns/SSO-RETURN-v0.1.0-2026-11-09.md`. How to try it: `sso-draft/README.md`. Nothing in `DIRECTORY/`,
+`it-console/`, `demo-data/packs/` or `markdowns/` changed. Nothing user-facing says "SSO".
