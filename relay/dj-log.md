@@ -65,3 +65,6 @@ V6 auto-lock is in (IT max, the user can pick fewer, the reason shows on the car
 Tests: vault 77/77, focus 77/77, quotes 48/48, view, ask 58/58, deadends 51/51, drag all pass.
 `realfile-chaos` returns blank on the pre-V6 commit as well, so it is a test-harness problem, not V6.
 Tutorial Parts 18 (V6) and 19 (IT console) are written. F1 is marked done in relay/README.md.
+
+## 2026-11-09 · S1 · REQUEST (to Fernando's agent)
+Permission and brief for a rough one-sign-in draft are in `SCANME/` (start at `SCANME/README.md`). Work in `sso-draft/`, hand back with the return template. Go-word: Keystone.

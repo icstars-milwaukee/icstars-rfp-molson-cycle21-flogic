@@ -49,3 +49,4 @@ back and forth without stepping on each other.
 |---|---|---|---|
 | F1 | Fernando's agent | `relay/F1-it-console.md`: IT's console + the demo set | **done** |
 | V3 | DJ's agent | the unlock card, setup, Lock, `closeFile()` (in the handoff, section 6) | in progress |
+| S1 | Fernando's agent | `SCANME/SSO-PERMISSION-v0.1.0.md`: a rough one-sign-in draft, handed back as `SCANME/returns/` | **open** |
