@@ -119,12 +119,14 @@ async function partB() {
     check('IT: opens the keyring and the signing key', await until(function () { return !$('open-part').hidden; }, 30000) &&
           text('open-who').includes(FLOGIC_IT_SIGNER.fingerprint), text('open-who'));
     pick('req-file', 'fernando-g.flogic-request', req.text);
-    check('IT: the request shows the laptop code to check by voice', await until(function () { return !$('req-check').hidden; }) && text('req-code') === laptopCode);
+    check('IT: asks for the code by voice, and does NOT show it', await until(function () { return !$('req-check').hidden; }) && !w().document.body.textContent.includes(laptopCode));
     check('IT: picks the person by name, with their keyring groups', $('person').value === 'u-0001' && /Service Desk/.test(text('person-groups')));
     w().__flogicLastDownload = null;
     click('issue');
     check('IT: won\'t issue until the code is checked', await until(function () { return /laptop code/.test(text('issue-msg')); }) && !w().__flogicLastDownload);
-    $('code-ok').checked = true; click('issue');
+    type('code-typed', 'AAAA-BBBB-CCCC-DDDD'); click('issue');
+    check('IT: a wrong typed code is refused', await until(function () { return /has to match/.test(text('issue-msg')); }) && !w().__flogicLastDownload);
+    type('code-typed', laptopCode.toLowerCase().replace(/-/g, ' ')); click('issue');
     check('IT: makes the sign-in file', await until(function () { return w().__flogicLastDownload; }, 30000) &&
           w().__flogicLastDownload.fileName === 'fernando-g.flogic-signin');
     const signinText = w().__flogicLastDownload.text;

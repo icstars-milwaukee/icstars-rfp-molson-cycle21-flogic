@@ -32,17 +32,31 @@
     <section id="open-part" hidden>
         <p class="good" id="open-who"></p>
         <h2>1. The person's request</h2>
+        <div id="folder-part">
+            <button type="button" id="connect-folder">Connect the shared folder</button>
+            <span class="small" id="folder-status">OneDrive, Google Drive or a network share. Requests wait in it, and your answers go back through it.</span>
+            <div id="inbox-part" hidden>
+                <ul id="inbox-list" class="inbox"></ul>
+                <p class="small" id="inbox-note"></p>
+                <button type="button" id="refresh">Look again</button>
+                <button type="button" id="renew-all">Renew everyone</button>
+                <p id="renew-msg" role="status"></p>
+            </div>
+        </div>
+        <details id="by-hand-it"><summary>Or open a request file you were sent</summary>
         <label class="field"><span>Their request file  (.flogic-request)</span><input type="file" id="req-file" accept=".flogic-request,application/json"></label>
+        </details>
         <p id="req-who"></p>
-        <p class="warn" id="req-check" hidden>Before you issue: ask them to read out the laptop code on their screen. It has to be
-           <strong class="code" id="req-code"></strong>. If it isn't, someone else made this file, so don't issue it.</p>
+        <p class="warn" id="req-check" hidden>Before you issue: phone or meet the person, and have them read out the laptop code on THEIR screen. Type what you hear in step 2.
+           Don't read it to them: the page knows it (<span class="small">it's hidden here on purpose</span>). If it doesn't match, someone else made this file, so don't issue it.</p>
 
         <h2>2. Who it's for</h2>
         <label class="field"><span>Person in the keyring  (their groups come from here)</span><select id="person"></select></label>
         <p id="person-groups"></p>
         <label class="field"><span>Good until  (the end of that day)</span><input type="date" id="until"></label>
         <p class="small">Short is safer: a sign-in file can't be taken back early. A new one costs the person nothing.</p>
-        <label class="tick"><input type="checkbox" id="code-ok"> <span>They read the laptop code back, and it matches</span></label>
+        <label class="field"><span>The laptop code they read out to you  (type it as they say it)</span><input type="text" id="code-typed" autocomplete="off" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX"></label>
+        <p class="small" id="code-state"></p>
 
         <button type="button" class="main" id="issue">Make their sign-in file</button>
         <p id="issue-msg" role="status"></p>
@@ -51,6 +65,8 @@
 </main>
 <script src="../DIRECTORY/vaultcoreI.js"></script>
 <script src="signincoreS.js"></script>
+<script src="mailboxS.js"></script>
+<script src="it-signerS.js"></script>
 <script src="itissueS.js"></script>
 </body>
 </html>

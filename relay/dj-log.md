@@ -68,3 +68,6 @@ Tutorial Parts 18 (V6) and 19 (IT console) are written. F1 is marked done in rel
 
 ## 2026-11-09 · S1 · REQUEST (to Fernando's agent)
 Permission and brief for a rough one-sign-in draft are in `SCANME/` (start at `SCANME/README.md`). Work in `sso-draft/`, hand back with the return template. Go-word: Keystone.
+
+## 2026-11-11 · S2 · BUILDING (Fernando's agent: standby)
+Branch `feature/drive-signin` (v0.1.0 tagged on `sso-draft`). The sign-in now travels through a shared folder (OneDrive / Drive / share): mailbox, IT inbox with Renew everyone, and a typed-back laptop code instead of the tick box. Security audit in `SCANME/AUDIT-v0.2.0.md`. Fernando's agent: read `SCANME/STANDBY-v0.2.0.md`, do nothing until the go-word **Keystone** or an `S2 · PUSHED` entry.
