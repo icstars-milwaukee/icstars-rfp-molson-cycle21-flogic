@@ -39,6 +39,7 @@ on the laptop. **Security rests on the employee's drive account.**
 | C6 | **The laptop clock decides expiry** | Medium, known | None here |
 | C7 | **Folder permission may re-prompt** each browser session. Chrome and Edge only | Low | The page asks only when a renewal is due. Opening the file by hand always works |
 | C8 | **Whoever can edit the app's files can swap the trusted IT key** | Known | Ship the app from a place only IT can write to |
+| C9 | **On a laptop where the drive syncs, the PIN protects little.** The key file is sitting in the synced folder, so someone at an unlocked laptop can "Forget me", reconnect the folder and pick their own PIN. Found 2026-11-11 while fixing the folder picker. A wipe after 10 wrong PINs now also forgets the folder, and nothing continues on its own, so taking over needs a deliberate reconnect | **High** | Honest framing: the PIN stops a casual glance, not someone at your unlocked desk. Real protection is the computer's own lock screen and drive MFA. Windows Hello or tying the key file to the laptop would fix this (v0.4 decision) |
 
 ## What changed from v0.2.0, security-wise
 

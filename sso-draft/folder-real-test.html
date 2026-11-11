@@ -189,17 +189,35 @@ async function run() {
     await until(function () { return $('connect'); });
     await load('signin.html');
     noPicker();
-    await until(function () { return $('connect'); });
-    click('connect');
-    check('person page, reloaded: the folder is remembered, no picking again', await until(function () { return $('pin1'); }, 30000), txt('why'));
+    check('person page, reloaded: the remembered folder goes straight to the PIN, no click, no picker', await until(function () { return $('pin1'); }, 30000), txt('why'));
 
-    //  the real "cancelled" path:  the person closes the picker
+    //  "cancelled":  the browser closing the window by itself  vs  the person closing it
     await deleteDb('flogic-mailbox');
     await load('signin.html');
     w().showDirectoryPicker = async function () { throw new DOMException('The user aborted a request.', 'AbortError'); };
     await until(function () { return $('connect'); });
     click('connect');
-    check('person page: closing the picker says so (not a ghost button)', await until(function () { return /No folder picked/.test(txt('why')); }), txt('why'));
+    check('picker closed at once: says the BROWSER closed it, with its own words, and offers drag-and-drop', await until(function () {
+        return /closed the folder window by itself/.test(txt('why')) && /AbortError/.test(txt('why')) && /drag/i.test(txt('why')); }), txt('why'));
+    w().showDirectoryPicker = function () { return new Promise(function (r, j) { setTimeout(function () { j(new DOMException('The user aborted a request.', 'AbortError')); }, 700); }); };
+    click('connect');
+    check('picker closed by the person: says "No folder picked"', await until(function () { return /No folder picked/.test(txt('why')); }), txt('why'));
+
+    //  drag-and-drop the key file onto the page
+    function dropOn(id, file) {
+        const dt = new (w().DataTransfer)();
+        dt.items.add(file);
+        $(id).dispatchEvent(new (w().DragEvent)('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    }
+    dropOn('folder-drop', new (w().File)([await readFile(fernFolder, 'flogic.flogic-key')], 'flogic.flogic-key'));
+    check('drop: dropping the key file on the page goes to the PIN', await until(function () { return $('pin1') && /Hi, Fernando G/.test(txt('title')); }, 30000), txt('why'));
+    await load('signin.html');
+    await until(function () { return $('folder-drop'); });
+    dropOn('folder-drop', new (w().File)(['not a key'], 'notes.txt'));
+    check('drop: dropping something else says so', await until(function () { return /isn't a Flogic key file/.test(txt('why')); }), txt('why'));
+
+    await load('it-issue.html');
+    check('IT page: has the drop area too', !!$('folder-drop'));
 
     await opfs.removeEntry('FlogicDemo', { recursive: true });
     await opfs.removeEntry('FlogicEmpty', { recursive: true });

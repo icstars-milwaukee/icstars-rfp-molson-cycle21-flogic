@@ -160,29 +160,47 @@
             catch (e) { why.textContent = nice(e); }
             byHand.value = '';
         });
-        const connect = Mailbox.supported() ? button('Connect your Flogic folder', async function () {
+        function failed(e) {
+            console.warn('Flogic: connecting the folder failed:', e);
+            why.textContent = e.code && e.code !== 'cancelled' && !e.raw ? nice(e) : Mailbox.whyNot(e);
+        }
+        //  A folder handle  ->  its key file  ->  pick a PIN
+        async function useFolder(h) {
+            folder = await Mailbox.openPersonal(h);
+            try { await Mailbox.remember(h, 'person'); } catch (e) { /* works this visit;  asks again next time */ }
+            const k = await keyFromFolder();
+            if (!k) { why.textContent = 'There\'s no key file in "' + folder.name + '" yet. Pick the folder IT shared with you, or ask IT to put your key there.'; folder = null; return; }
+            await S.check(k, FLOGIC_IT_SIGNER);
+            choosePin(k);
+        }
+        const connect = Mailbox.supported() ? button('Connect your Flogic folder', function () {
             why.textContent = '';
-            try {
-                if (!await reconnect(true)) await connectNew();
-                const k = await keyFromFolder();
-                if (!k) { why.textContent = 'There\'s no key file in "' + folder.name + '" yet. Pick the folder IT shared with you, or ask IT to put your key there.'; folder = null; return; }
-                await S.check(k, FLOGIC_IT_SIGNER);
-                choosePin(k);
-            } catch (e) {
-                console.warn('Flogic: connecting the folder failed:', e);
-                why.textContent = e.code === 'cancelled' ? 'No folder picked. Click again and pick the folder IT shared with you.'
-                    : e.name === 'SecurityError' || e.name === 'NotAllowedError' ? 'The browser didn\'t allow that folder. Pick the folder itself (such as u-0001), and click Allow when asked.'
-                    : nice(e);
-            }
+            Mailbox.pick('read').then(useFolder).catch(failed);         //  the picker FIRST,  straight from the click
         }, 'main', 'connect') : null;
+        //  Or drag the folder  (or the key file itself)  onto the page:  no picker window at all
+        const drop = el('div', { class: 'drop', id: 'folder-drop', text: 'Or drag your Flogic folder (or the key file) here' });
+        ['dragenter', 'dragover'].forEach(function (t) { drop.addEventListener(t, function (e) { e.preventDefault(); drop.classList.add('over'); }); });
+        drop.addEventListener('dragleave', function () { drop.classList.remove('over'); });
+        drop.addEventListener('drop', function (e) {
+            e.preventDefault(); drop.classList.remove('over'); why.textContent = '';
+            Mailbox.fromDrop(e).then(async function (r) {
+                if (r.dir) return useFolder(r.dir);
+                const k = S.readKey(await r.file.text()); await S.check(k, FLOGIC_IT_SIGNER); choosePin(k);
+            }).catch(failed);
+        });
         screen('Sign in to Flogic',
                [Mailbox.supported() ? 'IT shared a folder with you in OneDrive or Google Drive. Pick it once, and you\'re in.'
                                     : 'Open the key file IT gave you (' + Mailbox.KEY_FILE + ').'],
-               [connect,
+               [connect, drop,
                 el('details', { id: 'by-hand' }, [el('summary', { text: 'Or open the key file yourself' }),
                     el('label', { class: 'field' }, [el('span', { text: 'Your key file  (' + Mailbox.KEY_FILE + ')' }), byHand])]),
                 why], note);
         if (!Mailbox.supported()) box.querySelector('details').open = true;
+        //  A folder this browser already remembers,  still allowed:  go straight to the PIN
+        if (!note && await reconnect(false)) {
+            try { const k = await keyFromFolder(); if (k) { await S.check(k, FLOGIC_IT_SIGNER); choosePin(k); } }
+            catch (e) { why.textContent = nice(e); }
+        }
     }
 
     function choosePin(keyFile) {
@@ -248,7 +266,12 @@
             } catch (e) {
                 pin.input.value = '';
                 if (e.code === 'wrong-pin') { await saveCopy(e.copy); copy = e.copy; }
-                if (e.code === 'wiped') { await forgetCopy(copy.id); start(e.message); return; }
+                if (e.code === 'wiped') {
+                    //  Forget the folder too:  otherwise the page would just offer "pick a new PIN" to whoever is at the desk
+                    folder = null;
+                    try { await Mailbox.forget('person'); } catch (x) { /* nothing remembered */ }
+                    await forgetCopy(copy.id); start(e.message); return;
+                }
                 why.textContent = e.message;
             }
         }, 'main', 'go');

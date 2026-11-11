@@ -37,10 +37,50 @@ const Mailbox = (function () {
     function fail(code, message) { const e = new Error(message); e.code = code; return e; }
     function supported() { return typeof window !== 'undefined' && typeof window.showDirectoryPicker === 'function'; }
 
-    async function pick(mode) {
-        if (!supported()) throw fail('no-folder-access', 'This browser can\'t open a drive folder. Use Chrome or Edge, or open your key file by hand.');
-        try { return await window.showDirectoryPicker({ id: 'flogic-' + (mode || 'read'), mode: mode === 'readwrite' ? 'readwrite' : 'read' }); }
-        catch (e) { throw e && e.name === 'AbortError' ? fail('cancelled', 'No folder picked.') : e; }
+    //  Call this FIRST in a click handler,  before any other await:  the browser only opens the picker straight after a click.
+    //  A 'cancelled' error carries  .fast  (true:  the window closed in under half a second,  so the PERSON didn't close it)
+    //  and  .raw  (the browser's own words),  so the page can say what really happened.
+    function pick(mode) {
+        if (!supported()) return Promise.reject(fail('no-folder-access', 'This browser can\'t open a drive folder. Use Chrome or Edge, or open your key file by hand.'));
+        const t0 = Date.now();
+        let p;
+        try { p = window.showDirectoryPicker({ mode: mode === 'readwrite' ? 'readwrite' : 'read' }); }
+        catch (e) { return Promise.reject(e); }
+        return p.catch(function (e) {
+            if (e && e.name === 'AbortError') {
+                const c = fail('cancelled', 'No folder picked.');
+                c.fast = Date.now() - t0 < 500; c.raw = e.name + ': ' + e.message;
+                throw c;
+            }
+            throw e;
+        });
+    }
+
+    //  Drag-and-drop:  the same folder,  without the picker window.   Call it INSIDE the drop event,  before any await.
+    //  ->  a promise of  { dir }  (a folder handle)  or  { file }  (a dropped file),  or rejects with a plain reason
+    function fromDrop(event) {
+        const items = event.dataTransfer && event.dataTransfer.items;
+        const item = items && Array.from(items).find(function (i) { return i.kind === 'file'; });
+        if (!item) return Promise.reject(fail('not-a-file', 'Drop a folder (or the key file) here.'));
+        //  Both must be asked for DURING the event:  afterwards the browser hands back nothing
+        const plain = item.getAsFile();
+        const h = typeof item.getAsFileSystemHandle === 'function' ? item.getAsFileSystemHandle() : null;
+        return Promise.resolve(h).then(function (handle) {
+            if (handle && handle.kind === 'directory') return { dir: handle };
+            if (handle) return handle.getFile().then(function (f) { return { file: f }; });
+            if (plain && plain.size > 0) return { file: plain };
+            throw fail('not-a-file', 'This browser couldn\'t read what was dropped. Click "Connect" instead, or drop the key file itself.');
+        });
+    }
+
+    //  The words to show for a failed pick or drop
+    function whyNot(e) {
+        if (e.code === 'cancelled') {
+            return e.fast ? 'The browser closed the folder window by itself (' + e.raw + '). Drag the folder onto this page instead, or open the key file yourself.'
+                          : 'No folder picked. Click again, or drag the folder onto this page.';
+        }
+        if (e.name === 'SecurityError' || e.name === 'NotAllowedError') return 'The browser didn\'t allow that (' + e.name + ': ' + e.message + '). Pick a plain subfolder, click Allow when asked, or drag the folder onto this page.';
+        return e.message + (e.name && e.name !== 'Error' ? ' (' + e.name + ')' : '');
     }
 
     // ---- remember the folder between visits  (the browser keeps the handle;  it may ask permission again) ----
@@ -132,7 +172,7 @@ const Mailbox = (function () {
 
 
     return Object.freeze({
-        KEY_FILE: KEY_FILE, PERSON: PERSON, supported: supported, pick: pick,
+        KEY_FILE: KEY_FILE, PERSON: PERSON, supported: supported, pick: pick, fromDrop: fromDrop, whyNot: whyNot,
         openPersonal: openPersonal, openIT: openIT,
         remember: remember, recall: recall, forget: forget, allowed: allowed,
     });

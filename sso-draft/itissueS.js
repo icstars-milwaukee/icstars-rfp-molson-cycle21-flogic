@@ -81,23 +81,33 @@
         } catch (e) { folder = null; }
         return folder;
     }
-    function folderOn() { $('connect-folder').hidden = true; say('folder-status', 'Connected: "' + folder.name + '". Key files go into each person\'s subfolder.', 'good'); }
-    $('connect-folder').addEventListener('click', async function () {
+    function folderOn() { $('connect-folder').hidden = true; $('folder-drop').hidden = true; say('folder-status', 'Connected: "' + folder.name + '". Key files go into each person\'s subfolder.', 'good'); }
+    async function useFolder(h) {
+        if (!await Mailbox.allowed(h, 'readwrite', true)) throw Object.assign(new Error('Flogic needs your OK to write key files into that folder.'), { name: 'NotAllowedError' });
+        folder = await Mailbox.openIT(h);
+        try { await Mailbox.remember(h, 'it'); } catch (e) { /* asks again next time */ }
+        folderOn(); draw();
+    }
+    function folderFailed(e) {
+        console.warn('Flogic IT: connecting the folder failed:', e);
+        say('folder-status', Mailbox.whyNot(e), 'problem');
+    }
+    $('connect-folder').addEventListener('click', function () {
+        const picking = Mailbox.pick('readwrite');                   //  FIRST,  straight from the click
         say('folder-status', 'Pick a folder in the window that opened (check the taskbar if you don\'t see it), then allow Flogic to edit it.');
-        try {
-            if (!await reconnect(true)) {
-                const h = await Mailbox.pick('readwrite');
-                folder = await Mailbox.openIT(h);
-                try { await Mailbox.remember(h, 'it'); } catch (e) { /* asks again next time */ }
-                folderOn();
-            }
-            draw();
-        } catch (e) {
-            console.warn('Flogic IT: connecting the folder failed:', e);
-            say('folder-status', e.code === 'cancelled' ? 'No folder connected (cancelled). Click again and pick a folder such as C:\\FlogicDemo.'
-                : e.name === 'SecurityError' || e.name === 'NotAllowedError' ? 'The browser didn\'t allow that folder. Pick a plain subfolder such as C:\\FlogicDemo, and click Allow when asked.'
-                : 'Couldn\'t connect: ' + e.message, 'problem');
-        }
+        picking.then(useFolder).catch(folderFailed);
+    });
+    //  Or drag the folder onto the page  (no picker window at all)
+    const drop = $('folder-drop');
+    ['dragenter', 'dragover'].forEach(function (t) { drop.addEventListener(t, function (e) { e.preventDefault(); drop.classList.add('over'); }); });
+    drop.addEventListener('dragleave', function () { drop.classList.remove('over'); });
+    drop.addEventListener('drop', function (e) {
+        e.preventDefault(); drop.classList.remove('over');
+        const got = Mailbox.fromDrop(e);                             //  FIRST,  during the drop
+        got.then(function (r) {
+            if (!r.dir) throw Object.assign(new Error('That\'s a file. Drag IT\'s Flogic FOLDER here (the one that will hold a subfolder per person).'), { name: 'Error' });
+            return useFolder(r.dir);
+        }).catch(folderFailed);
     });
 
 
@@ -182,7 +192,7 @@
     $('lock').addEventListener('click', function () {
         ring = null; signer = null; folder = null;
         ['ring-file', 'signer-file'].forEach(function (id) { $(id).value = ''; });
-        $('people').replaceChildren(); $('connect-folder').hidden = false;
+        $('people').replaceChildren(); $('connect-folder').hidden = false; $('folder-drop').hidden = false;
         $('open-part').hidden = true; $('locked').hidden = false;
         say('open-why', 'Locked.', 'good');
     });
