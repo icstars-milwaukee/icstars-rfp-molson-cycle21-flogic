@@ -8,7 +8,9 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = fs.readFileSync(path.join(here, '..', 'DIRECTORY', 'vaultcoreI.js'), 'utf8') + '\n' +
-            fs.readFileSync(path.join(here, 'signincoreS.js'), 'utf8') + '\nreturn { VaultCore, SignInCore };';
-export const { VaultCore, SignInCore } = new Function(src)();
+            fs.readFileSync(path.join(here, 'signincoreS.js'), 'utf8') + '\n' +
+            fs.readFileSync(path.join(here, 'mailboxS.js'), 'utf8') + '\n' +
+            fs.readFileSync(path.join(here, 'memory-folderS.js'), 'utf8') + '\nreturn { VaultCore, SignInCore, Mailbox, makeMemoryFolder };';
+export const { VaultCore, SignInCore, Mailbox, makeMemoryFolder } = new Function(src)();
 export const repo = path.join(here, '..');
 export const draft = here;

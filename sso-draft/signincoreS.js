@@ -321,6 +321,20 @@ const SignInCore = (function (VaultCore) {
         return c;
     }
 
+    //  IT's side  (v0.2.0):   "did WE sign this?"   Signature, issuer and keys-hash only.   No laptop, no end date:
+    //  IT renews a sign-in that has already run out,  for a laptop whose code was checked by voice the first time.
+    //  ->  the claims
+    async function readIssued(signin, pinned) {
+        const key = await trustedKey(pinned);
+        let ok = false;
+        try { ok = await subtle.verify(SIG, key, fromB64(signin.sig), utf8.encode(SIGN_MAGIC + signin.claims)); } catch (e) { ok = false; }
+        if (!ok) throw fail('bad-signature', 'That sign-in file wasn\'t signed by this IT key, or it was changed.');
+        const c = JSON.parse(signin.claims);
+        if (c.iss !== pinned.fingerprint) throw fail('wrong-issuer', 'That sign-in file wasn\'t made by this IT key.');
+        if (await hashText(JSON.stringify(signin.keys)) !== c.keys) throw fail('damaged', 'That sign-in file\'s keys don\'t match it.');
+        return c;
+    }
+
     //  After check():   the laptop's private key unlocks every group key at once   ->   [{ group, keyVersion, key }]
     //  The keys come out NOT readable  (extractable: false).
     async function openKeys(signin, claims, laptopPrivate) {
@@ -437,7 +451,7 @@ const SignInCore = (function (VaultCore) {
         fingerprint: fingerprint,
         newSigner: newSigner, readSigner: readSigner, openSigner: openSigner, pin: pin,
         newLaptop: newLaptop, readRequest: readRequest, openLaptop: openLaptop,
-        issue: issue, readSignin: readSignin, check: check, openKeys: openKeys,
+        issue: issue, readSignin: readSignin, check: check, readIssued: readIssued, openKeys: openKeys,
         keyringGroups: keyringGroups, startSession: startSession, niceDate: niceDate,
     });
 
