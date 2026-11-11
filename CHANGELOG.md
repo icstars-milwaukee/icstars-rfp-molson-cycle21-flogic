@@ -3,7 +3,7 @@
 Plain words, newest first. Headings: **New**, **Safer**, **Fixed**, **Known limits** (left out when empty).
 Versions follow SemVer; everything is `0.x` until the Nov 19 demo. Conventions: `SCANME/README.md`.
 
-## 0.3.0 (unreleased, branch )
+## 0.3.0 (unreleased, branch `feature/filekey`)
 
 ### New
 - Sign in with a key file. IT makes one signed key file per person and puts it in that person's OneDrive or Google Drive
@@ -15,7 +15,7 @@ Versions follow SemVer; everything is `0.x` until the Nov 19 demo. Conventions: 
 ### Safer
 - An edited, forged, swapped or ended key file is refused (tested). An older one put back isn't taken.
 - After 10 wrong PINs, the laptop forgets the person. They connect their folder again.
-- Audit: .
+- Audit: `SCANME/AUDIT-v0.3.0.md`.
 
 ### Known limits
 - **The key file is the login.** Whoever gets it gets in until its end date, so the drive account (with MFA) is the lock.
