@@ -83,6 +83,7 @@
     }
     function folderOn() { $('connect-folder').hidden = true; say('folder-status', 'Connected: "' + folder.name + '". Key files go into each person\'s subfolder.', 'good'); }
     $('connect-folder').addEventListener('click', async function () {
+        say('folder-status', 'Pick a folder in the window that opened (check the taskbar if you don\'t see it), then allow Flogic to edit it.');
         try {
             if (!await reconnect(true)) {
                 const h = await Mailbox.pick('readwrite');
@@ -91,7 +92,12 @@
                 folderOn();
             }
             draw();
-        } catch (e) { if (e.code !== 'cancelled') say('folder-status', e.message, 'problem'); }
+        } catch (e) {
+            console.warn('Flogic IT: connecting the folder failed:', e);
+            say('folder-status', e.code === 'cancelled' ? 'No folder connected (cancelled). Click again and pick a folder such as C:\\FlogicDemo.'
+                : e.name === 'SecurityError' || e.name === 'NotAllowedError' ? 'The browser didn\'t allow that folder. Pick a plain subfolder such as C:\\FlogicDemo, and click Allow when asked.'
+                : 'Couldn\'t connect: ' + e.message, 'problem');
+        }
     });
 
 

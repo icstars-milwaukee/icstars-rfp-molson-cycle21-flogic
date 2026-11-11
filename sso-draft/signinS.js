@@ -168,7 +168,12 @@
                 if (!k) { why.textContent = 'There\'s no key file in "' + folder.name + '" yet. Pick the folder IT shared with you, or ask IT to put your key there.'; folder = null; return; }
                 await S.check(k, FLOGIC_IT_SIGNER);
                 choosePin(k);
-            } catch (e) { if (e.code !== 'cancelled') why.textContent = nice(e); }
+            } catch (e) {
+                console.warn('Flogic: connecting the folder failed:', e);
+                why.textContent = e.code === 'cancelled' ? 'No folder picked. Click again and pick the folder IT shared with you.'
+                    : e.name === 'SecurityError' || e.name === 'NotAllowedError' ? 'The browser didn\'t allow that folder. Pick the folder itself (such as u-0001), and click Allow when asked.'
+                    : nice(e);
+            }
         }, 'main', 'connect') : null;
         screen('Sign in to Flogic',
                [Mailbox.supported() ? 'IT shared a folder with you in OneDrive or Google Drive. Pick it once, and you\'re in.'
