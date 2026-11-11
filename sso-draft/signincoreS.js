@@ -10,7 +10,7 @@
                               +  the group keys.   The claims carry a hash of the keys,  so neither half can be swapped
                               or edited.    THE FILE IS THE LOGIN:   the drive's own sign-in  (company MFA)  guards it.
 
-        On each laptop,  the first time:   the person picks a PIN  (6+ digits).   Flogic keeps a LAPTOP COPY of the
+        On each laptop,  the first time:   the person picks a PIN  (4+ digits).   Flogic keeps a LAPTOP COPY of the
         filekey with the group keys locked by that PIN  (PBKDF2,  600,000 rounds).   After that:   PIN only.
         10 wrong PINs and the laptop copy is wiped  (open the filekey from the drive again).
 
@@ -206,7 +206,7 @@ const SignInCore = (function (VaultCore) {
     // ------------------------------------------------------
 
     function pinProblem(p) {
-        if (typeof p !== 'string' || !/^[0-9]{6,12}$/.test(p)) return 'Use 6 to 12 digits.';
+        if (typeof p !== 'string' || !/^[0-9]{4,12}$/.test(p)) return 'Use 4 to 12 digits.';
         if (/^(\d)\1+$/.test(p) || '0123456789012'.includes(p) || '9876543210987'.includes(p)) return 'Pick digits that aren\'t all the same or in a row.';
         return null;
     }

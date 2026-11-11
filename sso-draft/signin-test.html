@@ -127,8 +127,8 @@ async function partB() {
     check('first time: an edited key file is refused, and says so', await until(function () { return /changed/.test(text('why')); }), text('why'));
     click('connect');
     check('first time: connecting the folder finds the key and asks for a PIN', await until(function () { return $('pin1') && /Hi, Fernando G/.test(title()); }, 30000), title());
-    type('pin1', '1234'); type('pin2', '1234'); click('set-pin');
-    check('PIN: a short one is refused', await until(function () { return /6 to 12 digits/.test(text('why')); }));
+    type("pin1", "123"); type("pin2", "123"); click('set-pin');
+    check('PIN: a short one is refused', await until(function () { return /4 to 12 digits/.test(text('why')); }));
     type('pin1', PIN); type('pin2', PIN + '0'); click('set-pin');
     check('PIN: two that don\'t match are refused', await until(function () { return /don't match/.test(text('why')); }));
     type('pin2', PIN); click('set-pin');

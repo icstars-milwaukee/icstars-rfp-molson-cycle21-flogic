@@ -14,7 +14,7 @@ on the laptop. **Security rests on the employee's drive account.**
 |---|---|
 | The key file in the drive (the login) | The drive account's own sign-in. **Turn on company MFA.** Share each subfolder with its person only |
 | Who's in which group, until when | IT's signature. Any edit is refused (tested) |
-| The laptop's copy | A PIN of 6 to 12 digits, PBKDF2 at 600,000 rounds, and a wipe after 10 wrong PINs |
+| The laptop's copy | A PIN of 4 to 12 digits, PBKDF2 at 600,000 rounds, and a wipe after 10 wrong PINs |
 | Data packs | AES-GCM group keys, opened only on the laptop, never readable by the page (non-extractable) |
 
 ## Tried and held (tests)
@@ -33,7 +33,7 @@ on the laptop. **Security rests on the employee's drive account.**
 |---|---|---|---|
 | C1 | **The key file is a bearer login.** Whoever has it can sign in until its end date (shared link, hacked drive, copied file) | **High** | MFA on the drive. Short end dates (7 days) with Renew everyone. Never email key files |
 | C2 | **No early revoke.** Someone who leaves keeps access until their current file ends | High, known | Remove them from the keyring and don't renew. Their access ends within 7 days at most |
-| C3 | **A PIN is weak against a copied browser profile.** 1 million 6-digit PINs at about 0.3 s each means days offline, not years. The wipe counter can be skipped by copying the files | Medium | Accepted: the PIN is for the unlocked-desk case. A longer PIN helps. Windows Hello would be the real fix (v0.4 idea) |
+| C3 | **A PIN is weak against a copied browser profile.** A 4-digit PIN (10,000 choices at about 0.3 s each) falls in under an hour offline; 6 digits takes days. The wipe counter can be skipped by copying the files | Medium | Accepted: the PIN is for the unlocked-desk case. A longer PIN helps. Windows Hello would be the real fix (v0.4 idea) |
 | C4 | **The folder shows who's in which group.** Claims are signed, not hidden | Low | Each subfolder is shared with one person only |
 | C5 | **The demo IT signing key is public** (passphrase in the repo) | High if shipped | Make a real key before real use; never ship the demo one |
 | C6 | **The laptop clock decides expiry** | Medium, known | None here |

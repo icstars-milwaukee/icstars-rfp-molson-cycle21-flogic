@@ -182,7 +182,7 @@
 
     function choosePin(keyFile) {
         const c = JSON.parse(keyFile.claims);
-        const a = field('Pick a PIN for this laptop  (6 or more digits)', 'pin1');
+        const a = field('Pick a PIN for this laptop  (4 or more digits)', 'pin1');
         const b = field('Type it again', 'pin2');
         const why = problem();
         const go = button('Sign in', async function () {

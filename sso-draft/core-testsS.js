@@ -70,11 +70,12 @@ async function runCoreTests(check, env) {
     check('expiry: an ended key file is refused', await code(function () { return S.check(short, env.pinned); }, 'expired'));
 
     // ---- the laptop copy,  locked with a PIN ----
-    check('PIN: too short is refused', S.pinProblem('1234') !== null);
+    check('PIN: too short is refused', S.pinProblem('123') !== null);
     check('PIN: letters are refused', S.pinProblem('abcdef') !== null);
     check('PIN: 111111 and 123456 are refused', S.pinProblem('111111') !== null && S.pinProblem('123456') !== null && S.pinProblem('654321') !== null);
     check('PIN: 482916 is fine', S.pinProblem(PIN) === null);
-    check('claim: a weak PIN is refused', await code(function () { return S.claim(kf, '1234', env.pinned, FAST); }, 'weak'));
+    check('PIN: 4 digits (4829) is enough', S.pinProblem('4829') === null);
+    check('claim: a weak PIN is refused', await code(function () { return S.claim(kf, '12', env.pinned, FAST); }, 'weak'));
     check('claim: an edited key file can\'t be claimed', await code(function () { return S.claim(edit(kf, function (c) { c.name = 'Boss'; }), PIN, env.pinned, FAST); }, 'bad-signature'));
     const copy = await S.claim(kf, PIN, env.pinned, FAST);
     const copyText = JSON.stringify(copy);

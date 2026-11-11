@@ -21,7 +21,7 @@ Demo IT passphrase (keyring and signing key): `flogic demo keyring only`. Made-u
    3. Click **Make key file** next to Fernando G. It writes `u-0001/flogic.flogic-key` into that folder.
 2. **The person:** open `sso-draft/signin.html`.
    1. Click **Connect your Flogic folder** and pick the `u-0001` folder.
-   2. Pick a PIN (6 or more digits). You're signed in.
+   2. Pick a PIN (4 or more digits). You're signed in.
    3. Open `demo-data/packs/demo_incident.flogic`: it opens. `demo_change_request.flogic` is refused.
    4. Click **Lock**. From now on it's the PIN only.
 
@@ -58,7 +58,7 @@ The browser test swaps the folder picker for an in-memory folder. **No real OneD
   they're out when it ends.
 - **Anyone who gets the key file gets in** until its end date: a shared link, a hacked drive account, a copy on a USB
   stick. The drive's login is the lock.
-- **A 6-digit PIN is weak against someone who copies the browser's files** (about 0.3 s a guess offline). It stops a
+- **A 4-digit PIN is very weak against someone who copies the browser's files** (about 0.3 s a guess offline). It stops a
   person at an unlocked desk, not a determined thief with the disk.
 - **The laptop's clock decides "ended".**
 - **Whoever can change the app's files can change whom it trusts** (`it-signerS.js`).

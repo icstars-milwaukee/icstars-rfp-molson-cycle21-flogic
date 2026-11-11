@@ -20,7 +20,7 @@ Versions follow SemVer; everything is `0.x` until the Nov 19 demo. Conventions: 
 ### Known limits
 - **The key file is the login.** Whoever gets it gets in until its end date, so the drive account (with MFA) is the lock.
 - No early revoke: someone removed keeps access until their current file ends (7 days by default).
-- A 6-digit PIN slows a casual person, not someone who copies the browser's files.
+- A 4-digit PIN slows a casual person, not someone who copies the browser's files.
 - Not yet tried on a real OneDrive or Drive folder.
 
 ### Removed
