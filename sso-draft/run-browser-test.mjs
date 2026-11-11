@@ -24,8 +24,8 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const page = pathToFileURL(path.join(here, 'signin-test.html')).href;
-const TIMEOUT_MS = 180000;
+const page = pathToFileURL(path.join(here, process.argv[2] || 'signin-test.html')).href;
+const TIMEOUT_MS = Number(process.env.TEST_TIMEOUT_MS) || 180000;
 
 const browsers = [
     process.env.CHROME_PATH,
@@ -104,7 +104,7 @@ async function main() {
         await wait(250);
         done = await evaluate('window.__done === true');
     }
-    if (!done) throw new Error('The tests didn\'t finish in ' + (TIMEOUT_MS / 1000) + ' s.');
+    if (!done) pageErrors.push('The tests didn\'t finish in ' + (TIMEOUT_MS / 1000) + ' s. Results so far are above.');
 
     const results = JSON.parse(await evaluate('JSON.stringify(window.__results)'));
     let passed = 0;

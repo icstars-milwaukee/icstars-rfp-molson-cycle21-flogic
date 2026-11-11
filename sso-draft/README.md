@@ -41,16 +41,20 @@ With no folder access, IT's page downloads the key file and the person opens it 
 | `core-testsS.js`, `run-node-test.mjs`, `load-core.mjs` | Core checks in Node (the browser runs the same ones) |
 | `mailbox-testsS.js`, `run-mailbox-test.mjs`, `memory-folderS.js` | Folder checks against an in-memory folder |
 | `signin-test.html`, `run-browser-test.mjs` | Core checks, plus both pages end to end, headless |
+| `folder-real-test.html` | Both pages on a real browser folder handle (run: `node sso-draft/run-browser-test.mjs folder-real-test.html`) |
 
 ## Tests
 
 ```text
 node sso-draft/run-node-test.mjs       47 / 47
 node sso-draft/run-mailbox-test.mjs    15 / 15
-node sso-draft/run-browser-test.mjs    76 / 76   (Chrome or Edge, Node 22+)
+node sso-draft/run-browser-test.mjs    77 / 77   (Chrome or Edge, Node 22+)
+node sso-draft/run-browser-test.mjs folder-real-test.html    31 / 31   (real folder handles)
 ```
 
-The browser test swaps the folder picker for an in-memory folder. **No real OneDrive or Drive folder has been tested.**
+`signin-test.html` uses an in-memory folder. `folder-real-test.html` uses the browser's REAL folder handles (its private
+folder: the same kind of handle a OneDrive folder gives), including remembering the folder after a reload. What no test
+covers: the Windows "Select folder" window and its "Allow" prompt, and OneDrive or Drive syncing the file across.
 
 ## What it can't do
 
