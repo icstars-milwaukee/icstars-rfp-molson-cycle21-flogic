@@ -71,3 +71,6 @@ Permission and brief for a rough one-sign-in draft are in `SCANME/` (start at `S
 
 ## 2026-11-11 · S2 · BUILDING (Fernando's agent: standby)
 Branch `feature/drive-signin` (v0.1.0 tagged on `sso-draft`). The sign-in now travels through a shared folder (OneDrive / Drive / share): mailbox, IT inbox with Renew everyone, and a typed-back laptop code instead of the tick box. Security audit in `SCANME/AUDIT-v0.2.0.md`. Fernando's agent: read `SCANME/STANDBY-v0.2.0.md`, do nothing until the go-word **Keystone** or an `S2 · PUSHED` entry.
+
+## 2026-11-11 · S3 · PUSHED (filekey, Fernando's agent: standby)
+DJ chose filekey sign-in: IT puts one signed key file per person in their drive folder; the person connects the folder once and picks a PIN, then uses only the PIN. The request, voice check and passphrase are gone from sso-draft/. Branch `feature/filekey`. Tests: core 47, folder 15, browser 76 (in-memory folder; no real drive yet). Audit `SCANME/AUDIT-v0.3.0.md`. Fernando's agent: `SCANME/STANDBY-v0.3.0.md`, wait for **Keystone**.

@@ -1,56 +1,64 @@
-# One sign-in for all your groups (draft S1)
+# Filekey sign-in (draft v0.3.0)
 
-**This is a draft for review, not a release.** It's standalone pages, not the real app, and it changes nothing in `DIRECTORY/`,
-`it-console/` or `demo-data/packs/`. The brief is `SCANME/SSO-PERMISSION-v0.1.0.md`, and the full write-up for DJ's agent
-is in `SCANME/returns/`.
+**This is a draft for review, not a release.** These are standalone pages, not the real app. Nothing in `DIRECTORY/`,
+`it-console/` or `demo-data/packs/` changes. The audit is in `SCANME/AUDIT-v0.3.0.md`.
 
-**Why:** people don't care one bit about security, but we do. So the person's part is as small as it can be. After a
-one-time set-up, signing in is **only their passphrase**, for every group they're in. IT signs everything else (who they
-are, their groups, the rules, the end date), so editing the file breaks it.
+**The idea:** IT makes one signed **key file** per person and puts it in that person's OneDrive or Google Drive folder.
+The person connects the folder once and picks a PIN for the laptop. After that, signing in is **only the PIN**. IT
+renews by putting a new key file in the folder, and the page takes it in by itself. Data is opened only on the laptop.
 
-## Try it (Chrome or Edge, opened as `file://`, no network)
+**Security depends on the employee's drive account.** The key file is the login, so the drive's sign-in (company MFA)
+guards it. The PIN guards the laptop's own copy: 10 wrong PINs and the laptop forgets the person.
 
-Demo passphrase for IT (keyring and signing key): `flogic demo keyring only`. Made-up data only.
+## Try it (Chrome or Edge, opened as `file://`)
 
-1. **The person:** open `sso-draft/signin.html`. Type a name (`Fernando G`) and a passphrase. **Make my file for IT**
-   saves `fernando-g.flogic-request` and shows a laptop code.
-2. **IT:** open `sso-draft/it-issue.html`. Pick `demo-data/packs/demo-it.flogic-keyring` and
-   `sso-draft/demo/demo-it.flogic-signer`, type the passphrase, and click **Open**. Then:
-   1. Pick the request file.
-   2. Check the laptop code with the person (by voice), and tick the box.
-   3. Click **Make their sign-in file**. It saves `fernando-g.flogic-signin`.
-3. **The person:** back in `signin.html`, open that file, then type the passphrase. Open
-   `demo-data/packs/demo_incident.flogic`: it opens. `demo_change_request.flogic` is refused ("You're not in that group").
-   **Lock** signs out. So do stepping away (auto-lock) and the end date.
+Demo IT passphrase (keyring and signing key): `flogic demo keyring only`. Made-up data only.
+
+1. **IT:** open `sso-draft/it-issue.html`.
+   1. Pick `demo-data/packs/demo-it.flogic-keyring` and `sso-draft/demo/demo-it.flogic-signer`, type the passphrase, and
+      click **Open**.
+   2. **Connect IT's Flogic folder**: make an empty folder for this, inside OneDrive or Drive if you have it.
+   3. Click **Make key file** next to Fernando G. It writes `u-0001/flogic.flogic-key` into that folder.
+2. **The person:** open `sso-draft/signin.html`.
+   1. Click **Connect your Flogic folder** and pick the `u-0001` folder.
+   2. Pick a PIN (6 or more digits). You're signed in.
+   3. Open `demo-data/packs/demo_incident.flogic`: it opens. `demo_change_request.flogic` is refused.
+   4. Click **Lock**. From now on it's the PIN only.
+
+With no folder access, IT's page downloads the key file and the person opens it by hand.
 
 ## Files
 
 | File | What it is |
 |---|---|
-| `signincoreS.js` | `SignInCore`: the crypto and the file shapes (IT signing key, laptop key, request, sign-in file, check, session) |
+| `signincoreS.js` | `SignInCore`: IT's signing key, the key file, the PIN-locked laptop copy, the session |
+| `mailboxS.js` | `Mailbox`: the drive folder (IT's parent folder, the person's own subfolder) |
 | `signin.html`, `signinS.js` | The person's page |
-| `it-issue.html`, `itissueS.js` | IT's page: a request in, a sign-in file out |
-| `signinS.css` | The look of both pages (light and dark) |
-| `it-signerS.js` | The app's pinned copy of IT's **public** signing key |
-| `demo/demo-it.flogic-signer` | IT's demo signing key, locked with the demo passphrase |
-| `make-demo.mjs` | Makes a new demo signing key and pin (this breaks old sign-in files) |
-| `core-testsS.js` | The core checks: Node and the browser run the same ones |
-| `run-node-test.mjs`, `load-core.mjs` | Run the core checks in Node |
+| `it-issue.html`, `itissueS.js` | IT's page: people from the keyring, Make key file, Renew everyone |
+| `signinS.css` | The look of both pages |
+| `it-signerS.js` | The app's pinned copy of IT's **public** signing key (a DEMO key) |
+| `demo/demo-it.flogic-signer` | IT's demo signing key. **Running `make-demo.mjs` replaces it** and breaks old key files |
+| `core-testsS.js`, `run-node-test.mjs`, `load-core.mjs` | Core checks in Node (the browser runs the same ones) |
+| `mailbox-testsS.js`, `run-mailbox-test.mjs`, `memory-folderS.js` | Folder checks against an in-memory folder |
 | `signin-test.html`, `run-browser-test.mjs` | Core checks, plus both pages end to end, headless |
 
 ## Tests
 
 ```text
-node sso-draft/run-node-test.mjs       45 / 45
+node sso-draft/run-node-test.mjs       47 / 47
+node sso-draft/run-mailbox-test.mjs    15 / 15
 node sso-draft/run-browser-test.mjs    76 / 76   (Chrome or Edge, Node 22+)
 ```
 
-## What it can't do (no server)
+The browser test swaps the folder picker for an in-memory folder. **No real OneDrive or Drive folder has been tested.**
 
-- **It can't take a sign-in back before its end date.** Keep end dates short (the default is 7 days). A new file costs
-  the person nothing.
-- **A laptop's clock decides "expired".** If someone sets the clock back, the end date moves with it.
-- **Wrong guesses are slowed only by key stretching** (about 0.3 s each). Nothing counts them.
+## What it can't do
+
+- **It can't take access back early.** A key file works until its end date (default 7 days). Stop renewing someone, and
+  they're out when it ends.
+- **Anyone who gets the key file gets in** until its end date: a shared link, a hacked drive account, a copy on a USB
+  stick. The drive's login is the lock.
+- **A 6-digit PIN is weak against someone who copies the browser's files** (about 0.3 s a guess offline). It stops a
+  person at an unlocked desk, not a determined thief with the disk.
+- **The laptop's clock decides "ended".**
 - **Whoever can change the app's files can change whom it trusts** (`it-signerS.js`).
-- **The rules (export, auto-lock) are signed, so a changed file is refused.** But DevTools can still skip them in a
-  running page.

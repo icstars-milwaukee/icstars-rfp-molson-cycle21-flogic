@@ -8,8 +8,9 @@ The short, read-this-first documents for the agents (and people) working on Flog
 |---|---|---|
 | `README.md` | This page: the index and the release conventions | everyone |
 | `SSO-PERMISSION-v0.1.0.md` | Permission, limits and the brief for a rough SSO-style sign-in | Fernando's agent |
-| `STANDBY-v0.2.0.md` | Puts Fernando's agent on standby: what to watch, what to run, what to do on Keystone | Fernando's agent |
-| `AUDIT-v0.2.0.md` | Security audit of the shared-folder sign-in: fixed, tested, still open | everyone |
+| `STANDBY-v0.3.0.md` | Fernando's agent on standby for the filekey build: what to watch, run, and do on Keystone | Fernando's agent |
+| `AUDIT-v0.3.0.md` | Security audit of filekey sign-in: what protects what, what held, what is open | everyone |
+| `STANDBY-v0.2.0.md`, `AUDIT-v0.2.0.md` | Replaced by v0.3.0 (kept for the record) | history |
 | `SSO-RETURN-v0.1.0.md` | The template Fernando's agent fills in and hands back, so DJ's agent can build it out | Fernando's agent, then DJ's agent |
 
 Returns go in `SCANME/returns/`. The file name is the template name with the date added
@@ -21,7 +22,7 @@ Taken from DJ's other repo, `Librariusjm` (its `CHANGELOG.md` and `COORDINATION.
 SCANME file follows.
 
 1. **Versions are `MAJOR.MINOR.PATCH`.** Before the Nov 19 demo everything is `0.x`. The first thing we show as the real
-   product is `1.0.0`. `v0.1.0` is tagged (the file-swap draft). `0.2.0` is the shared-folder version.
+   product is `1.0.0`. `v0.1.0` is tagged (the file-swap draft). `0.3.0` (filekey sign-in, on `feature/filekey`) replaced the unreleased `0.2.0`.
    - `PATCH`: a fix, nothing new to learn.
    - `MINOR`: something new people can see or use.
    - `MAJOR`: something that breaks an old file or habit (for us: a changed `.flogic` or `.flogic-id` format).
@@ -32,7 +33,7 @@ SCANME file follows.
 4. **Commit messages:** `Area: what changed`, then a blank line, then bullets. Areas here: `Vault`, `IT console`, `SSO`,
    `Dashboard`, `Focus`, `Relay`, `SCANME`, `Tutorial`. A review pass is tagged `[review]`.
 5. **Branches:** work goes on `group-BUFFER`, as the relay rules say. A draft that might not be kept goes on its own
-   branch first: `sso-draft`; a version being built goes on `feature/<name>` (now `feature/drive-signin`).
+   branch first: `sso-draft`; a version being built goes on `feature/<name>` (now `feature/filekey`).
 6. **Honest claims.** Nothing here may say more than it does. "SSO-style" is not SSO until a real identity provider is
    involved (see `SSO-PERMISSION-v0.1.0.md`, section 3).
 7. **Keywords:** the go-word for Fernando's agent stays **Keystone**, and DJ's "it's running" word stays **Cornerstone**.

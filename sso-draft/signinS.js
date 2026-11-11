@@ -1,20 +1,18 @@
 /*
     ==========================================================
 
-        signinS.js   -   THE PERSON'S SIDE   (a standalone draft page:  not the real app)
+        signinS.js   -   THE PERSON'S SIDE   (filekey,  v0.3.0.   A standalone draft page:  not the real app)
 
-        What the person does,  and nothing more:
-            1.  once:   type your name,  pick a passphrase   ->   a small file to send IT
-            2.  once:   open the file IT sends back
-            3.  every day:   your passphrase.   That's it,  for every group you're in.
+        What the person does:
+            1.  once:    "Connect your Flogic folder"   (the drive folder IT shared with you),  pick a PIN
+            2.  daily:   the PIN.   That's it,  for every group you're in.
+        Renewals:  IT puts a new filekey in your folder;  this page picks it up by itself.
 
-        What this browser keeps  (IndexedDB  "flogic-signin-draft",  one record per laptop set-up):
-            the name,  the laptop's PUBLIC key,  its private key LOCKED with the passphrase,
-            and IT's sign-in file  (signed claims + group keys locked to this laptop).
-            Never a passphrase.   Never an unlocked key.   Never data.
+        What this browser keeps  (IndexedDB  "flogic-filekey",  one record per person):
+            IT's signed claims,  and the group keys LOCKED with the PIN.   Never the PIN.   Never an unlocked key.  Never data.
+        The folder is remembered as a browser handle  (Mailbox.remember),  never as a path.
 
-        The session lives in memory only  (SignInCore.startSession),  and ends by Lock,  the idle timer,
-        or the sign-in file's end date.
+        The session lives in memory only,  and ends by Lock,  the idle timer,  or the filekey's end date.
 
     ==========================================================
 */
@@ -24,14 +22,14 @@
     'use strict';
 
     const S = SignInCore;
-    const DB_NAME = 'flogic-signin-draft';
+    const DB_NAME = 'flogic-filekey';
 
     // ---- the browser's store ----
 
     function openDb() {
         return new Promise(function (done, fail) {
             const req = indexedDB.open(DB_NAME, 1);
-            req.onupgradeneeded = function () { req.result.createObjectStore('laptops', { keyPath: 'id' }); };
+            req.onupgradeneeded = function () { req.result.createObjectStore('people', { keyPath: 'id' }); };
             req.onsuccess = function () { done(req.result); };
             req.onerror = function () { fail(req.error); };
         });
@@ -40,16 +38,16 @@
         const db = await openDb();
         try {
             return await new Promise(function (done, fail) {
-                const tx = db.transaction('laptops', mode);
-                const req = work(tx.objectStore('laptops'));
+                const tx = db.transaction('people', mode);
+                const req = work(tx.objectStore('people'));
                 tx.oncomplete = function () { done(req ? req.result : undefined); };
                 tx.onerror = function () { fail(tx.error); };
             });
         } finally { db.close(); }
     }
-    const allLaptops = function () { return dbDo('readonly', function (s) { return s.getAll(); }); };
-    const saveLaptop = function (r) { return dbDo('readwrite', function (s) { return s.put(r); }); };
-    const forgetLaptop = function (id) { return dbDo('readwrite', function (s) { return s.delete(id); }); };
+    const allCopies = function () { return dbDo('readonly', function (s) { return s.getAll(); }); };
+    const saveCopy = function (r) { return dbDo('readwrite', function (s) { return s.put(r); }); };
+    const forgetCopy = function (id) { return dbDo('readwrite', function (s) { return s.delete(id); }); };
 
 
     // ---- little helpers ----
@@ -74,8 +72,8 @@
         b.addEventListener('click', onClick);
         return b;
     }
-    function field(label, type, id) {
-        const input = el('input', { type: type, id: id, autocomplete: 'off', spellcheck: 'false' });
+    function field(label, id) {
+        const input = el('input', { type: 'password', id: id, autocomplete: 'off', inputmode: 'numeric', maxlength: '12' });
         return { wrap: el('label', { class: 'field' }, [el('span', { text: label }), input]), input: input };
     }
     function problem(id) { return el('p', { class: 'problem', role: 'alert', id: id || 'why' }); }
@@ -89,260 +87,195 @@
         box.replaceChildren();
         box.appendChild(el('h1', { text: title, id: 'title' }));
         if (note) box.appendChild(el('p', { class: 'note', id: 'note', text: note }));
-        lines.forEach(function (l) { box.appendChild(typeof l === 'string' ? el('p', { text: l }) : l); });
+        lines.forEach(function (l) { if (l) box.appendChild(typeof l === 'string' ? el('p', { text: l }) : l); });
         controls.forEach(function (c) { if (c) box.appendChild(c); });
         const first = box.querySelector('input:not([type=file]), button.main');
         if (first) first.focus();
     }
-    function download(fileName, text) {
-        window.__flogicLastDownload = { fileName: fileName, text: text };      //  the tests read this
-        const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
-        const a = el('a', { href: url, download: fileName });
-        document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
-    }
-    function fileName(name, ext) {
-        return (String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'me') + ext;
-    }
     function groupsLine(groups) { return groups.map(function (g) { return g.label; }).join(' · '); }
-    function claimsOf(record) { try { return JSON.parse(record.signin.claims); } catch (e) { return null; } }
+    function claimsOf(copy) { try { return JSON.parse(copy.claims); } catch (e) { return null; } }
+    function nice(e) { return e.code === 'not-a-file' ? 'That isn\'t a Flogic key file. It\'s called ' + Mailbox.KEY_FILE + ', in the folder IT shared with you.' : e.message; }
 
     const ENDED = {
         lock: 'Locked.',
         idle: 'Locked, because nothing happened for a while.',
-        expired: 'Your sign-in from IT has ended. Ask IT for a new one: there\'s nothing for you to set up again.',
+        expired: 'Your access has ended. IT renews it in your folder: there\'s nothing for you to do but sign in again later.',
     };
 
 
-    // ---- the shared folder  (v0.2.0):  OneDrive / Drive / a share.   Optional:  without it, files are sent by hand ----
+    // ---- the drive folder ----
 
-    let folder = null, stopWatching = null;
-
-    function stopWatch() { if (stopWatching) { stopWatching(); stopWatching = null; } }
-
-    //  Is there a remembered folder we may use?   ask:  true  only straight after a click  (the browser asks the person)
+    let folder = null;
     async function reconnect(ask) {
         if (folder) return folder;
         if (!Mailbox.supported()) return null;
         try {
-            const h = await Mailbox.recall();
-            if (!h || !await Mailbox.allowed(h, ask)) return null;
-            folder = await Mailbox.open(h);
-        } catch (e) { console.warn('Sign-in draft: the shared folder isn\'t available:', e); folder = null; }
+            const h = await Mailbox.recall('person');
+            if (!h || !await Mailbox.allowed(h, 'read', ask)) return null;
+            folder = await Mailbox.openPersonal(h);
+        } catch (e) { console.warn('Flogic draft: the folder isn\'t available:', e); folder = null; }
         return folder;
     }
     async function connectNew() {
-        const h = await Mailbox.pick();
-        folder = await Mailbox.open(h);
-        try { await Mailbox.remember(h); } catch (e) { /* works this visit;  asks again next time */ }
+        const h = await Mailbox.pick('read');
+        folder = await Mailbox.openPersonal(h);
+        try { await Mailbox.remember(h, 'person'); } catch (e) { /* works this visit;  asks again next time */ }
         return folder;
     }
-    //  A sign-in file arrived  (from the folder or by hand):  the SAME checks either way.  ->  null,  or the words to show.
-    async function install(record, text) {
-        let signin, c;
-        try {
-            signin = S.readSignin(text);
-            await S.check(signin, FLOGIC_IT_SIGNER, record.id);
-            c = JSON.parse(signin.claims);
-        } catch (e) { return e.code === 'not-a-file' ? 'That isn\'t a sign-in file. Pick the .flogic-signin file IT sent you.' : e.message; }
-        const old = record.signin ? claimsOf(record) : null;
-        if (old && old.sub !== c.sub) return 'This sign-in file is for ' + c.name + ', not ' + old.name + '.';
-        if (old && new Date(c.issued) <= new Date(old.issued)) return old.serial === c.serial ? null : 'That\'s an older sign-in file than the one you have.';
-        record.signin = signin;
-        await saveLaptop(record);
-        return null;
-    }
-    //  Look for a newer file right now  (a renewal).  true  =  installed one.
-    async function pullRenewal(record) {
-        if (!await reconnect(false)) return false;
-        try {
-            const t = await folder.getSignin(record.id);
-            if (!t) return false;
-            const before = record.signin && record.signin.sig;
-            await install(record, t);
-            return record.signin && record.signin.sig !== before;
-        } catch (e) { return false; }
+    //  The filekey from the folder,  checked.   ->  the key file,  or null
+    async function keyFromFolder() {
+        if (!folder) return null;
+        const t = await folder.getKey();
+        return t ? S.readKey(t) : null;
     }
 
 
     // ---- START:  who's this? ----
 
     async function start(note) {
-        stopWatch();
-        let laptops = [];
-        try { laptops = await allLaptops(); } catch (e) { console.warn('Sign-in draft: could not read this browser\'s store:', e); }
-        if (laptops.length === 0) { setup(note); return; }
-        const pick = laptops.map(function (r) {
-            const c = r.signin ? claimsOf(r) : null;
-            const b = button(r.name, function () { r.signin ? unlock(r) : waiting(r); }, 'person', 'who-' + r.id);
-            b.appendChild(el('small', { text: c ? groupsLine(c.groups) : 'Waiting for your file from IT' }));
+        let copies = [];
+        try { copies = await allCopies(); } catch (e) { console.warn('Flogic draft: could not read this browser\'s store:', e); }
+        if (copies.length === 0) { firstTime(note); return; }
+        if (copies.length === 1 && !note) { pinScreen(copies[0]); return; }
+        const pick = copies.map(function (r) {
+            const c = claimsOf(r);
+            const b = button(r.name, function () { pinScreen(r); }, 'person', 'who-' + r.id);
+            b.appendChild(el('small', { text: c ? groupsLine(c.groups) : '' }));
             return b;
         });
-        screen('Who\'s signing in?', [], pick.concat([button('Set up someone new on this laptop', function () { setup(); }, 'quiet', 'new')]), note);
+        screen('Who\'s signing in?', [], pick.concat([button('Someone new on this laptop', function () { firstTime(); }, 'quiet', 'new')]), note);
     }
 
 
-    // ---- 1.  SET UP  (once):   your name,  a passphrase   ->   the file for IT ----
+    // ---- 1.  FIRST TIME ON THIS LAPTOP:   connect your folder  (or open the file),  pick a PIN ----
 
-    function setup(note) {
-        const name = field('Your name', 'text', 'name');
-        const a = field('Pick a passphrase', 'password', 'pass1');
-        const b = field('Type it again', 'password', 'pass2');
+    async function firstTime(note) {
         const why = problem();
-        const link = el('p', { class: 'small', id: 'folder-status' });
-        const linkBtn = Mailbox.supported() ? button('Connect the shared folder (OneDrive, Google Drive or a share)', async function () {
+        const byHand = el('input', { type: 'file', id: 'key-file', accept: '.flogic-key,application/json' });
+        byHand.addEventListener('change', async function () {
             why.textContent = '';
-            try { await connectNew(); showLink(); } catch (e) { if (e.code !== 'cancelled') why.textContent = e.message; }
-        }, 'quiet', 'connect') : null;
-        function showLink() {
-            link.textContent = folder ? 'IT will get your request through "' + folder.name + '": nothing to send.'
-                                      : 'No shared folder connected: you\'ll send a small file to IT by hand.';
-            if (linkBtn) linkBtn.hidden = !!folder;
-        }
-        reconnect(false).then(showLink);
-        showLink();
-        const go = button('Ask IT for access', async function () {
-            why.textContent = '';
-            if (!name.input.value.trim()) { why.textContent = 'Type your name.'; return; }
-            const issue = VaultCore.passphraseProblem(a.input.value);
-            if (issue) { why.textContent = issue; return; }
-            if (a.input.value !== b.input.value) { why.textContent = 'The two don\'t match.'; return; }
-            try {
-                await reconnect(true);                                   //  the click lets the browser ask about the folder
-                const made = await busy(go, 'Making it…', function () { return S.newLaptop(name.input.value, a.input.value); });
-                a.input.value = ''; b.input.value = '';
-                await saveLaptop(made.record);
-                let sent = false;
-                if (folder) {
-                    try { await folder.putRequest(made.request); sent = true; }
-                    catch (e) { console.warn('Sign-in draft: the folder didn\'t take the request:', e); }
-                }
-                if (!sent) download(fileName(made.record.name, '.flogic-request'), JSON.stringify(made.request, null, 2));
-                waiting(made.record, sent ? 'sent' : 'file');
-            } catch (e) { why.textContent = 'Couldn\'t set up: ' + e.message; }
-        }, 'main', 'make');
-        onEnter(b.input, function () { go.click(); });
-        screen('One sign-in for all your groups',
-               ['Type your name and pick a passphrase. You\'ll type the passphrase each time you sign in. At least 12 characters, or 4 words.'],
-               [name.wrap, a.wrap, b.wrap, linkBtn, link, go, why], note);
-    }
-
-
-    // ---- 2.  WAITING FOR IT  ->  open the sign-in file IT sent ----
-
-    function signinPicker(record, after, whyId) {
-        const pick = el('input', { type: 'file', id: 'signin-file', accept: '.flogic-signin,application/json' });
-        const why = problem(whyId);
-        pick.addEventListener('change', async function () {
-            why.textContent = '';
-            const f = pick.files[0];
+            const f = byHand.files[0];
             if (!f) return;
-            const bad = await install(record, await f.text());
-            if (bad) { why.textContent = bad; return; }
-            after(record);
+            try { const k = S.readKey(await f.text()); await S.check(k, FLOGIC_IT_SIGNER); choosePin(k); }
+            catch (e) { why.textContent = nice(e); }
+            byHand.value = '';
         });
-        return { wrap: el('label', { class: 'field' }, [el('span', { text: 'The file IT sent you  (.flogic-signin)' }), pick]), why: why };
+        const connect = Mailbox.supported() ? button('Connect your Flogic folder', async function () {
+            why.textContent = '';
+            try {
+                if (!await reconnect(true)) await connectNew();
+                const k = await keyFromFolder();
+                if (!k) { why.textContent = 'There\'s no key file in "' + folder.name + '" yet. Pick the folder IT shared with you, or ask IT to put your key there.'; folder = null; return; }
+                await S.check(k, FLOGIC_IT_SIGNER);
+                choosePin(k);
+            } catch (e) { if (e.code !== 'cancelled') why.textContent = nice(e); }
+        }, 'main', 'connect') : null;
+        screen('Sign in to Flogic',
+               [Mailbox.supported() ? 'IT shared a folder with you in OneDrive or Google Drive. Pick it once, and you\'re in.'
+                                    : 'Open the key file IT gave you (' + Mailbox.KEY_FILE + ').'],
+               [connect,
+                el('details', { id: 'by-hand' }, [el('summary', { text: 'Or open the key file yourself' }),
+                    el('label', { class: 'field' }, [el('span', { text: 'Your key file  (' + Mailbox.KEY_FILE + ')' }), byHand])]),
+                why], note);
+        if (!Mailbox.supported()) box.querySelector('details').open = true;
     }
 
-    function requestOf(record) {
-        return { flogic: 'signin-request', v: S.VERSION, name: record.name, fingerprint: record.id, publicKey: record.publicKey, made: record.made };
-    }
-
-    //  how:  'sent'  (request is in the shared folder),  'file'  (just downloaded),  or nothing  (came back later)
-    async function waiting(record, how) {
-        stopWatch();
-        const p = signinPicker(record, function (r) { stopWatch(); unlock(r, 'You\'re set. Type your passphrase to sign in.'); });
-        const status = el('p', { id: 'watch-status', role: 'status', class: 'small' });
-        if (!how) await reconnect(false);
-        if (folder) {
-            //  IT's answer is picked up the moment it lands in the folder:  nothing for the person to open
-            stopWatching = Mailbox.watch(folder, record.id, async function (text) {
-                const bad = await install(record, text);
-                if (bad) { status.textContent = 'IT\'s file arrived but can\'t be used: ' + bad; return; }
-                stopWatch(); unlock(record, 'IT said yes. Type your passphrase to sign in.');
-            }, 4000);
-        }
-        const sent = how === 'sent';
-        screen(sent ? 'Asked IT' : how === 'file' ? 'Send that file to IT' : 'Waiting for IT',
-               [sent ? 'Your request is in the shared folder. This page signs you in by itself once IT says yes. You can close it and come back.'
-                     : how === 'file' ? 'Your browser just saved ' + fileName(record.name, '.flogic-request') + '. Send it to IT, by email or Teams. It holds nothing secret.'
-                     : folder ? 'Your request is with IT. This page signs you in by itself once they say yes.'
-                              : 'Send IT the file this laptop made, then open the file they send back.',
-                el('p', {}, ['IT will ask for your laptop code. Read it out: ', el('strong', { class: 'code', id: 'laptop-code', text: record.id }), '.']),
-                status],
-               [el('details', { id: 'by-hand' }, [el('summary', { text: 'Got a file from IT by email or Teams?' }), p.wrap, p.why]),
-                button('Save the request file again', function () {
-                    download(fileName(record.name, '.flogic-request'), JSON.stringify(requestOf(record), null, 2));
-                }),
-                folder ? button('Put my request in the folder again', async function () {
-                    try { await folder.putRequest(requestOf(record)); status.textContent = 'Put it there again.'; }
-                    catch (e) { status.textContent = 'Couldn\'t: ' + e.message; }
-                }) : (Mailbox.supported() ? button('Connect the shared folder', async function () {
-                    try { await connectNew(); await folder.putRequest(requestOf(record)); waiting(record, 'sent'); }
-                    catch (e) { if (e.code !== 'cancelled') status.textContent = e.message; }
-                }, 'quiet', 'connect') : null),
-                button('Back', function () { start(); })]);
-    }
-
-
-    // ---- 3.  SIGN IN  (every day):   the passphrase ----
-
-    function unlock(record, note) {
-        stopWatch();
-        const c = claimsOf(record);
-        const pass = field('Passphrase', 'password', 'pass');
+    function choosePin(keyFile) {
+        const c = JSON.parse(keyFile.claims);
+        const a = field('Pick a PIN for this laptop  (6 or more digits)', 'pin1');
+        const b = field('Type it again', 'pin2');
         const why = problem();
         const go = button('Sign in', async function () {
             why.textContent = '';
+            const issue = S.pinProblem(a.input.value);
+            if (issue) { why.textContent = issue; return; }
+            if (a.input.value !== b.input.value) { why.textContent = 'The two don\'t match.'; return; }
             try {
                 const opened = await busy(go, 'Signing in…', async function () {
-                    const priv = await S.openLaptop(record, pass.input.value);
-                    const claims = await S.check(record.signin, FLOGIC_IT_SIGNER, record.id);   //  checked EVERY time
-                    return { claims: claims, keys: await S.openKeys(record.signin, claims, priv) };
+                    const copy = await S.claim(keyFile, a.input.value, FLOGIC_IT_SIGNER);
+                    const o = await S.unlock(copy, a.input.value, FLOGIC_IT_SIGNER);
+                    await saveCopy(o.copy);
+                    return o;
                 });
-                pass.input.value = '';
-                signedIn(record, opened);
+                a.input.value = ''; b.input.value = '';
+                signedIn(opened.copy, opened);
+            } catch (e) { why.textContent = nice(e); }
+        }, 'main', 'set-pin');
+        onEnter(b.input, function () { go.click(); });
+        screen('Hi, ' + c.name,
+               [el('p', { id: 'groups', text: 'IT gave you: ' + groupsLine(c.groups) + '.' }),
+                'Pick a PIN. You\'ll type it each time you sign in on this laptop. Nobody else needs it, not even IT.'],
+               [a.wrap, b.wrap, go, why]);
+    }
+
+
+    // ---- 2.  EVERY DAY:   the PIN ----
+
+    function pinScreen(copy, note) {
+        const c = claimsOf(copy);
+        const pin = field('PIN', 'pin');
+        const why = problem();
+        const go = button('Sign in', async function () {
+            why.textContent = '';
+            const typed = pin.input.value;
+            try {
+                const opened = await busy(go, 'Signing in…', async function () {
+                    let o = await S.unlock(copy, typed, FLOGIC_IT_SIGNER);
+                    await saveCopy(o.copy); copy = o.copy;
+                    //  Renewal:  a newer filekey in the folder replaces this one,  under the same PIN.
+                    const ends = new Date(o.claims.expires), endingSoon = ends - Date.now() < 3 * 86400000;
+                    if (await reconnect(endingSoon)) {
+                        try {
+                            const k = await keyFromFolder();
+                            if (k && await S.isNewer(k, copy, FLOGIC_IT_SIGNER)) {
+                                await S.check(k, FLOGIC_IT_SIGNER);
+                                o = await S.unlock(await S.claim(k, typed, FLOGIC_IT_SIGNER), typed, FLOGIC_IT_SIGNER);
+                                await saveCopy(o.copy); copy = o.copy;
+                                o.renewed = true;
+                            }
+                        } catch (e) { console.warn('Flogic draft: the folder\'s key file wasn\'t used:', e); }
+                    }
+                    S.notEnded(o.claims);
+                    return o;
+                });
+                pin.input.value = '';
+                signedIn(copy, opened);
             } catch (e) {
-                why.textContent = e.code === 'wrong-secret' ? 'That passphrase doesn\'t match.' : e.message;
-                pass.input.select();
+                pin.input.value = '';
+                if (e.code === 'wrong-pin') { await saveCopy(e.copy); copy = e.copy; }
+                if (e.code === 'wiped') { await forgetCopy(copy.id); start(e.message); return; }
+                why.textContent = e.message;
             }
         }, 'main', 'go');
-        onEnter(pass.input, function () { go.click(); });
-        const renew = signinPicker(record, function (r) { unlock(r, 'Your new sign-in file is in. Type your passphrase.'); }, 'renew-why');
+        onEnter(pin.input, function () { go.click(); });
         const ends = c ? new Date(c.expires) : null;
-        const soon = ends && ends - Date.now() < 3 * 86400000;
-        screen(record.name, [c ? groupsLine(c.groups) : '',
-                             ends ? el('p', { class: soon ? 'warn' : 'small', id: 'ends', text: (ends < new Date() ? 'Ended ' : 'Good until ') + S.niceDate(ends) + (soon && ends > new Date() ? '. IT can send a new file; nothing for you to set up.' : '') }) : null],
-               [pass.wrap, go, why,
-                el('details', {}, [el('summary', { text: 'Got a new file from IT?' }), renew.wrap, renew.why]),
-                el('p', { class: 'small', text: 'Forgot your passphrase? Set up again: IT just sends a new file. Nothing is lost, because no data is kept here.' }),
+        screen(copy.name, [c ? groupsLine(c.groups) : '',
+                           ends ? el('p', { class: 'small', id: 'ends', text: (ends < new Date() ? 'Ended ' : 'Good until ') + S.niceDate(ends) + '. IT renews it in your folder.' }) : null],
+               [pin.wrap, go, why,
+                el('p', { class: 'small', text: 'Forgot your PIN? Forget me on this laptop, then connect your folder again and pick a new one. Nothing is lost.' }),
                 button('Forget me on this laptop', async function () {
-                    if (!confirm('Forget ' + record.name + ' on this laptop? You\'d set up again, and IT would send a new file.')) return;
-                    await forgetLaptop(record.id); start();
+                    if (!confirm('Forget ' + copy.name + ' on this laptop? You\'d connect your folder again and pick a new PIN.')) return;
+                    await forgetCopy(copy.id); start();
                 }, 'quiet', 'forget'),
-                button('Someone else', function () { start(); })], note);
-        //  A renewal waiting in the shared folder is picked up quietly:  the person doesn't ask for it
-        pullRenewal(record).then(function (got) {
-            if (got && !session) unlock(record, 'IT sent you a newer sign-in. Type your passphrase.');
-        });
+                button('Someone else', function () { start('Pick who\'s signing in.'); }, 'quiet', 'someone-else')], note);
     }
 
 
     // ---- SIGNED IN ----
 
-    function signedIn(record, opened) {
+    function signedIn(copy, opened) {
         let tick = null;
         session = S.startSession({ claims: opened.claims, keys: opened.keys, onEnd: function (reason) {
             session = null;
             clearInterval(tick);
-            unlock(record, ENDED[reason] || 'Locked.');
+            pinScreen(copy, ENDED[reason] || 'Locked.');
         } });
         const ends = el('p', { class: 'small', id: 'session-ends' });
         tick = setInterval(show, 1000);
         function show() {
             if (!session) return;
             const at = session.endsAt();
-            ends.textContent = at ? 'Locks by itself at ' + at.toLocaleTimeString() + ' if you step away.' + ' Sign-in from IT good until ' + S.niceDate(new Date(opened.claims.expires)) + '.' : '';
+            ends.textContent = at ? 'Locks by itself at ' + at.toLocaleTimeString() + ' if you step away. Access good until ' + S.niceDate(new Date(opened.claims.expires)) + '.' : '';
         }
         show();
 
@@ -365,7 +298,8 @@
         });
 
         screen('Hi, ' + opened.claims.name,
-               [el('p', { id: 'groups', text: 'Signed in for: ' + groupsLine(opened.claims.groups) }), ends],
+               [el('p', { id: 'groups', text: 'Signed in for: ' + groupsLine(opened.claims.groups) }),
+                opened.renewed ? el('p', { class: 'good', id: 'renewed', text: 'IT renewed your access.' }) : null, ends],
                [el('label', { class: 'field' }, [el('span', { text: 'Open a data pack  (.flogic)' }), pack]), result,
                 button('Lock', function () { if (session) session.lock(); }, 'main', 'lock')]);
     }

@@ -1,55 +1,49 @@
 /*
     ==========================================================
 
-        mailboxS.js   -   THE SHARED-FOLDER MAILBOX   (v0.2.0)
+        mailboxS.js   -   THE DRIVE FOLDER   (v0.3.0,  filekey)
 
-        A folder both sides can reach:  OneDrive / SharePoint / Google Drive for desktop / a network share.
-        Anything that shows up on the laptop as an ordinary folder will do.   It carries two kinds of file and decides nothing:
+        IT keeps ONE parent folder in OneDrive / Google Drive / a share,  with a subfolder per person,
+        each shared with that person only:
 
-            inbox/<LAPTOP-CODE>.flogic-request     the person's request          (public:  a name and a PUBLIC key)
-            outbox/<LAPTOP-CODE>.flogic-signin     IT's answer                   (signed;  group keys locked to that laptop)
+            <IT's folder>/u-0001/flogic.flogic-key        Fernando's filekey
+            <IT's folder>/u-0002/flogic.flogic-key        DJ's filekey
 
-        The folder is treated as HOSTILE.   Anyone who can write to it can add,  change or delete files.   So:
-          *  file names are the laptop code and nothing else   (checked against a strict pattern:  no name from inside a file
-             ever becomes a path,  so no  ../  tricks),
-          *  every file is size-checked BEFORE it's read,  and re-verified after  (request: code matches key;  sign-in: IT's
-             signature, the laptop, the end date),
-          *  a missing or changed file is "ask again" or "refused",  never a silent success.
-        Nothing secret is ever written here:  not a passphrase,  not a private key,  not a plain group key.
+        The person connects THEIR folder  (the one IT shared with them)  once.   Flogic reads  flogic.flogic-key  from it.
+        Flogic never writes to the person's folder.
 
-        Works with a real folder  (File System Access API:  Chrome / Edge,  showDirectoryPicker)  or with ANY object that
-        answers the same few calls  (the tests use an in-memory folder).   Without folder access the app falls back to
-        saving and opening the files by hand  (no change to the person's page,  only slower).
+        The folder is not trusted for honesty:   every filekey is checked against IT's signature before use.
+        It IS trusted for secrecy:   the filekey is the login,  so the drive's own sign-in  (company MFA)  guards it.
+          *  file and folder names come from a strict pattern,  never from inside a file  (no  ../  tricks)
+          *  size is checked before reading
 
-        It puts ONE name on the page:  Mailbox.      Needs SignInCore first.
+        Works with a real folder  (File System Access API:  Chrome / Edge)  or with any object that answers the
+        same calls  (the tests use an in-memory folder).   Without folder access,  the person opens the file by hand.
+
+        It puts ONE name on the page:  Mailbox.
 
     ==========================================================
 */
 
-const Mailbox = (function (SignInCore) {
+const Mailbox = (function () {
 
     'use strict';
 
-    const FP = /^[2-9A-HJKMNP-Z]{4}(-[2-9A-HJKMNP-Z]{4}){3}$/;      //  a laptop code
-    const REQ_EXT = '.flogic-request', SIGNIN_EXT = '.flogic-signin';
-    const MAX_FILE = 256 * 1024;                                    //  same ceiling as SignInCore
-    const MAX_LISTED = 500;                                         //  a flooded inbox shows the first 500,  not a frozen page
+    const KEY_FILE = 'flogic.flogic-key';
+    const PERSON = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;           //  a keyring person id,  e.g.  u-0001
+    const MAX_FILE = 256 * 1024;
+    const MAX_LISTED = 2000;
 
     function fail(code, message) { const e = new Error(message); e.code = code; return e; }
-
     function supported() { return typeof window !== 'undefined' && typeof window.showDirectoryPicker === 'function'; }
 
-    //  Ask the person for the folder.   Must be called from a click.
-    async function pick() {
-        if (!supported()) throw fail('no-folder-access', 'This browser can\'t open a shared folder. Use Chrome or Edge, or send the files by hand.');
-        try { return await window.showDirectoryPicker({ id: 'flogic-mailbox', mode: 'readwrite' }); }
+    async function pick(mode) {
+        if (!supported()) throw fail('no-folder-access', 'This browser can\'t open a drive folder. Use Chrome or Edge, or open your key file by hand.');
+        try { return await window.showDirectoryPicker({ id: 'flogic-' + (mode || 'read'), mode: mode === 'readwrite' ? 'readwrite' : 'read' }); }
         catch (e) { throw e && e.name === 'AbortError' ? fail('cancelled', 'No folder picked.') : e; }
     }
 
-
-    // ------------------------------------------------------
-    //    Remember the folder between visits  (the BROWSER keeps the handle,  not a path,  and asks permission again)
-    // ------------------------------------------------------
+    // ---- remember the folder between visits  (the browser keeps the handle;  it may ask permission again) ----
 
     function memory(mode, work) {
         return new Promise(function (done, bad) {
@@ -57,148 +51,90 @@ const Mailbox = (function (SignInCore) {
             open.onupgradeneeded = function () { open.result.createObjectStore('folder'); };
             open.onerror = function () { bad(open.error); };
             open.onsuccess = function () {
-                const db = open.result, tx = db.transaction('folder', mode), req = work(tx.objectStore('folder'));
+                const db = open.result;
+                let tx, req;
+                try { tx = db.transaction('folder', mode); req = work(tx.objectStore('folder')); }
+                catch (e) { db.close(); bad(e); return; }                    //  e.g. a handle the browser can't store
                 tx.oncomplete = function () { db.close(); done(req ? req.result : undefined); };
                 tx.onerror = function () { db.close(); bad(tx.error); };
             };
         });
     }
-    function remember(handle, role) { return memory('readwrite', function (s) { return s.put(handle, role || 'default'); }); }
-    function recall(role) { return memory('readonly', function (s) { return s.get(role || 'default'); }); }
-    function forget(role) { return memory('readwrite', function (s) { return s.delete(role || 'default'); }); }
+    function remember(handle, role) { return memory('readwrite', function (s) { return s.put(handle, role || 'person'); }); }
+    function recall(role) { return memory('readonly', function (s) { return s.get(role || 'person'); }); }
+    function forget(role) { return memory('readwrite', function (s) { return s.delete(role || 'person'); }); }
 
-    //  The browser forgets the permission when the tab closes.   true  =  we can use the folder now.
-    //  askToo:  call requestPermission  (only allowed straight after a click).
-    async function allowed(handle, askToo) {
+    //  true  =  usable now.    ask:  only straight after a click.
+    async function allowed(handle, mode, ask) {
         if (!handle) return false;
         if (!handle.queryPermission) return true;                    //  an in-memory folder
-        const o = { mode: 'readwrite' };
+        const o = { mode: mode === 'readwrite' ? 'readwrite' : 'read' };
         if (await handle.queryPermission(o) === 'granted') return true;
-        return askToo ? (await handle.requestPermission(o)) === 'granted' : false;
+        return ask ? (await handle.requestPermission(o)) === 'granted' : false;
     }
-
-
-    // ------------------------------------------------------
-    //    Small file helpers
-    // ------------------------------------------------------
 
     async function readText(fileHandle) {
         const f = await fileHandle.getFile();
-        if (f.size > MAX_FILE) throw fail('not-a-file', 'That file is too big to be one of ours.');     //  before reading it
+        if (f.size > MAX_FILE) throw fail('not-a-file', 'That file is too big to be a key file.');
         return f.text();
     }
-    async function writeText(dir, name, text) {
-        const h = await dir.getFileHandle(name, { create: true });
-        const w = await h.createWritable();                          //  the old file stays until close():  a half-written file is never seen
-        try { await w.write(text); } finally { await w.close(); }
+    async function tryHandle(get) {
+        try { return await get(); }
+        catch (e) { if (e && (e.name === 'NotFoundError' || e.name === 'TypeMismatchError')) return null; throw e; }
     }
-    async function tryFile(dir, name) {
-        try { return await dir.getFileHandle(name); }
-        catch (e) { if (e && (e.name === 'NotFoundError' || e.code === 8)) return null; throw e; }
-    }
-    function codeOf(name, ext) {
-        if (!name.endsWith(ext)) return null;
-        const c = name.slice(0, -ext.length);
-        return FP.test(c) ? c : null;
-    }
-    function mustBeCode(fp) { if (typeof fp !== 'string' || !FP.test(fp)) throw fail('not-a-file', 'That isn\'t a laptop code.'); return fp; }
+    function mustBePerson(id) { if (typeof id !== 'string' || !PERSON.test(id)) throw fail('not-a-file', 'That isn\'t a person id.'); return id; }
 
 
-    // ------------------------------------------------------
-    //    open(root)  ->  the mailbox
-    // ------------------------------------------------------
+    // ---- THE PERSON:  their own folder.   Read only. ----
 
-    async function open(root) {
-        if (!await allowed(root, false)) throw fail('no-permission', 'Flogic needs your OK to use that folder again. Click "Connect the shared folder".');
-        const inbox = await root.getDirectoryHandle('inbox', { create: true });
-        const outbox = await root.getDirectoryHandle('outbox', { create: true });
-
+    async function openPersonal(dir) {
+        if (!await allowed(dir, 'read', false)) throw fail('no-permission', 'Flogic needs your OK to read your folder again.');
         return {
-            name: root.name || 'shared folder',
-
-            //  PERSON:  leave a request for IT.   Checks it first,  so a broken file never lands in IT's inbox.
-            putRequest: async function (request) {
-                const text = JSON.stringify(request, null, 2);
-                const r = await SignInCore.readRequest(text);
-                await writeText(inbox, mustBeCode(r.fingerprint) + REQ_EXT, text);
-                return r.fingerprint;
-            },
-
-            //  IT:  every good request in the inbox   ->  { requests: [{ fp, name, made, request }],  skipped: n,  more: bool }
-            listRequests: async function () {
-                const requests = []; let skipped = 0, seen = 0, more = false;
-                for await (const entry of inbox.entries()) {
-                    const name = entry[0], h = entry[1];
-                    if (h.kind !== 'file') continue;
-                    const fp = codeOf(name, REQ_EXT);
-                    if (!fp) { skipped++; continue; }
-                    if (++seen > MAX_LISTED) { more = true; break; }
-                    try {
-                        const r = await SignInCore.readRequest(await readText(h));
-                        if (r.fingerprint !== fp) { skipped++; continue; }               //  the file's name has to be its own code
-                        requests.push({ fp: fp, name: r.name, made: r.made, request: r });
-                    } catch (e) { skipped++; }
-                }
-                requests.sort(function (a, b) { return a.name.localeCompare(b.name); });
-                return { requests: requests, skipped: skipped, more: more };
-            },
-
-            //  IT:  the answer.   Checks it is JSON  (the person's page checks IT's signature,  every time).
-            putSignin: async function (fp, signin) {
-                const text = typeof signin === 'string' ? signin : JSON.stringify(signin, null, 2);
-                SignInCore.readSignin(text);
-                await writeText(outbox, mustBeCode(fp) + SIGNIN_EXT, text);
-            },
-
-            //  PERSON:  is my answer there yet?   ->  the text,  or null
-            getSignin: async function (fp) {
-                const h = await tryFile(outbox, mustBeCode(fp) + SIGNIN_EXT);
+            name: dir.name || 'your folder',
+            //  ->  the filekey text,  or null
+            getKey: async function () {
+                const h = await tryHandle(function () { return dir.getFileHandle(KEY_FILE); });
                 return h ? readText(h) : null;
-            },
-
-            //  IT:  the answers already given   ->  [{ fp, text }]     (for  "Renew everyone")
-            listSignins: async function () {
-                const out = []; let seen = 0;
-                for await (const entry of outbox.entries()) {
-                    if (entry[1].kind !== 'file') continue;
-                    const fp = codeOf(entry[0], SIGNIN_EXT);
-                    if (!fp) continue;
-                    if (++seen > MAX_LISTED) break;
-                    try { out.push({ fp: fp, text: await readText(entry[1]) }); } catch (e) { /* too big or unreadable: skip */ }
-                }
-                return out;
-            },
-
-            //  IT:  one request by code   ->  the request,  or null
-            getRequest: async function (fp) {
-                const h = await tryFile(inbox, mustBeCode(fp) + REQ_EXT);
-                if (!h) return null;
-                const r = await SignInCore.readRequest(await readText(h));
-                return r.fingerprint === fp ? r : null;
             },
         };
     }
 
-    //  PERSON'S PAGE:  look for the answer every few seconds.   ->  stop()
-    //  onSignin(text)  is called ONCE per new answer text;  checking it is the page's job.
-    function watch(box, fp, onSignin, everyMs) {
-        let stopped = false, last = null, timer = null;
-        async function look() {
-            if (stopped) return;
-            try {
-                const text = await box.getSignin(fp);
-                if (text && text !== last) { last = text; await onSignin(text); }
-            } catch (e) { /* the folder went away for a moment:  try again next time */ }
-            if (!stopped) timer = setTimeout(look, everyMs || 4000);
-        }
-        look();
-        return function stop() { stopped = true; clearTimeout(timer); };
+
+    // ---- IT:  the parent folder,  one subfolder per person ----
+
+    async function openIT(root) {
+        if (!await allowed(root, 'readwrite', false)) throw fail('no-permission', 'Flogic needs your OK to use that folder again.');
+        return {
+            name: root.name || 'IT folder',
+            putKeyFor: async function (id, text) {
+                const sub = await root.getDirectoryHandle(mustBePerson(id), { create: true });
+                const h = await sub.getFileHandle(KEY_FILE, { create: true });
+                const w = await h.createWritable();                  //  the old file stays until close()
+                try { await w.write(text); } finally { await w.close(); }
+            },
+            getKeyFor: async function (id) {
+                const sub = await tryHandle(function () { return root.getDirectoryHandle(mustBePerson(id)); });
+                if (!sub) return null;
+                const h = await tryHandle(function () { return sub.getFileHandle(KEY_FILE); });
+                return h ? readText(h) : null;
+            },
+            //  ->  the person ids that have a subfolder  (odd names ignored)
+            people: async function () {
+                const out = [];
+                for await (const entry of root.entries()) {
+                    if (entry[1].kind === 'directory' && PERSON.test(entry[0])) out.push(entry[0]);
+                    if (out.length >= MAX_LISTED) break;
+                }
+                return out;
+            },
+        };
     }
 
 
     return Object.freeze({
-        FP: FP, supported: supported, pick: pick, open: open, watch: watch,
+        KEY_FILE: KEY_FILE, PERSON: PERSON, supported: supported, pick: pick,
+        openPersonal: openPersonal, openIT: openIT,
         remember: remember, recall: recall, forget: forget, allowed: allowed,
     });
 
-})(SignInCore);
+})();

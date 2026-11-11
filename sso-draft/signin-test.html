@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Sign-in draft: tests</title>
+    <title>Filekey sign-in draft: tests</title>
     <style>
         body { font: 14px/1.5 system-ui, sans-serif; margin: 20px; }
         .ok { color: #1d7a3a; } .fail { color: #b3261e; font-weight: 600; }
@@ -13,10 +13,10 @@
 <!--
     Headless:   node sso-draft/run-browser-test.mjs
     Part A:  the core checks  (core-testsS.js,  the same ones Node runs),  in the browser.
-    Part B:  drives the real pages in the frame:  the person sets up,  IT issues,  the person signs in,
-             opens packs,  locks,  and a short sign-in file ends mid-session.   Made-up data only.
+    Part B:  drives the real pages in the frame.   The browser's folder picker is replaced by an IN-MEMORY folder
+             (memory-folderS.js),  so this does NOT prove a real OneDrive / Drive folder works.   Made-up data only.
 -->
-<h1>Sign-in draft: tests</h1>
+<h1>Filekey sign-in draft: tests</h1>
 <p id="summary">Running…</p>
 <ol id="list"></ol>
 <iframe id="frame" title="the page under test"></iframe>
@@ -24,6 +24,7 @@
 <script src="../DIRECTORY/vaultcoreI.js"></script>
 <script src="signincoreS.js"></script>
 <script src="it-signerS.js"></script>
+<script src="memory-folderS.js"></script>
 <script src="core-testsS.js"></script>
 <script>
 'use strict';
@@ -68,112 +69,115 @@ function pick(id, name, data) {
 }
 function text(id) { const e = $(id); return e ? e.textContent : ''; }
 function title() { return text('title'); }
-function deleteStore() {
-    return new Promise(function (r) { const q = indexedDB.deleteDatabase('flogic-signin-draft'); q.onsuccess = q.onerror = q.onblocked = function () { r(); }; });
+function fakePicker(folder) { w().showDirectoryPicker = async function () { return folder; }; }
+function deleteDb(name) {
+    return new Promise(function (r) { const q = indexedDB.deleteDatabase(name); q.onsuccess = q.onerror = q.onblocked = function () { r(); }; });
 }
 function readStore() {
     return new Promise(function (r) {
-        const q = indexedDB.open('flogic-signin-draft', 1);
+        const q = indexedDB.open('flogic-filekey', 1);
         q.onsuccess = function () {
-            const t = q.result.transaction('laptops', 'readonly').objectStore('laptops').getAll();
+            const t = q.result.transaction('people', 'readonly').objectStore('people').getAll();
             t.onsuccess = function () { q.result.close(); r(t.result); };
         };
     });
 }
 
 async function partB() {
-    const PASS = 'correct horse battery staple';
+    const PIN = '482916';
     const ITPASS = 'flogic demo keyring only';
     const ringText = await env.text('demo-data/packs/demo-it.flogic-keyring');
     const signerText = await env.text('sso-draft/demo/demo-it.flogic-signer');
     const incident = await env.bytes('demo-data/packs/demo_incident.flogic');
     const change = await env.bytes('demo-data/packs/demo_change_request.flogic');
+    const itRoot = makeMemoryFolder('Flogic keys');
 
-    // ---- the person: set up ----
-    await deleteStore();
-    await load('signin.html');
-    check('page: a new laptop goes straight to set-up', await until(function () { return $('make'); }) && /one sign-in for all your groups/i.test(title()));
-    check('page: nothing on it says "SSO" or "single sign-on"', !/\bsso\b|single sign/i.test(d().body.innerText + d().title));
-    type('name', 'Fernando G'); type('pass1', 'short'); type('pass2', 'short'); click('make');
-    check('setup: a weak passphrase is refused', await until(function () { return /12 characters/.test(text('why')); }));
-    type('pass1', PASS); type('pass2', PASS + 'x'); click('make');
-    check('setup: two different passphrases are refused', await until(function () { return /don't match/.test(text('why')); }));
-    w().__flogicLastDownload = null;
-    type('pass2', PASS); click('make');
-    check('setup: makes the file for IT', await until(function () { return w().__flogicLastDownload && $('laptop-code'); }, 30000));
-    const req = w().__flogicLastDownload;
-    const laptopCode = text('laptop-code');
-    check('setup: the file is a request named for the person', req.fileName === 'fernando-g.flogic-request' && JSON.parse(req.text).fingerprint === laptopCode, req.fileName);
-    check('setup: the passphrase boxes are emptied', $('pass1') === null);
-    let store = await readStore();
-    check('store: one record, no passphrase, no private key in the clear',
-          store.length === 1 && !JSON.stringify(store).includes(PASS) && !JSON.stringify(store).includes('"d":') && !!store[0].locked.wrapped);
+    await deleteDb('flogic-filekey'); await deleteDb('flogic-mailbox');
 
-    // ---- IT: issue ----
+    // ---- IT: open, connect the folder, make Fernando's key file ----
     await load('it-issue.html');
-    pick('ring-file', 'demo-it.flogic-keyring', ringText);
-    pick('signer-file', 'demo-it.flogic-signer', signerText);
-    type('it-pass', 'wrong passphrase here'); click('open');
-    check('IT: a wrong passphrase opens nothing', await until(function () { return /doesn't open/.test(text('open-why')); }, 30000));
+    fakePicker(itRoot);
+    type('it-pass', 'wrong passphrase entirely'); pick('ring-file', 'demo-it.flogic-keyring', ringText); pick('signer-file', 'demo-it.flogic-signer', signerText);
+    click('open');
+    check('IT: a wrong passphrase opens nothing', await until(function () { return /doesn't open/.test(text('open-why')); }, 30000) && $('open-part').hidden);
     type('it-pass', ITPASS); click('open');
     check('IT: opens the keyring and the signing key', await until(function () { return !$('open-part').hidden; }, 30000) &&
           text('open-who').includes(FLOGIC_IT_SIGNER.fingerprint), text('open-who'));
-    pick('req-file', 'fernando-g.flogic-request', req.text);
-    check('IT: asks for the code by voice, and does NOT show it', await until(function () { return !$('req-check').hidden; }) && !w().document.body.textContent.includes(laptopCode));
-    check('IT: picks the person by name, with their keyring groups', $('person').value === 'u-0001' && /Service Desk/.test(text('person-groups')));
-    w().__flogicLastDownload = null;
-    click('issue');
-    check('IT: won\'t issue until the code is checked', await until(function () { return /laptop code/.test(text('issue-msg')); }) && !w().__flogicLastDownload);
-    type('code-typed', 'AAAA-BBBB-CCCC-DDDD'); click('issue');
-    check('IT: a wrong typed code is refused', await until(function () { return /has to match/.test(text('issue-msg')); }) && !w().__flogicLastDownload);
-    type('code-typed', laptopCode.toLowerCase().replace(/-/g, ' ')); click('issue');
-    check('IT: makes the sign-in file', await until(function () { return w().__flogicLastDownload; }, 30000) &&
-          w().__flogicLastDownload.fileName === 'fernando-g.flogic-signin');
-    const signinText = w().__flogicLastDownload.text;
+    check('IT: lists the people from the keyring', await until(function () { return $('make-u-0001') && $('make-u-0002'); }));
+    click('connect-folder');
+    check('IT: connects the folder', await until(function () { return /Connected/.test(text('folder-status')); }), text('folder-status'));
+    click('make-u-0001');
+    check('IT: puts the key file in the person\'s subfolder', await until(function () { return /Put Fernando G/.test(text('issue-msg')); }, 30000) &&
+          itRoot.__dirs.has('u-0001') && itRoot.__dirs.get('u-0001').__files.has('flogic.flogic-key'), text('issue-msg'));
+    check('IT: shows it is there, with its end date', await until(function () { return /good until/.test(text('status-u-0001')); }), text('status-u-0001'));
+    const keyText = itRoot.__dirs.get('u-0001').__files.get('flogic.flogic-key');
+    check('IT: the key file is signed by IT\'s key and holds only Fernando\'s groups', !!(await SignInCore.check(SignInCore.readKey(keyText), FLOGIC_IT_SIGNER)) &&
+          JSON.parse(JSON.parse(keyText).claims).groups.map(function (g) { return g.group; }).join() === 'service-desk');
     click('lock');
     check('IT: Lock closes it', !$('locked').hidden && $('open-part').hidden);
 
-    // ---- the person: open IT's file, sign in ----
+    // ---- the person: first time ----
+    const mine = itRoot.__dirs.get('u-0001');
     await load('signin.html');
-    check('page: the laptop is remembered, waiting for IT', await until(function () { return $('who-' + laptopCode); }) &&
-          /Waiting/.test(text('who-' + laptopCode)));
-    click('who-' + laptopCode);
-    await until(function () { return $('signin-file'); });
-    const edited = JSON.parse(signinText); const ec = JSON.parse(edited.claims); ec.groups[0].rules.export = false; ec.groups.push({ group: 'change-team', label: 'Change Team', keyVersion: 1, rules: { export: false, autoLockMin: 10 } });
-    edited.claims = JSON.stringify(ec);
-    pick('signin-file', 'edited.flogic-signin', JSON.stringify(edited));
-    check('open: an edited sign-in file is refused, and says so', await until(function () { return /changed/.test(text('why')); }), text('why'));
-    pick('signin-file', 'fernando-g.flogic-signin', signinText);
-    check('open: the real one goes in, and asks for the passphrase', await until(function () { return $('pass') && /You're set/.test(text('note')); }));
-    type('pass', 'not my passphrase at all'); click('go');
-    check('sign in: a wrong passphrase is refused', await until(function () { return /doesn't match/.test(text('why')); }, 30000));
-    type('pass', PASS); click('go');
-    check('sign in: the right one signs in', await until(function () { return w().SignInPage.signedIn(); }, 30000) && /Hi, Fernando G/.test(title()));
-    check('sign in: shows the groups from IT\'s file', /Service Desk/.test(text('groups')) && !/Change Team/.test(text('groups')));
+    fakePicker(mine);
+    check('page: a new laptop asks for the folder', await until(function () { return $('connect'); }) && /Sign in to Flogic/.test(title()));
+    const edited = JSON.parse(keyText); const ec = JSON.parse(edited.claims);
+    ec.groups.push({ group: 'change-team', label: 'Change Team', keyVersion: 1, rules: { export: true, autoLockMin: 10 } }); edited.claims = JSON.stringify(ec);
+    pick('key-file', 'flogic.flogic-key', JSON.stringify(edited));
+    check('first time: an edited key file is refused, and says so', await until(function () { return /changed/.test(text('why')); }), text('why'));
+    click('connect');
+    check('first time: connecting the folder finds the key and asks for a PIN', await until(function () { return $('pin1') && /Hi, Fernando G/.test(title()); }, 30000), title());
+    type('pin1', '1234'); type('pin2', '1234'); click('set-pin');
+    check('PIN: a short one is refused', await until(function () { return /6 to 12 digits/.test(text('why')); }));
+    type('pin1', PIN); type('pin2', PIN + '0'); click('set-pin');
+    check('PIN: two that don\'t match are refused', await until(function () { return /don't match/.test(text('why')); }));
+    type('pin2', PIN); click('set-pin');
+    check('first time: signed in, straight away', await until(function () { return w().SignInPage.signedIn(); }, 30000) && /Hi, Fernando G/.test(title()));
+    check('signed in: shows the groups from IT\'s file', /Service Desk/.test(text('groups')) && !/Change Team/.test(text('groups')));
     check('session: shows when it locks by itself', /Locks by itself/.test(text('session-ends')));
     pick('pack-file', 'demo_incident.flogic', incident);
     check('pack: Service Desk\'s pack opens', await until(function () { return /Opened demo_incident\.csv/.test(text('pack-result')); }, 30000), text('pack-result'));
     pick('pack-file', 'demo_change_request.flogic', change);
     check('pack: Change Team\'s pack is refused', await until(function () { return /You're not in that group/.test(text('pack-result')); }), text('pack-result'));
     click('lock');
-    check('Lock: back to the passphrase, signed out', await until(function () { return $('pass') && /Locked/.test(text('note')); }) && !w().SignInPage.signedIn());
-    store = await readStore();
-    check('store: holds IT\'s file and locked keys only', store.length === 1 && !!store[0].signin && !JSON.stringify(store).includes(PASS) && !JSON.stringify(store).includes('"d":'));
+    check('Lock: back to the PIN, signed out', await until(function () { return $('pin') && /Locked/.test(text('note')); }) && !w().SignInPage.signedIn());
+    let store = await readStore();
+    const raw = JSON.parse(keyText).keys.entries[0].raw;
+    check('store: one person, no PIN, no group key in the clear', store.length === 1 && !JSON.stringify(store).includes(PIN) && !JSON.stringify(store).includes(raw));
 
-    // ---- the end date, mid-session (a 6-second sign-in file, signed with the demo key) ----
+    // ---- every day: the PIN ----
+    type('pin', '000001'); click('go');
+    check('daily: a wrong PIN is refused and says how many tries are left', await until(function () { return /9 more tries/.test(text('why')); }, 30000), text('why'));
+    type('pin', PIN); click('go');
+    check('daily: the PIN signs in', await until(function () { return w().SignInPage.signedIn(); }, 30000));
+    store = await readStore();
+    check('daily: the right PIN resets the wrong-PIN count', store[0].tries === 0, store[0].tries);
+    click('lock');
+    await until(function () { return $('pin'); });
+
+    // ---- renewal, picked up from the folder by itself (IT made a 6-second one) ----
     const signer = await SignInCore.openSigner(SignInCore.readSigner(signerText), ITPASS);
     const ring = await SignInCore.keyringGroups(ringText, ITPASS);
-    const shortOne = await SignInCore.issue(signer, await SignInCore.readRequest(req.text), ring.people[0],
-                                            ring.groups.filter(function (g) { return g.group === 'service-desk'; }), new Date(Date.now() + 6000));
-    pick('signin-file', 'short.flogic-signin', JSON.stringify(shortOne));
-    check('renew: a newer file from IT goes in with no new set-up', await until(function () { return /new sign-in file is in/.test(text('note')); }));
-    type('pass', PASS); click('go');
-    check('expiry: signs in before the end', await until(function () { return w().SignInPage.signedIn(); }, 30000));
+    const shortOne = await SignInCore.issueKey(signer, ring.people[0], ring.groups.filter(function (g) { return g.group === 'service-desk'; }), new Date(Date.now() + 6000));
+    mine.__files.set('flogic.flogic-key', JSON.stringify(shortOne));
+    type('pin', PIN); click('go');
+    check('renew: a newer key file in the folder is taken in by itself, same PIN', await until(function () { return w().SignInPage.signedIn() && $('renewed'); }, 30000));
     check('expiry: the end date signs you out, mid-session', await until(function () { return !w().SignInPage.signedIn() && /has ended/.test(text('note')); }, 15000), text('note'));
-    type('pass', PASS); click('go');
+    type('pin', PIN); click('go');
     check('expiry: and you can\'t sign in again with that file', await until(function () { return /ended/.test(text('why')); }, 30000), text('why'));
-    pick('signin-file', 'fernando-g.flogic-signin', signinText);
-    check('renew: an OLDER file than the one you have is refused', await until(function () { return /older/.test(text('renew-why')); }), text('renew-why'));
+    mine.__files.set('flogic.flogic-key', keyText);
+    type('pin', PIN); click('go');
+    check('renew: an OLDER key file put back in the folder is not taken', await until(function () { return /ended/.test(text('why')) && !w().SignInPage.signedIn(); }, 30000), text('why'));
+
+    // ---- too many wrong PINs wipe the laptop copy ----
+    for (let i = 0; i < SignInCore.MAX_TRIES; i++) {
+        type('pin', '999990'); click('go');
+        const want = SignInCore.MAX_TRIES - i - 1;
+        await until(function () { return want > 0 ? new RegExp(want + ' more tr').test(text('why')) : /forgot you/.test(text('note')); }, 30000);
+    }
+    store = await readStore();
+    check('wipe: 10 wrong PINs and this laptop forgets you', /forgot you/.test(text('note')) && store.length === 0, text('note') + ' / ' + store.length);
+    check('wipe: you just connect your folder again', !!$('connect'));
 }
 
 (async function () {
