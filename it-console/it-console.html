@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="neo-neutral">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <!--  No network,  no outside code:  only this folder's files and  ../DIRECTORY/vaultcoreI.js  -->
+    <!--  No network,  no outside code:  only this folder's files and the app's own core files in  ../DIRECTORY/  -->
     <meta http-equiv="Content-Security-Policy"
           content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'">
     <title>Flogic IT console</title>
@@ -13,9 +13,11 @@
 <div id="it-app">
 
     <header class="top">
-        <h1>Flogic IT console</h1>
-        <p class="sub">Plays Molson IT for the demo: access groups, data packs, and credential files.
-           Nothing is saved in this browser.</p>
+        <div>
+            <h1>Flogic <span class="thin">IT console</span></h1>
+            <p class="sub">Who can open which data, what they may do with it, and for how long.</p>
+        </div>
+        <button type="button" id="theme-btn" class="chip-btn" title="Switch between the app's two looks">Neo-Neutral</button>
     </header>
 
 
@@ -25,7 +27,7 @@
             <h2>Open keyring</h2>
             <label>Keyring file <input type="file" id="open-file" accept=".flogic-keyring,application/json"></label>
             <label>IT passphrase <input type="password" id="open-pass" autocomplete="off"></label>
-            <button id="open-btn" class="primary">Open keyring</button>
+            <button type="button" id="open-btn" class="primary">Open keyring</button>
         </section>
 
         <section class="card">
@@ -33,7 +35,7 @@
             <p class="hint">At least 12 characters, or 4 words. There's no way to get it back if it's lost.</p>
             <label>IT passphrase <input type="password" id="new-pass" autocomplete="new-password"></label>
             <label>Type it again <input type="password" id="new-pass2" autocomplete="new-password"></label>
-            <button id="new-btn">New keyring</button>
+            <button type="button" id="new-btn">New keyring</button>
         </section>
 
         <p id="start-msg" class="msg" role="status"></p>
@@ -47,14 +49,125 @@
                 <span id="keyring-counts" class="hint"></span>
                 <span id="unsaved" class="tag warn" hidden>unsaved changes</span></span>
             <span class="actions">
-                <button id="save-btn" class="primary">Save keyring</button>
-                <button id="lock-btn">🔒 Lock</button>
+                <button type="button" id="save-btn" class="primary">Save keyring</button>
+                <button type="button" id="lock-btn">🔒 Lock</button>
             </span>
         </section>
         <p id="keyring-msg" class="msg" role="status"></p>
 
+        <nav class="jump" aria-label="Sections">
+            <a href="#access">Access</a>
+            <a href="#levels">Levels and rules</a>
+            <a href="#people">People</a>
+            <a href="#groups">Groups</a>
+            <a href="#pack">Data packs</a>
+            <a href="#signer">Signing key</a>
+        </nav>
 
-        <!-- ======================  2.  GROUPS  ====================== -->
+
+        <!-- ======================  ACCESS:  THE WHOLE PICTURE,  FIRST  ====================== -->
+        <section class="card" id="access">
+            <h2>Access</h2>
+            <ul id="todo" class="todo"></ul>
+
+            <h3>Who has what</h3>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Person</th><th>Level</th><th>Groups</th><th>Key file</th><th>Review</th><th>Last day</th><th></th></tr></thead>
+                    <tbody id="person-list"></tbody>
+                </table>
+            </div>
+            <p id="person-none" class="hint">No one yet. Add a person under "People".</p>
+
+            <div class="row">
+                <button type="button" id="renew-all" class="primary">Renew everyone</button>
+                <span class="hint">A fresh key file for everyone whose review is in date. Guests are renewed by name.</span>
+            </div>
+            <p id="issue-msg" class="msg" role="status"></p>
+
+            <h3>IT's Flogic folder</h3>
+            <p class="hint">One folder in OneDrive, Google Drive or a share, with a subfolder per person (named by their id, like
+               <span class="mono">u-0001</span>). Share each subfolder with that person only. Their drive sign-in is what guards their key file.</p>
+            <div class="row">
+                <button type="button" id="connect-folder">Connect IT's Flogic folder</button>
+                <button type="button" id="forget-folder" class="quiet" hidden>Forget this folder</button>
+            </div>
+            <div class="drop" id="folder-drop">Or drag the folder here, from File Explorer or Finder</div>
+            <p id="folder-status" class="msg" role="status"></p>
+
+            <h3>Which data is for whom</h3>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Group</th><th>Key</th><th>Can export</th><th>Auto-lock (most)</th><th>People</th><th>Data packed for it</th></tr></thead>
+                    <tbody id="data-list"></tbody>
+                </table>
+            </div>
+            <p id="data-none" class="hint">No groups yet.</p>
+        </section>
+
+
+        <!-- ======================  ACCESS LEVELS  AND  THE BUILT-IN RULES  ====================== -->
+        <section class="card" id="levels">
+            <h2>Levels and rules</h2>
+            <p class="hint">A <strong>group</strong> says which data a person can open. A <strong>level</strong> says what they may do with it.
+               When the two disagree, the stricter one wins. These are built into the app: they can't be changed from this screen.</p>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Level</th><th>For</th><th>Export</th><th>Auto-lock</th><th>Key file lasts</th><th>Renewed</th><th>Groups</th><th>The app opens with</th></tr></thead>
+                    <tbody id="level-list"></tbody>
+                </table>
+            </div>
+            <ul class="rules">
+                <li id="rule-grant"></li>
+                <li id="rule-review"></li>
+                <li>The app checks these itself at every sign-in. A key file that breaks one is refused, even if this console signed it.</li>
+            </ul>
+        </section>
+
+
+        <!-- ======================  PEOPLE  ====================== -->
+        <section class="card" id="people">
+            <h2>People</h2>
+            <h3 id="person-form-title">Add a person</h3>
+            <div class="form-row">
+                <label>Name <input type="text" id="c-name" maxlength="80" placeholder="e.g. Fernando G"></label>
+                <label>Access level <select id="pp-level"></select>
+                    <span class="hint" id="pp-level-hint"></span></label>
+            </div>
+            <fieldset id="c-groups-box">
+                <legend>Groups (at least one)</legend>
+                <div id="c-groups"></div>
+            </fieldset>
+            <div class="form-row">
+                <label>Last day (optional) <input type="date" id="c-expires">
+                    <span class="hint">For someone leaving on a known date. Their key files never run past it.</span></label>
+            </div>
+            <button type="button" id="c-btn" class="primary">Add person</button>
+            <button type="button" id="pp-cancel" hidden>Cancel</button>
+            <p id="person-msg" class="msg" role="status"></p>
+
+            <!--  The older way in:  only shown while the built-in rules still allow it  -->
+            <div id="legacy-note" class="legacy" hidden>
+                <h3>The older way: a credential file</h3>
+                <p class="hint">"Credential file" in the list above makes a <span class="mono">.flogic-id</span> file and a setup code. It keeps
+                   whatever end date is typed here, so it does <strong>not</strong> follow the short-access and review rules. Prefer key files.</p>
+                <label>Credential good until <input type="date" id="cred-expires"></label>
+            </div>
+
+            <!--  The setup code:  shown once  -->
+            <div id="code-panel" class="code-panel" hidden>
+                <p class="code-for">Setup code for <strong id="code-for"></strong></p>
+                <p id="setup-code" class="setup-code mono"></p>
+                <p class="code-note"><strong>Give this to the person in person or over Teams, never in the same email as the file.
+                   Treat it as one-time.</strong> It isn't saved anywhere, not even in the keyring. If it's lost, make a new credential.</p>
+                <button type="button" id="copy-btn">Copy</button>
+                <button type="button" id="code-done">I've handed it over. Hide it.</button>
+                <span id="copy-msg" class="hint"></span>
+            </div>
+        </section>
+
+
+        <!-- ======================  GROUPS  ====================== -->
         <section class="card" id="groups">
             <h2>Groups</h2>
             <p class="hint">Each group has its own key. A data pack made for a group opens only for the people in it.</p>
@@ -78,70 +191,77 @@
                     <input type="number" id="g-autolock" min="1" max="240" step="1" value="15"></label>
             </div>
             <label class="inline check"><input type="checkbox" id="g-export"> Can export (Export report, Save as CSV)</label>
-            <p id="g-edit-note" class="hint" hidden>People who already have a credential keep the old name and rules
-               until they get a new credential.</p>
-            <button id="g-add" class="primary">Make group</button>
-            <button id="g-cancel" hidden>Cancel</button>
+            <p id="g-edit-note" class="hint" hidden>People keep the old name and rules until their next key file.</p>
+            <button type="button" id="g-add" class="primary">Make group</button>
+            <button type="button" id="g-cancel" hidden>Cancel</button>
             <p id="group-msg" class="msg" role="status"></p>
         </section>
 
 
-        <!-- ======================  3.  PACK A FILE  ====================== -->
+        <!-- ======================  DATA PACKS  ====================== -->
         <section class="card" id="pack">
-            <h2>Pack a file</h2>
+            <h2>Data packs</h2>
             <p class="hint">Locks a data file for one group. Only that group's people can open the <code>.flogic</code> file it makes.
                Anyone can still see which group it's for, and the file's name.</p>
             <div class="form-row">
                 <label>Data file (.csv, .xlsx, .sql) <input type="file" id="p-file" accept=".csv,.xlsx,.sql"></label>
                 <label>For the group <select id="p-group"></select></label>
             </div>
-            <button id="p-btn" class="primary">Pack</button>
+            <button type="button" id="p-btn" class="primary">Pack</button>
             <p id="pack-msg" class="msg" role="status"></p>
+
+            <h3>Packed so far</h3>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Pack</th><th>From</th><th>For</th><th>Size</th><th>Made</th></tr></thead>
+                    <tbody id="pack-list"></tbody>
+                </table>
+            </div>
+            <p id="pack-none" class="hint">Nothing packed with this keyring yet. (The list holds names and sizes only, never data.)</p>
         </section>
 
 
-        <!-- ======================  4.  PEOPLE:  CREDENTIAL FILES  ====================== -->
-        <section class="card" id="people">
-            <h2>People</h2>
-            <p class="hint">A credential file (<code>.flogic-id</code>) holds a person's group keys, locked with a setup code.
-               They open it once in Flogic, with the code, and pick their own passphrase.</p>
+        <!-- ======================  THE SIGNING KEY  ====================== -->
+        <section class="card" id="signer">
+            <h2>Signing key</h2>
+            <p class="hint">Every key file is signed with IT's signing key. It lives inside the keyring, locked with the IT passphrase.
+               The app carries the public half in <span class="mono">DIRECTORY/it-signerI.js</span> (the "trust file"), and refuses
+               key files signed by any other key.</p>
 
-            <div class="table-wrap">
-                <table>
-                    <thead><tr><th>Id</th><th>Name</th><th>Groups</th><th>Expires</th><th>Made</th></tr></thead>
-                    <tbody id="person-list"></tbody>
-                </table>
+            <div id="signer-has" hidden>
+                <p>This keyring signs as <strong id="signer-print" class="mono"></strong></p>
+                <p id="signer-trust" class="msg" role="status"></p>
+                <button type="button" id="trust-btn">Download the app's trust file</button>
+                <details>
+                    <summary>Replace the signing key</summary>
+                    <p class="hint">Only if the keyring or its passphrase may have leaked. Every key file out there stops working, and every
+                       copy of the app needs the new trust file.</p>
+                    <label class="inline check"><input type="checkbox" id="signer-replace-ok"> I understand: everyone needs a new key file</label>
+                    <div class="row">
+                        <button type="button" id="signer-remake" class="danger">Make a new signing key</button>
+                        <label class="file-btn">Or bring one in (.flogic-signer) <input type="file" id="signer-file2" accept=".flogic-signer,application/json"></label>
+                    </div>
+                </details>
             </div>
-            <p id="person-none" class="hint">No one yet.</p>
 
-            <h3>Make a credential</h3>
-            <div class="form-row">
-                <label>Name <input type="text" id="c-name" maxlength="80" placeholder="e.g. Fernando G"></label>
-                <label>Expires <input type="date" id="c-expires"></label>
+            <div id="signer-none" hidden>
+                <p>This keyring has no signing key yet, so it can't make key files.</p>
+                <div class="row">
+                    <button type="button" id="signer-make" class="primary">Make a signing key</button>
+                    <label class="file-btn">Or bring in an existing one (.flogic-signer) <input type="file" id="signer-file" accept=".flogic-signer,application/json"></label>
+                </div>
             </div>
-            <fieldset id="c-groups-box">
-                <legend>Groups (at least one)</legend>
-                <div id="c-groups"></div>
-            </fieldset>
-            <button id="c-btn" class="primary">Make credential</button>
-            <p id="person-msg" class="msg" role="status"></p>
-
-            <!--  The setup code:  shown once  -->
-            <div id="code-panel" class="code-panel" hidden>
-                <p class="code-for">Setup code for <strong id="code-for"></strong></p>
-                <p id="setup-code" class="setup-code mono"></p>
-                <p class="code-note"><strong>Give this to the person in person or over Teams, never in the same email as the file.
-                   Treat it as one-time.</strong> It isn't saved anywhere, not even in the keyring. If it's lost, make a new credential.</p>
-                <button id="copy-btn">Copy</button>
-                <button id="code-done">I've handed it over. Hide it.</button>
-                <span id="copy-msg" class="hint"></span>
-            </div>
+            <p id="signer-msg" class="msg" role="status"></p>
         </section>
     </main>
 
 </div>
 
 <script src="../DIRECTORY/vaultcoreI.js"></script>
+<script src="../DIRECTORY/policyI.js"></script>
+<script src="../DIRECTORY/signincoreI.js"></script>
+<script src="../DIRECTORY/mailboxI.js"></script>
+<script src="../DIRECTORY/it-signerI.js"></script>
 <script src="itconsoleI.js"></script>
 </body>
 </html>

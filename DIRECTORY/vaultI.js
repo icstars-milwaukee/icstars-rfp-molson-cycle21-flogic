@@ -7,16 +7,24 @@
 
         What it does:
             -  the full-screen UNLOCK CARD  (before the app shows anything)
-            -  SETUP,  the first time:  your credential file  ->  the setup code IT gave you
-                                        ->  pick a passphrase  ->  your recovery code  ("write this down")
-            -  UNLOCK:  your passphrase  (or your recovery code)
+            -  SIGN IN WITH YOUR KEY FILE   (the main way):
+                   the first time:  connect the drive folder IT shared with you  ->  pick a PIN for this laptop
+                   every day:       the PIN.   A renewed key file in the folder is taken in by itself.
+               The key file is signed by IT,  lasts days,  and carries your ACCESS LEVEL  (signincoreI.js,  policyI.js).
+            -  THE OLDER WAY  (only while  FlogicPolicy.ALLOW_LEGACY_CREDENTIALS  is true):
+                   SETUP:   your credential file  ->  the setup code IT gave you
+                            ->  pick a passphrase  ->  your recovery code  ("write this down")
+                   UNLOCK:  your passphrase  (or your recovery code)
             -  LOCK:  the keys and the open file leave the page,  and the card comes back
             -  window.FlogicVault:  what the dashboard reads  (who you are,  can you export)
 
-        What the browser keeps  (IndexedDB  "flogic-vault"):  for each person who set up here,
-        their name,  their groups,  their rules,  and their group keys LOCKED twice
-        (once with the passphrase,  once with the recovery code).   Never data.   Never a passphrase.
-        Never an unlocked key.
+        What the browser keeps:
+            IndexedDB "flogic-filekey":   for each person who signed in with a key file here:  IT's signed claims
+                                          (name,  level,  groups,  end date)  and their group keys LOCKED with the PIN.
+            IndexedDB "flogic-mailbox":   which drive folder was connected  (a browser handle,  not a path,  not a file).
+            IndexedDB "flogic-vault":     the older way:  name,  groups,  rules,  and the group keys LOCKED twice
+                                          (once with the passphrase,  once with the recovery code).
+        Never data.   Never a PIN or a passphrase.   Never an unlocked key.   Nothing in localStorage.
 
         It loads LAST  (after scriptI.js and dashI.js),  and changes nothing of theirs:
         it only CALLS  loadFile,  closeFile,  queryFileChanged.   Renamed?  It says so in the console and stays off.
@@ -35,13 +43,21 @@
 
     const V = typeof VaultCore === 'undefined' ? null : VaultCore;
 
+    //  Key-file sign-in needs 4 more files  (policyI.js,  signincoreI.js,  mailboxI.js,  it-signerI.js).
+    //  One missing  (an older test page)?   Then only the older way is offered.
+    const S = typeof SignInCore === 'undefined' ? null : SignInCore;
+    const P = typeof FlogicPolicy === 'undefined' ? null : FlogicPolicy;
+    const TRUSTED = typeof FLOGIC_IT_SIGNER === 'undefined' ? null : FLOGIC_IT_SIGNER;      //  IT's public key:  whose key files we believe
+    const keyFilesOn = S !== null && P !== null && TRUSTED !== null && typeof Mailbox !== 'undefined';
+    const legacyOn = !keyFilesOn || P.ALLOW_LEGACY_CREDENTIALS === true;                     //  the credential file + passphrase way
+
 
     // ------------------------------------------------------
     //    THE VAULT'S STATE   (only in variables:  Lock sets them back to null)
     // ------------------------------------------------------
 
     let state  = missing.length > 0 ? 'off' : 'locked';     //  'off'  |  'locked'  (the card is up)  |  'unlocked'
-    let me     = null;          //  the signed-in person:   { id, name, groups, expires, prefs }
+    let me     = null;          //  the signed-in person:   { id, name, groups, expires, prefs,  level, endsAt, byKey  (key-file sign-in) }
     let keys   = null;          //  their unlocked group keys:   Map  group -> { keyVersion, key }   (not readable:  extractable false)
     let pack   = null;          //  the open data pack's label  (V4)
     const listeners = [];
@@ -67,9 +83,13 @@
     window.FlogicVault = Object.freeze({
         state: function () { return state; },
         person: function () {
-            return me === null ? null : { id: me.id, name: me.name,
+            return me === null ? null : { id: me.id, name: me.name, level: me.level,
                 groups: me.groups.map(function (g) { return { group: g.group, label: g.label, rules: Object.assign({}, g.rules) }; }) };
         },
+        //  The signed-in person's access level  (policyI.js:  { id, label, can, view ... }),  or null  (the older way,  or nobody).
+        level: function () { return me === null || !me.level || P === null ? null : P.level(me.level); },
+        //  When their key file ends  (a Date),  or null.
+        accessEnds: function () { return me === null || !me.endsAt ? null : new Date(me.endsAt); },
         openPack: function () { return pack === null ? null : Object.assign({}, pack); },
         canExport: function () {
             if (state !== 'unlocked' || pack === null) return state !== 'locked';    //  a plain file:  yes   (locked:  no)
@@ -123,6 +143,32 @@
 
     const allPeople = function () { return dbDo('readonly', function (s) { return s.getAll(); }); };
     const savePerson = function (record) { return dbDo('readwrite', function (s) { return s.put(record); }); };
+
+
+    //  KEY-FILE SIGN-IN keeps its own database:  "flogic-filekey",  one LAPTOP COPY per person.
+    //      { id, name, claims, sig,                IT's signed claims,  exactly as IT wrote them
+    //        locked: { salt, rounds, iv, data },   the group keys,  locked with the PIN
+    //        tries,                                wrong PINs in a row  (10  ->  the copy is wiped)
+    //        prefs: { autoLockMin } }
+    function keyDb(mode, work) {
+        return new Promise(function (done, fail) {
+            const open = indexedDB.open('flogic-filekey', 1);
+            open.onupgradeneeded = function () { open.result.createObjectStore('people', { keyPath: 'id' }); };
+            open.onerror = function () { fail(open.error); };
+            open.onsuccess = function () {
+                const db = open.result;
+                let tx, req;
+                try { tx = db.transaction('people', mode); req = work(tx.objectStore('people')); }
+                catch (e) { db.close(); fail(e); return; }
+                tx.oncomplete = function () { db.close(); done(req ? req.result : undefined); };
+                tx.onerror = tx.onabort = function () { db.close(); fail(tx.error); };
+            };
+        });
+    }
+
+    const allCopies = function () { return keyDb('readonly', function (s) { return s.getAll(); }); };
+    const saveCopy = function (copy) { return keyDb('readwrite', function (s) { return s.put(copy); }); };
+    const forgetCopy = function (id) { return keyDb('readwrite', function (s) { return s.delete(id); }); };
 
 
     // ------------------------------------------------------
@@ -234,24 +280,291 @@
         });
     }
 
+    //  The laptop copies  (key-file sign-in),  never waiting forever either.
+    function copiesOrNothing() {
+        if (!keyFilesOn) return Promise.resolve([]);
+        return Promise.race([
+            allCopies().catch(function (e) { console.warn('Vault: could not read the key-file store:', e); return []; }),
+            new Promise(function (done) { setTimeout(function () { done([]); }, 3000); }),
+        ]);
+    }
+
+    function claimsOf(copy) { try { return JSON.parse(copy.claims); } catch (e) { return null; } }
+
+    //  "Service Desk · Change Team"
+    function groupsLine(groups) { return groups.map(function (g) { return g.label; }).join(' · '); }
+
+    //  "Analyst  ·  Service Desk"
+    function levelLine(c) {
+        const l = P.level(c.level);
+        return (l ? l.label + '  ·  ' : '') + groupsLine(c.groups);
+    }
+
     async function startScreen() {
         screen('Opening…', [], []);
-        const people = await peopleOrNothing();
+        const people = legacyOn ? await peopleOrNothing() : [];
+        const copies = await copiesOrNothing();
 
-        const pick = people.map(function (p) {
-            const b = button(p.name, function () { unlockScreen(p, false); }, 'vault-person');
-            b.appendChild(el('small', { text: p.groups.map(function (g) { return g.label; }).join(' · ') }));
+        if (people.length + copies.length === 0) { keyFilesOn ? keyFileScreen() : whoScreen([], []); return; }
+        if (people.length + copies.length === 1) {
+            if (copies.length === 1) pinScreen(copies[0]); else unlockScreen(people[0], false);
+            return;
+        }
+        whoScreen(people, copies);
+    }
+
+    //  The list:  everyone who signed in on this laptop,  and the ways in for someone new.
+    function whoScreen(people, copies) {
+        const pick = copies.map(function (r) {
+            const c = claimsOf(r);
+            const b = button(r.name, function () { pinScreen(r); }, 'vault-person');
+            b.appendChild(el('small', { text: c ? levelLine(c) : '' }));
             return b;
+        }).concat(people.map(function (p) {
+            const b = button(p.name, function () { unlockScreen(p, false); }, 'vault-person');
+            b.appendChild(el('small', { text: groupsLine(p.groups) }));
+            return b;
+        }));
+        const nobody = pick.length === 0;
+
+        screen(nobody ? 'Sign in to Flogic' : 'Who\'s unlocking?',
+               nobody ? [keyFilesOn ? 'Your IT department puts a key file in a drive folder it shares with you.'
+                                    : 'Your IT department gives you a credential file and a setup code.'] : [],
+               pick.concat([
+                   keyFilesOn ? button(nobody ? 'Sign in with your key file' : 'Someone new on this laptop', keyFileScreen, nobody ? 'vault-main' : 'vault-quiet') : null,
+                   legacyOn ? button('Set up with a credential file', setupScreen, nobody && !keyFilesOn ? 'vault-main' : 'vault-quiet') : null,
+                   button('Open a plain file without signing in', plainMode, 'vault-quiet'),
+               ].filter(Boolean)));
+    }
+
+
+    // ---- KEY-FILE SIGN-IN,  THE FIRST TIME ON THIS LAPTOP:   your drive folder  (or the file itself),  then a PIN ----
+
+    let folder = null;              //  the person's drive folder  (Mailbox.openPersonal),  once connected.   Read only.
+
+    //  The folder this browser remembers,  if it's still allowed.   ask:  only straight after a click.
+    async function reconnect(ask) {
+        if (folder) return folder;
+        if (!Mailbox.supported()) return null;
+        try {
+            const h = await Mailbox.recall('person');
+            if (!h || !await Mailbox.allowed(h, 'read', ask)) return null;
+            folder = await Mailbox.openPersonal(h);
+        } catch (e) { console.warn('Vault: the drive folder isn\'t available:', e); folder = null; }
+        return folder;
+    }
+
+    //  The key file in the folder   ->   read  (not checked yet),  or null
+    async function keyFromFolder() {
+        if (!folder) return null;
+        const t = await folder.getKey();
+        return t ? S.readKey(t) : null;
+    }
+
+    function keyWords(e) {
+        if (e.code === 'not-a-file') return 'That isn\'t a Flogic key file. It\'s called ' + Mailbox.KEY_FILE + ', in the folder IT shared with you.';
+        return e.message;
+    }
+
+    function keyFileScreen() {
+        const why = problem();
+        const canFolder = Mailbox.supported();
+
+        //  A key file's text   ->   checked against IT's signature AND the built-in rules   ->   pick a PIN
+        async function take(text) {
+            const k = S.readKey(text);
+            await S.check(k, TRUSTED);
+            choosePinScreen(k);
+        }
+        function failed(e) {
+            console.warn('Vault: that key file or folder didn\'t work:', e);
+            why.textContent = e.code && e.code !== 'cancelled' && !e.raw ? keyWords(e) : Mailbox.whyNot(e);
+        }
+        async function useFolder(h) {
+            folder = await Mailbox.openPersonal(h);
+            try { await Mailbox.remember(h, 'person'); } catch (e) { /* works this visit;  asks again next time */ }
+            const t = await folder.getKey();
+            if (!t) {
+                why.textContent = 'There\'s no key file in "' + folder.name + '" yet. Pick the folder IT shared with you, or ask IT to put your key there.';
+                folder = null;
+                return;
+            }
+            await take(t);
+        }
+
+        const connect = canFolder ? button('Connect your Flogic folder', function () {
+            why.textContent = '';
+            Mailbox.pick('read').then(useFolder).catch(failed);         //  the picker FIRST,  straight from the click:  the browser insists
+        }, 'vault-main') : null;
+        if (connect) connect.id = 'vaultConnect';
+
+        //  Or drag the folder  (or the key file itself)  onto the card:  no picker window at all
+        const drop = el('div', { class: 'vault-drop', id: 'vaultDrop', text: canFolder ? 'Or drag your Flogic folder (or the key file) here' : 'Drag your key file here' });
+        ['dragenter', 'dragover'].forEach(function (t) { drop.addEventListener(t, function (e) { e.preventDefault(); drop.classList.add('over'); }); });
+        drop.addEventListener('dragleave', function () { drop.classList.remove('over'); });
+        drop.addEventListener('drop', function (e) {
+            e.preventDefault();
+            drop.classList.remove('over');
+            why.textContent = '';
+            Mailbox.fromDrop(e).then(async function (r) {               //  FIRST,  during the drop
+                if (r.dir) return useFolder(r.dir);
+                await take(await r.file.text());
+            }).catch(failed);
         });
 
-        if (people.length === 1) { unlockScreen(people[0], false); return; }
+        const byHand = el('input', { type: 'file', id: 'vaultKeyFile', accept: '.flogic-key,application/json' });
+        byHand.addEventListener('change', function () {
+            why.textContent = '';
+            const f = byHand.files[0];
+            if (!f) return;
+            f.text().then(take).catch(failed);
+            byHand.value = '';
+        });
+        const hand = el('details', { class: 'vault-details' }, [
+            el('summary', { text: 'Or open the key file yourself' }),
+            el('label', { class: 'vault-field' }, [el('span', { text: 'Your key file  (' + Mailbox.KEY_FILE + ')' }), byHand]),
+        ]);
+        if (!canFolder) hand.open = true;
 
-        screen(people.length === 0 ? 'Sign in to Flogic' : 'Who\'s unlocking?',
-               people.length === 0 ? ['Your IT department gives you a credential file and a setup code.'] : [],
-               pick.concat([
-                   button('Set up with a credential file', setupScreen, people.length === 0 ? 'vault-main' : 'vault-quiet'),
-                   button('Open a plain file without signing in', plainMode, 'vault-quiet'),
-               ]));
+        screen('Sign in to Flogic',
+               [canFolder ? 'IT shared a folder with you in OneDrive or Google Drive. Pick it once, and you\'re in.'
+                          : 'Open the key file IT gave you (' + Mailbox.KEY_FILE + ').'],
+               [connect, drop, hand, why,
+                button('Back', startScreenAll, 'vault-quiet'),
+                legacyOn ? button('Set up with a credential file', setupScreen, 'vault-quiet') : null,
+                button('Open a plain file without signing in', plainMode, 'vault-quiet')].filter(Boolean));
+
+        //  A folder this browser already remembers,  still allowed:  straight to the PIN
+        reconnect(false).then(async function (f) {
+            if (!f || !box.contains(why)) return;
+            try { const k = await keyFromFolder(); if (k && box.contains(why)) { await S.check(k, TRUSTED); choosePinScreen(k); } }
+            catch (e) { if (box.contains(why)) why.textContent = keyWords(e); }
+        });
+    }
+
+    function pinField(label, id) {
+        const f = field(label, 'password', id);
+        f.input.setAttribute('inputmode', 'numeric');
+        f.input.setAttribute('maxlength', '12');
+        return f;
+    }
+
+    function choosePinScreen(keyFile) {
+        const c = JSON.parse(keyFile.claims);
+        const a = pinField('Pick a PIN for this laptop  (4 or more digits)', 'vaultPin1');
+        const b = pinField('Type it again', 'vaultPin2');
+        const why = problem();
+        const go = button('Sign in', async function () {
+            why.textContent = '';
+            const issue = S.pinProblem(a.input.value);
+            if (issue) { why.textContent = issue; return; }
+            if (a.input.value !== b.input.value) { why.textContent = 'The two don\'t match.'; return; }
+            try {
+                const opened = await busy(go, 'Signing in…', async function () {
+                    const copy = await S.claim(keyFile, a.input.value, TRUSTED);
+                    const o = await S.unlock(copy, a.input.value, TRUSTED);
+                    await saveCopy(o.copy);
+                    return o;
+                });
+                a.input.value = '';
+                b.input.value = '';
+                signInWithKey(opened.copy, opened);
+            } catch (e) { why.textContent = keyWords(e); }
+        }, 'vault-main');
+        onEnter(b.input, function () { go.click(); });
+
+        const l = P.describe(c.level);
+        screen('Hi, ' + c.name,
+               [el('p', { class: 'vault-who', id: 'vaultGave', text: 'IT gave you: ' + levelLine(c) }),
+                el('p', { class: 'vault-small', text: l.label + ': export ' + l.export.toLowerCase() + ', locks after ' + l.autoLock + '.' }),
+                'Pick a PIN. You\'ll type it each time you sign in on this laptop. Nobody else needs it, not even IT.'],
+               [a.wrap, b.wrap, go, why, button('Back', startScreen, 'vault-quiet')]);
+    }
+
+
+    // ---- KEY-FILE SIGN-IN,  EVERY DAY:   the PIN ----
+
+    function pinScreen(copy) {
+        const c = claimsOf(copy);
+        const pin = pinField('PIN', 'vaultPin');
+        const why = problem();
+        let forgetArmed = false;
+
+        const go = button('Sign in', async function () {
+            why.textContent = '';
+            const typed = pin.input.value;
+            try {
+                const opened = await busy(go, 'Signing in…', async function () {
+                    let o = await S.unlock(copy, typed, TRUSTED);
+                    await saveCopy(o.copy);
+                    copy = o.copy;
+                    //  RENEWAL:  a newer key file in the drive folder replaces this one,  under the same PIN.
+                    //  (Ending soon?  Then it's worth asking for the folder again.   Otherwise:  only if it's still allowed.)
+                    const endingSoon = new Date(o.claims.expires) - Date.now() < P.RENEW_WHEN_DAYS_LEFT * 86400000;
+                    if (await reconnect(endingSoon)) {
+                        try {
+                            const k = await keyFromFolder();
+                            if (k && await S.isNewer(k, copy, TRUSTED)) {
+                                await S.check(k, TRUSTED);
+                                const fresh = await S.claim(k, typed, TRUSTED);
+                                fresh.prefs = copy.prefs;                       //  the auto-lock pick carries over
+                                o = await S.unlock(fresh, typed, TRUSTED);
+                                await saveCopy(o.copy);
+                                copy = o.copy;
+                                o.renewed = true;
+                            }
+                        } catch (e) { console.warn('Vault: the folder\'s key file wasn\'t used:', e); }
+                    }
+                    S.notEnded(o.claims);
+                    return o;
+                });
+                pin.input.value = '';
+                signInWithKey(copy, opened);
+            } catch (e) {
+                pin.input.value = '';
+                if (e.code === 'wrong-pin') { await saveCopy(e.copy); copy = e.copy; }
+                if (e.code === 'wiped') {
+                    //  Forget the folder too:  otherwise the card would just offer "pick a new PIN" to whoever is at the desk.
+                    folder = null;
+                    try { await Mailbox.forget('person'); } catch (x) { /* nothing remembered */ }
+                    await forgetCopy(copy.id);
+                    lockReason = e.message;
+                    startScreen();
+                    return;
+                }
+                why.textContent = e.message;
+            }
+        }, 'vault-main');
+        onEnter(pin.input, function () { go.click(); });
+
+        const ends = c ? new Date(c.expires) : null;
+        const forget = button('Forget me on this laptop', async function () {
+            if (!forgetArmed) {
+                forgetArmed = true;
+                forget.textContent = 'Click again to forget ' + copy.name + ' on this laptop';
+                return;
+            }
+            await forgetCopy(copy.id);
+            startScreen();
+        }, 'vault-quiet');
+
+        screen(copy.name,
+               [el('p', { id: 'vaultGave', text: c ? levelLine(c) : '' }),
+                ends ? el('p', { class: 'vault-small', id: 'vaultEnds',
+                                 text: (ends < new Date() ? 'Ended ' : 'Good until ') + S.niceDate(ends) + '. IT renews it in your folder.' }) : null].filter(Boolean),
+               [pin.wrap, go, why,
+                el('p', { class: 'vault-small', text: 'Forgot your PIN?  Forget me on this laptop, then connect your folder again and pick a new one. Nothing is lost.' }),
+                forget,
+                button('Someone else', startScreenAll, 'vault-quiet'),
+                button('Open a plain file without signing in', plainMode, 'vault-quiet')]);
+    }
+
+    //  PIN right,  signature right,  rules kept,  not ended:   in.
+    function signInWithKey(copy, opened) {
+        const c = opened.claims;
+        signIn({ id: c.sub, name: c.name, groups: c.groups, expires: null, prefs: copy.prefs || {},
+                 level: c.level, endsAt: new Date(c.expires).getTime(), byKey: true }, opened.keys);
+        if (opened.renewed) say('IT renewed your access. Good until ' + S.niceDate(new Date(c.expires)) + '.');
     }
 
 
@@ -275,11 +588,7 @@
 
     //  "Someone else":  the full list,  even with one person.
     async function startScreenAll() {
-        const people = await peopleOrNothing();
-        screen('Who\'s unlocking?', [], people.map(function (p) {
-            return button(p.name, function () { unlockScreen(p, false); }, 'vault-person');
-        }).concat([button('Set up with a credential file', setupScreen, 'vault-quiet'),
-                   button('Open a plain file without signing in', plainMode, 'vault-quiet')]));
+        whoScreen(legacyOn ? await peopleOrNothing() : [], await copiesOrNothing());
     }
 
     async function tryUnlock(person, byRecovery, input, btn, why) {
@@ -417,13 +726,15 @@
     // ---- SIGNED IN  /  LOCKED  /  PLAIN ----
 
     function signIn(person, opened) {
-        me = { id: person.id, name: person.name, groups: person.groups, expires: person.expires, prefs: person.prefs || {} };
+        me = { id: person.id, name: person.name, groups: person.groups, expires: person.expires, prefs: person.prefs || {},
+               level: person.level || null, endsAt: person.endsAt || null, byKey: person.byKey === true };
         keys = new Map();
         for (const k of opened) keys.set(k.group, { keyVersion: k.keyVersion, key: k.key });
         pack = null;
         state = 'unlocked';
         lockReason = '';
-        chip.textContent = '🔒 Lock  ·  ' + me.name + '  ·  ' + me.groups.map(function (g) { return g.label; }).join(', ');
+        const levelName = me.level && P !== null && P.level(me.level) ? P.level(me.level).label + '  ·  ' : '';
+        chip.textContent = '🔒 Lock  ·  ' + me.name + '  ·  ' + levelName + me.groups.map(function (g) { return g.label; }).join(', ');
         bar.hidden = false;
         startIdle();
         hideCard();
@@ -592,9 +903,14 @@
         me.prefs = Object.assign({}, me.prefs, { autoLockMin: m });
         idleSince = Date.now();
         try {
-            const people = await allPeople();
-            const record = people.find(function (p) { return p.id === me.id; });
-            if (record) { record.prefs = Object.assign({}, record.prefs, { autoLockMin: m }); await savePerson(record); }
+            const id = me.id;
+            if (me.byKey) {
+                const copy = (await allCopies()).find(function (r) { return r.id === id; });
+                if (copy) { copy.prefs = Object.assign({}, copy.prefs, { autoLockMin: m }); await saveCopy(copy); }
+            } else {
+                const record = (await allPeople()).find(function (p) { return p.id === id; });
+                if (record) { record.prefs = Object.assign({}, record.prefs, { autoLockMin: m }); await savePerson(record); }
+            }
         } catch (e) { console.warn('Vault: could not save the auto-lock choice:', e); }
     });
 
@@ -604,6 +920,11 @@
         clearInterval(idleTimer);
         idleTimer = setInterval(function () {
             if (state !== 'unlocked') return;
+            //  The key file's END DATE signs you out,  even in the middle of something.
+            if (me.endsAt && Date.now() >= me.endsAt) {
+                lock(false, 'Your access has ended. IT renews it in your drive folder: sign in again once they have.');
+                return;
+            }
             const m = idleMinutes();
             if (Date.now() - idleSince >= m * 60000) lock(false, 'Locked after ' + m + ' minute' + (m === 1 ? '' : 's') + ' with no mouse or keys.');
         }, 5000);

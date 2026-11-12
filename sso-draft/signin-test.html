@@ -22,8 +22,9 @@
 <iframe id="frame" title="the page under test"></iframe>
 
 <script src="../DIRECTORY/vaultcoreI.js"></script>
-<script src="signincoreS.js"></script>
-<script src="it-signerS.js"></script>
+<script src="../DIRECTORY/policyI.js"></script>
+<script src="../DIRECTORY/signincoreI.js"></script>
+<script src="../DIRECTORY/it-signerI.js"></script>
 <script src="memory-folderS.js"></script>
 <script src="core-testsS.js"></script>
 <script>
@@ -86,7 +87,8 @@ function readStore() {
 async function partB() {
     const PIN = '482916';
     const ITPASS = 'flogic demo keyring only';
-    const ringText = await env.text('demo-data/packs/demo-it.flogic-keyring');
+    function freshRing(t) { const k = JSON.parse(t); k.people.forEach(function (p) { p.reviewed = (function (d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })(new Date()); }); return JSON.stringify(k); }
+    const ringText = freshRing(await env.text('demo-data/packs/demo-it.flogic-keyring'));
     const signerText = await env.text('sso-draft/demo/demo-it.flogic-signer');
     const incident = await env.bytes('demo-data/packs/demo_incident.flogic');
     const change = await env.bytes('demo-data/packs/demo_change_request.flogic');
@@ -95,14 +97,15 @@ async function partB() {
     await deleteDb('flogic-filekey'); await deleteDb('flogic-mailbox');
 
     // ---- IT: open, connect the folder, make Fernando's key file ----
-    await load('it-issue.html');
+    //  IT's page is the real console  (it-console/it-console.html):  the keyring carries the signing key.
+    await load('../it-console/it-console.html');
     fakePicker(itRoot);
-    type('it-pass', 'wrong passphrase entirely'); pick('ring-file', 'demo-it.flogic-keyring', ringText); pick('signer-file', 'demo-it.flogic-signer', signerText);
-    click('open');
-    check('IT: a wrong passphrase opens nothing', await until(function () { return /doesn't open/.test(text('open-why')); }, 30000) && $('open-part').hidden);
-    type('it-pass', ITPASS); click('open');
-    check('IT: opens the keyring and the signing key', await until(function () { return !$('open-part').hidden; }, 30000) &&
-          text('open-who').includes(FLOGIC_IT_SIGNER.fingerprint), text('open-who'));
+    type('open-pass', 'wrong passphrase entirely'); pick('open-file', 'demo-it.flogic-keyring', ringText);
+    click('open-btn');
+    check('IT: a wrong passphrase opens nothing', await until(function () { return /doesn't open/.test(text('start-msg')); }, 30000) && $('main').hidden);
+    type('open-pass', ITPASS); click('open-btn');
+    check('IT: opens the keyring and the signing key', await until(function () { return !$('main').hidden; }, 30000) &&
+          text('signer-print') === FLOGIC_IT_SIGNER.fingerprint, text('signer-print'));
     check('IT: lists the people from the keyring', await until(function () { return $('make-u-0001') && $('make-u-0002'); }));
     click('connect-folder');
     check('IT: connects the folder', await until(function () { return /Connected/.test(text('folder-status')); }), text('folder-status'));
@@ -113,8 +116,8 @@ async function partB() {
     const keyText = itRoot.__dirs.get('u-0001').__files.get('flogic.flogic-key');
     check('IT: the key file is signed by IT\'s key and holds only Fernando\'s groups', !!(await SignInCore.check(SignInCore.readKey(keyText), FLOGIC_IT_SIGNER)) &&
           JSON.parse(JSON.parse(keyText).claims).groups.map(function (g) { return g.group; }).join() === 'service-desk');
-    click('lock');
-    check('IT: Lock closes it', !$('locked').hidden && $('open-part').hidden);
+    click('lock-btn'); click('lock-btn');                       //  (twice:  the key file's end date is an unsaved note in the keyring)
+    check('IT: Lock closes it', !$('start').hidden && $('main').hidden);
 
     // ---- the person: first time ----
     const mine = itRoot.__dirs.get('u-0001');

@@ -129,3 +129,60 @@ found: two message boxes with one id on the unlock screen.
 ## 2026-11-09 · S1 · DONE
 Return: `SCANME/returns/SSO-RETURN-v0.1.0-2026-11-09.md`. How to try it: `sso-draft/README.md`. Nothing in `DIRECTORY/`,
 `it-console/`, `demo-data/packs/` or `markdowns/` changed. Nothing user-facing says "SSO".
+
+## 2026-11-12 · S3-R3 · STARTED
+DJ's "Sprint 3 Finalization Doc" (relayed by Fernando) is the word for R3. Branch `feature/sprint3-finalization`, made
+from `feature/filekey` at ec2ecb8. Nothing is committed or pushed yet: it's in Fernando's working tree for him to look at.
+
+## 2026-11-12 · S3-R3 · DONE (first pass; not committed)
+What's in, against the doc's list:
+
+| The doc asked for | What was done |
+|---|---|
+| Correct the broken filekey creation console | `sso-draft/it-issue.html` is retired. Its job moved into the real console. Three faults found and fixed (below) |
+| Integrate it with the genuine app | The core moved to `DIRECTORY/` (`signincoreI.js`, `mailboxI.js`, `it-signerI.js`, new `policyI.js`). `vaultI.js` signs in with a key file and a PIN. `it-console/` makes and renews key files |
+| IT console in the app's design language | Same colors, glass cards, buttons and both themes as `styleI.css` |
+| Profiles that matter | Three access levels: Guest, Viewer, Analyst. Each differs in export, auto-lock, key-file length, how it's renewed, group count and dashboard view. All enforced, not just labelled |
+| Credentials saved offsite (IndexedDB) | The app keeps a PIN-locked laptop copy in IndexedDB `flogic-filekey`. No file on disk is needed after the first sign-in |
+| A point of management | The console's **Access** section: who has what, key file, review, last day, with the actions on each row |
+| Verify no credentials are accessible locally | `app-signin-test.html` scans localStorage, sessionStorage, cookies, every IndexedDB database, the page and page-wide variables for the PIN and the plain key. **One limit it can't close, below** |
+| Hardcoded policies: short grants, renewal | `policyI.js`: 7 days at most, a 30-day review. The APP refuses a key file that breaks them, even one IT's key signed |
+| Access easily packed/viewed with user and group metadata | "Which data is for whom": each group with its key version, rules, people and packs. The keyring now lists what was packed |
+| An access level has a set of info, shown first | The "Levels and rules" table in the console, and the level on the app's card and Lock chip |
+| Ship Molson's data with the IT side | **Not handled**, as the doc says |
+| Single page | On pause, as the doc says |
+
+**The three faults in the old key-file page:**
+1. "Make a new signing key" had no way to tell the app. Key files made with it were refused as "wasn't made by this
+   company's IT". The console now downloads the trust file and warns when the app next to it trusts another key.
+2. A person could only be added by making an old `.flogic-id` credential in the other console first.
+3. The people list was redrawn while still reading the folder, so two redraws could list everyone twice.
+If DJ meant a different break, I need to know what he saw: the old page's own 77 + 31 checks all passed.
+
+**Tests (all pass):** console 205 · core 71 · folder 15 · browser 100 · real folder handles 35 · the real app 50.
+DJ's own vault suite (`realfile-vault`) isn't in the repo, so I couldn't run it. The first card screen changed (the
+main button is now "Connect your Flogic folder"; "Set up with a credential file" is still there, as a quiet button).
+
+**Files I changed outside my usual ones, on the doc's word:** `DIRECTORY/vaultI.js`, `vaultI.css`, `testI.html`, and
+`markdowns/tutorialwdetails.md` (Part 20). Also `dashI.js` (mine). `demo-it.flogic-keyring` was brought up to date in
+place: same group keys, so the demo packs and credentials still work.
+
+## 2026-11-12 · S3-R3 · QUESTION
+**To DJ and Fernando.** For each, I took the cautious option and kept going:
+1. **"No credentials accessible local" can't be fully true while the key file sits in a synced drive folder** (audit C9).
+   The app keeps nothing readable; OneDrive does. Fixing it means tying the key file to the laptop or Windows Hello,
+   which the audit left as a v0.4 decision. *(Now: said plainly in the README, the changelog and the tutorial.)*
+2. **The older credential + passphrase way doesn't follow the new rules.** Keep it for the Nov 19 demo, or turn it off?
+   *(Now: on, behind one flag, `FlogicPolicy.ALLOW_LEGACY_CREDENTIALS`, so DJ's vault tests and the demo credentials keep working.)*
+3. **The levels and their numbers are my proposal:** Guest 1 day / 5 min / 1 group, Viewer 7 days / 10 min, Analyst
+   7 days / 30 min; review every 30 days. Are these Molson's? *(They're one table in `policyI.js`.)*
+4. **"Saved offsite (likely IndexedDB)":** I read it as the person's sign-in. Did it also mean IT's keyring should live
+   in the browser instead of a file? *(Now: the keyring stays a locked file. The console keeps only the folder handle.)*
+5. **A Guest's "short summary" dashboard is a starting view, not a limit.** Should lower levels be locked out of Edit,
+   the query box or the sheet? That needs hooks in `scriptI.js` / `queryI.js`, which are DJ's.
+
+## 2026-11-12 · S3-R3 · REQUEST
+**To DJ's agent:**
+1. Run your vault suite on this branch and tell me what the new first screen breaks.
+2. `relay/README.md` and `SCANME/README.md` still describe S1/R3 as open, and `AUDIT-v0.3.0.md` names the old file
+   paths. Those are yours, so I left them.

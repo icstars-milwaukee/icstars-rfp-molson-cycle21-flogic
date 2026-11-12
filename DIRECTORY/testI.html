@@ -371,6 +371,10 @@
     <script src="scriptI.js"></script>
     <script src="dashI.js"></script>      <!--  the dashboard:  it needs the brain above it,  so it goes LAST  -->
     <script src="vaultcoreI.js"></script> <!--  the vault's locks and keys  (no page,  no saving)  -->
+    <script src="policyI.js"></script>    <!--  the built-in rules:  short access,  the 30-day review,  the access levels  -->
+    <script src="signincoreI.js"></script><!--  key files:  IT signs them,  a PIN locks your copy on this laptop  -->
+    <script src="mailboxI.js"></script>   <!--  the drive folder IT shared with you  (read only)  -->
+    <script src="it-signerI.js"></script> <!--  IT's PUBLIC key:  whose key files this app believes  -->
     <script src="vaultI.js"></script>     <!--  signing in,  and Lock:  it CALLS the brain and the dashboard,  so it goes after them  -->
 
 

@@ -19835,3 +19835,106 @@ The hard truths from that README, so nobody is surprised:
 - There is **no revoking** yet.
 - IT's export and expiry rules are polite: they stop the app, not a determined person with a copy of the file.
 - A **lost keyring can't be recovered**. Keep it and its passphrase safe.
+
+
+# PART 20: Key Files, Access Levels, and the Rules That Are Built In 🪪
+
+Parts 15 to 19 gave everyone a credential file, a setup code, a passphrase and a recovery code. That's a lot to ask of a person. This part swaps it for something smaller: IT puts one signed **key file** in a drive folder it shares with you, and you pick a **PIN**. It also adds **access levels**, and three rules nobody can switch off.
+
+Four new files load before `vaultI.js` in `testI.html`:
+
+```html
+    <script src="vaultcoreI.js"></script> <!--  the vault's locks and keys  (no page,  no saving)  -->
+    <script src="policyI.js"></script>    <!--  the built-in rules:  short access,  the 30-day review,  the access levels  -->
+    <script src="signincoreI.js"></script><!--  key files:  IT signs them,  a PIN locks your copy on this laptop  -->
+    <script src="mailboxI.js"></script>   <!--  the drive folder IT shared with you  (read only)  -->
+    <script src="it-signerI.js"></script> <!--  IT's PUBLIC key:  whose key files this app believes  -->
+    <script src="vaultI.js"></script>     <!--  signing in,  and Lock:  it CALLS the brain and the dashboard,  so it goes after them  -->
+```
+
+```text
+  the first time on a laptop                              every day after
+  ──────────────────────────                              ───────────────
+  ┌──────────────────────────────┐                        ┌──────────────────────────────┐
+  │ 🔒 Sign in to Flogic          │   your drive folder    │ 🔒 Fernando G                 │
+  │ [ Connect your Flogic folder ]│ ─────────────►        │ Analyst  ·  Service Desk     │
+  │ ┌ or drag the folder here ──┐ │   flogic.flogic-key    │ Good until Nov 19, 3:15 PM   │
+  │ └───────────────────────────┘ │   checked, then        │ [PIN ••••                  ] │
+  │ ▸ Or open the key file yourself│   pick a PIN (twice)  │ [         Sign in          ] │
+  └──────────────────────────────┘                        └──────────────────────────────┘
+```
+
+| You do | It does |
+|---|---|
+| Connect your folder (or drag it, or open the file by hand) | reads `flogic.flogic-key`, checks IT's signature and the built-in rules, then asks for a PIN |
+| Pick a PIN (4 to 12 digits) | locks your group keys with it and keeps that **laptop copy** in the browser. You're in. |
+| Type the PIN, any day after | unlocks the laptop copy. If the folder holds a **newer** key file, it's taken in by itself ("IT renewed your access.") |
+| Stay signed in past the key file's end date | the card comes back by itself: "Your access has ended." |
+| Type 10 wrong PINs | the laptop forgets that person, and the folder. They connect the folder again. |
+| "Forget me on this laptop" (two clicks) | the same, on purpose. That's also how you change a forgotten PIN. |
+
+### Step 20.1: A group says WHICH data. A level says WHAT you may do with it.
+
+`policyI.js` holds the three levels, lowest first. They're written into the app, not typed into a screen.
+
+| Level | For | Export | Auto-lock | Key file lasts | Renewed | Groups | Dashboard starts with |
+|---|---|---|---|---|---|---|---|
+| Guest | a visitor for a day | no | 5 min at most | 1 day | by name, each time | 1 | a short summary (3 tiles) |
+| Viewer | reads the numbers | no | 10 min at most | 7 days | with "Renew everyone" | any | the full dashboard |
+| Analyst | works the data, hands out reports | yes, if the group allows it | 30 min at most | 7 days | with "Renew everyone" | any | the full dashboard |
+
+When a group and a level disagree, **the stricter one wins** (`FlogicPolicy.effectiveRules`): Service Desk can export and locks after 15 minutes, but a Guest in Service Desk can't export and locks after 5. IT's console works that out and signs the result into the key file, so `vaultI.js` reads the rules exactly as it did before: `canExport()` and the ⏱ menu needed no new logic.
+
+### Step 20.2: The three rules nobody can switch off
+
+```text
+  1.  SHORT ACCESS    a key file lasts 7 days at most  (a Guest's: 1 day)
+  2.  RENEWAL         every 30 days IT says "still needed" for each person.  No review, no new key file.
+  3.  LEVELS          a key file can't give more than its level allows
+```
+
+IT's console follows them. But the part that matters is that **the app checks them too**, on every sign-in, after the signature (`FlogicPolicy.claimsProblem`, called from `SignInCore`'s check). A key file that lasts 90 days, or makes a Viewer an exporter, is refused **even when IT's real key signed it**. So a changed console, or a mistake, can't quietly hand out a year of access.
+
+### Step 20.3: What the browser keeps now
+
+```text
+  IndexedDB "flogic-filekey"    one LAPTOP COPY per person:
+                                { id, name, claims, sig,              IT's signed words, exactly as IT wrote them
+                                  locked: { salt, rounds, iv, data }, the group keys, locked with the PIN (600,000 rounds)
+                                  tries, made, prefs }
+  IndexedDB "flogic-mailbox"    which folder you connected  (a browser handle: not a path, not a file)
+  IndexedDB "flogic-vault"      the older way's records  (Part 16)
+```
+
+Never the PIN. Never an unlocked key. Never data. Nothing in `localStorage`. The test below reads every database, the page, and every page-wide variable, and looks for the PIN and the plain key: they aren't there.
+
+One honest limit: if your drive folder **syncs** to the laptop, the key file itself is a file on that laptop. The app didn't put it there and can't hide it. The computer's lock screen and the drive's own sign-in guard it. That's why key files are short.
+
+### Step 20.4: The card picks its first screen
+
+`startScreen()` counts who has signed in on this laptop: the laptop copies (key files) plus, while `FlogicPolicy.ALLOW_LEGACY_CREDENTIALS` is `true`, the older records.
+
+```text
+  nobody yet      ->  "Sign in to Flogic"  (connect your folder)
+  one person      ->  straight to their PIN  (or their passphrase, the older way)
+  two or more     ->  "Who's unlocking?"   each name with its level and groups
+```
+
+Set that flag to `false` and the credential file, setup code and passphrase screens are no longer offered, here or in IT's console.
+
+### Step 20.5: What the dashboard reads
+
+`window.FlogicVault` has two new answers, and `person()` now includes `level`:
+
+```text
+  FlogicVault.level()        the signed-in person's level  { id, label, can, view ... },  or null
+  FlogicVault.accessEnds()   when their key file ends  (a Date),  or null
+```
+
+`dashI.js` uses the first one in `levelView()`, right after `suggestTiles()`: a level whose view says `dashboard: 'summary'` (a Guest) starts with the first 3 suggested tiles and a note saying so. It's what you see **first**, not a lock: Edit still adds tiles.
+
+### Step 20.6: IT's side
+
+The IT console (`it-console/`, Part 19) now does key files too, and looks like the app. Its guide is `it-console/README.md`. In short: add a person with a level, **Make key file** (into their drive subfolder), **Renew everyone**, **Still needed** every 30 days, **End access**. Its signing key lives in the keyring, and **Download the app's trust file** makes the `it-signerI.js` this app loads.
+
+**Test:** `node sso-draft/run-browser-test.mjs app-signin-test.html` 50/50 (the real `testI.html` in a frame: refused key files, the PIN, both packs, the level's export rule and dashboard view, Lock, renewal, the end date, the wipe, and the "nothing readable is kept" scan). The rules themselves: `node sso-draft/run-node-test.mjs` 71/71.

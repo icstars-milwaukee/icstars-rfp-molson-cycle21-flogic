@@ -4,11 +4,11 @@
 */
 import fs from 'node:fs';
 import path from 'node:path';
-import { VaultCore, SignInCore, repo, draft } from './load-core.mjs';
+import { VaultCore, FlogicPolicy, SignInCore, repo, draft } from './load-core.mjs';
 
-const pinned = new Function(fs.readFileSync(path.join(draft, 'it-signerS.js'), 'utf8') + '\nreturn FLOGIC_IT_SIGNER;')();
-const runCoreTests = new Function('VaultCore', 'SignInCore',
-    fs.readFileSync(path.join(draft, 'core-testsS.js'), 'utf8') + '\nreturn runCoreTests;')(VaultCore, SignInCore);
+const pinned = new Function(fs.readFileSync(path.join(repo, 'DIRECTORY', 'it-signerI.js'), 'utf8') + '\nreturn FLOGIC_IT_SIGNER;')();
+const runCoreTests = new Function('VaultCore', 'SignInCore', 'FlogicPolicy',
+    fs.readFileSync(path.join(draft, 'core-testsS.js'), 'utf8') + '\nreturn runCoreTests;')(VaultCore, SignInCore, FlogicPolicy);
 
 const results = [];
 function check(name, ok, detail) { results.push({ name: name, ok: ok === true, detail: ok === true ? '' : String(detail === undefined ? ok : detail) }); }

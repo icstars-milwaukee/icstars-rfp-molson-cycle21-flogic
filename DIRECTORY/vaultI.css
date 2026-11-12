@@ -93,6 +93,23 @@ body.vault-up { overflow: hidden; }
 .vault-who { font-weight: 600; color: var(--text, #222) !important; }
 .vault-who:empty { display: none; }
 
+/*  KEY-FILE SIGN-IN:  where you drag your drive folder  (or the key file).  */
+.vault-drop {
+    border: 2px dashed var(--glass-edge, rgba(0, 0, 0, 0.3));
+    border-radius: 12px;
+    padding: 14px 10px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-soft, #555);
+}
+
+.vault-drop.over { border-color: var(--formula, #217346); color: var(--formula, #217346); }
+
+/*  "Or open the key file yourself":  folded away until you want it.  */
+.vault-details { font-size: 13px; color: var(--text-soft, #555); }
+.vault-details summary { cursor: pointer; }
+.vault-details[open] summary { margin-bottom: 8px; }
+
 /*  The recovery code:  big,  easy to copy by hand.  */
 .vault-code {
     font-family: Consolas, "Courier New", monospace;

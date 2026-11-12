@@ -23,7 +23,23 @@ Open it in `it-console/it-console.html` → **Open keyring**.
 
 The export rules differ on purpose: the demo shows one group that can export and one that can't.
 
-## The credentials (one per person)
+## Access levels and key files
+
+The demo keyring carries the demo signing key (the one `DIRECTORY/it-signerI.js` trusts) and each person's level:
+
+| Person | Level | So they... |
+|---|---|---|
+| Fernando G (`u-0001`) | **Analyst** | can export Service Desk data; key file lasts 7 days |
+| DJ (`u-0002`) | **Viewer** | can read Change Team data but not export it; key file lasts 7 days |
+
+Key files aren't kept here: they last 7 days at most, so they'd be out of date. Make them in the console
+(**Make key file**), then sign in to the app with one (`sso-draft/README.md`, "Try it").
+
+Each person's 30-day review was last done when the keyring was made or brought up to date. Once it runs out, the
+console asks for **Still needed** before it makes them a key file. `node it-console/upgrade-demo-keyring.mjs` does that
+for everyone and keeps every key.
+
+## The credentials (one per person, the older way)
 
 Each opens once in Flogic with its setup code. Then the person picks their own passphrase. Both expire 2026-12-31.
 

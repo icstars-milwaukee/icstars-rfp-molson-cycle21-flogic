@@ -1,12 +1,12 @@
 /*
     ==========================================================
 
-        signincoreS.js   -   FILEKEY SIGN-IN   (v0.3.0)
+        signincoreI.js   -   FILEKEY SIGN-IN   (v0.4.0)
 
         One file per person,  made and signed by IT,  kept in the person's OneDrive / Google Drive:
 
             .flogic-signer    IT's signing key   (ECDSA P-256).   The private half is locked with IT's passphrase.
-            .flogic-key       the person's FILEKEY:   signed CLAIMS  (who,  groups,  rules,  the end date)
+            .flogic-key       the person's FILEKEY:   signed CLAIMS  (who,  access level,  groups,  rules,  the end date)
                               +  the group keys.   The claims carry a hash of the keys,  so neither half can be swapped
                               or edited.    THE FILE IS THE LOGIN:   the drive's own sign-in  (company MFA)  guards it.
 
@@ -16,8 +16,9 @@
 
         Data is only ever opened ON THE LAPTOP,  with the group keys.   Nothing goes to Microsoft or Google but the filekey.
 
-        Uses VaultCore  (DIRECTORY/vaultcoreI.js)  for:  toB64,  fromB64,  unlockKeys  (IT's keyring),
-        readPackHeader,  openPack.     Changes nothing in it.
+        Uses VaultCore  (vaultcoreI.js)  for:  toB64,  fromB64,  unlockKeys  (IT's keyring),  readPackHeader,  openPack.
+        Uses FlogicPolicy  (policyI.js)  for the built-in rules:  how long a key file may last,  the 30-day review,
+        and what each access level allows.   A key file that breaks them is refused,  even with IT's signature.
 
         Only crypto.subtle.   No libraries.   No network.   Runs in the browser AND in Node 22+  (the tests).
 
@@ -31,18 +32,19 @@
             'wrong-issuer'    signed by a different IT key than the one this app trusts
             'expired'         the filekey's end date has passed              'damaged'       the parts don't match
             'wiped'           too many wrong PINs:  the laptop copy is gone
+            'policy'          IT signed it,  but it breaks a built-in rule  (too long,  no review,  more than its level allows)
 
     ==========================================================
 */
 
-const SignInCore = (function (VaultCore) {
+const SignInCore = (function (VaultCore, FlogicPolicy) {
 
     'use strict';
 
     const subtle = crypto.subtle;
     const ROUNDS = 600000;                       //  ~0.3 s per guess:  the only brake on guessing a PIN offline
-    const VERSION = 3;
-    const KEY_MAGIC = 'FLGKEY3\n';               //  put in front of the claims before signing
+    const VERSION = 4;                           //  4:  the claims carry an access level and a review day
+    const KEY_MAGIC = 'FLGKEY4\n';               //  put in front of the claims before signing
     const MAX_TRIES = 10;                        //  wrong PINs before the laptop copy is wiped
     const EC = { name: 'ECDSA', namedCurve: 'P-256' };
     const SIG = { name: 'ECDSA', hash: 'SHA-256' };
@@ -129,42 +131,54 @@ const SignInCore = (function (VaultCore) {
     // ------------------------------------------------------
     //    THE FILEKEY     (.flogic-key)
     //
-    //    { flogic: 'key', v: 3,
-    //      claims:  "<a JSON string>",    signed:  UTF-8 of  "FLGKEY3\n" + claims,  exactly as written
+    //    { flogic: 'key', v: 4,
+    //      claims:  "<a JSON string>",    signed:  UTF-8 of  "FLGKEY4\n" + claims,  exactly as written
     //      sig:     "<b64>",
     //      keys:    { entries: [{ group, keyVersion, raw: <b64> }] } }
     //
-    //    claims  =  { iss, sub, name, groups: [{ group, label, keyVersion, rules: { export, autoLockMin } }],
+    //    claims  =  { iss, sub, name, level, reviewed,
+    //                 groups: [{ group, label, keyVersion, rules: { export, autoLockMin } }],     rules:  the group's,  through the level
     //                 issued, expires, serial,  keys:  SHA-256 (b64) of  JSON.stringify(keys) }
     //
-    //    issueKey(signer, person { id, name }, groups [{ group, label, keyVersion, rules, key (extractable) }], expires Date)
+    //    issueKey(signer, person { id, name, level, reviewed, expires (their last day) },
+    //             groups [{ group, label, keyVersion, rules, key (extractable) }],
+    //             expires)        a Date,  or nothing:  then it lasts as long as the level allows  (FlogicPolicy.grantEnd)
     // ------------------------------------------------------
 
     async function issueKey(signer, person, groups, expires) {
-        if (!(expires instanceof Date) || isNaN(expires) || expires <= new Date()) throw fail('damaged', 'The end date has to be in the future.');
         if (!groups.length) throw fail('damaged', 'Pick at least one group.');
+        if (expires === undefined || expires === null) {
+            try { expires = FlogicPolicy.grantEnd(person.level, { accessEnds: person.expires, reviewed: person.reviewed }); }
+            catch (e) { throw fail('policy', e.message); }
+        }
+        if (!(expires instanceof Date) || isNaN(expires) || expires <= new Date()) throw fail('damaged', 'The end date has to be in the future.');
         const entries = [];
         for (const g of groups) entries.push({ group: g.group, keyVersion: g.keyVersion, raw: toB64(new Uint8Array(await subtle.exportKey('raw', g.key))) });
         const keys = { entries: entries };
         const claims = JSON.stringify({
             iss: signer.fingerprint, sub: person.id, name: person.name,
+            level: person.level, reviewed: person.reviewed,
             groups: groups.map(function (g) {
-                return { group: g.group, label: g.label, keyVersion: g.keyVersion, rules: { export: !!g.rules.export, autoLockMin: g.rules.autoLockMin } };
+                return { group: g.group, label: g.label, keyVersion: g.keyVersion, rules: FlogicPolicy.effectiveRules(person.level, g.rules) };
             }),
             issued: new Date().toISOString(), expires: expires.toISOString(),
             serial: toB64(randomBytes(9)), keys: await hashText(JSON.stringify(keys)),
         });
+        //  IT's own page refuses to make what the app would refuse to take.
+        const broken = FlogicPolicy.claimsProblem(JSON.parse(claims));
+        if (broken) throw fail('policy', broken);
         const sig = await signer.sign(utf8.encode(KEY_MAGIC + claims));
         return { flogic: 'key', v: VERSION, claims: claims, sig: toB64(sig), keys: keys };
     }
 
     function readKey(t) {
         const k = parse(t, 'key', 'a Flogic key file');
+        if (k.v < VERSION) throw fail('bad-version', 'This key file is from an older version of the app. Ask IT for a new one.');
         if (typeof k.claims !== 'string' || typeof k.sig !== 'string' || !k.keys || !Array.isArray(k.keys.entries)) throw fail('not-a-file', 'This key file is damaged.');
         return k;
     }
 
-    //  Signature,  issuer,  and that the claims match these keys.   ->  the claims      (no end-date check:  see check)
+    //  Signature,  issuer,  the built-in rules,  and that the claims match these keys.   ->  the claims      (no end-date check:  see check)
     async function verify(claimsText, sig, keys, pinned) {
         const key = await trustedKey(pinned);
         let ok = false;
@@ -176,6 +190,8 @@ const SignInCore = (function (VaultCore) {
             throw fail('bad-signature', 'This key file has been changed since IT made it.');
         }
         if (c.iss !== pinned.fingerprint) throw fail('wrong-issuer', 'This key file wasn\'t made by this company\'s IT.');
+        const broken = FlogicPolicy.claimsProblem(c);                     //  signed by IT,  and still not allowed
+        if (broken) throw fail('policy', broken);
         if (keys && await hashText(JSON.stringify(keys)) !== c.keys) throw fail('damaged', 'This key file\'s keys don\'t match it.');
         const want = c.groups.map(function (g) { return g.group + '|' + g.keyVersion; }).sort().join(',');
         if (keys) {
@@ -279,6 +295,7 @@ const SignInCore = (function (VaultCore) {
                 const found = opened.find(function (o) { return o.group === g.group && o.keyVersion === g.keyVersion; });
                 return { group: g.group, label: g.label, keyVersion: g.keyVersion, rules: g.rules, key: found && found.key };
             }).filter(function (g) { return g.key; }),
+            signer: k.signer || null,
         };
     }
 
@@ -355,4 +372,4 @@ const SignInCore = (function (VaultCore) {
         keyringGroups: keyringGroups, startSession: startSession, niceDate: niceDate,
     });
 
-})(VaultCore);
+})(VaultCore, FlogicPolicy);

@@ -23,6 +23,10 @@
 <iframe id="frame" title="the console under test"></iframe>
 
 <script src="../DIRECTORY/vaultcoreI.js"></script>
+<script src="../DIRECTORY/policyI.js"></script>
+<script src="../DIRECTORY/signincoreI.js"></script>
+<script src="../DIRECTORY/it-signerI.js"></script>
+<script src="../sso-draft/memory-folderS.js"></script>
 <script src="itconsoleI.js"></script>
 <script>
 'use strict';
@@ -86,8 +90,9 @@ async function testKeyringLogic() {
 
     const text = await ITConsole.keyringText(s);
     const file = JSON.parse(text);
-    check('The keyring file has the F1 shape',
-          file.flogic === 'keyring' && file.v === 1 && file.groups.length === 1 && Array.isArray(file.people) &&
+    check('The keyring file has its shape (v 2: groups, people, packs, signer, locked keys)',
+          file.flogic === 'keyring' && file.v === 2 && file.groups.length === 1 && Array.isArray(file.people) &&
+          Array.isArray(file.packs) && file.signer === null &&
           file.locked && file.locked.rounds === VaultCore.ROUNDS && file.locked.keys.length === 2, text.slice(0, 200));
     check('The keyring file has no passphrase in it', text.indexOf(PASS) < 0);
 
@@ -223,9 +228,10 @@ async function testPersonLogic() {
     const ringText = await ITConsole.keyringText(s);
     check('The setup code isn\'t in the keyring', ringText.indexOf(plain) < 0 && ringText.indexOf(made.setupCode) < 0);
     const p = s.people[0];
-    check('The keyring remembers the person: id, name, group ids, expiry, made (no keys, no code)',
+    check('The keyring remembers the person: id, name, group ids, level, last day, made, reviewed (no keys, no code)',
           s.people.length === 1 && p.id === 'u-0001' && p.name === 'Fernando G' && p.groups.join() === 'service-desk' &&
-          p.expires === expires && p.made === ITConsole.today() && Object.keys(p).sort().join() === 'expires,groups,id,made,name' &&
+          p.expires === expires && p.made === ITConsole.today() && p.reviewed === ITConsole.today() && p.level === 'analyst' &&
+          Object.keys(p).sort().join() === 'expires,groups,id,level,made,name,reviewed' &&
           s.unsaved === true, JSON.stringify(p));
 
     const both = await ITConsole.makePerson(s, { name: 'DJ', groups: ['change-team', 'service-desk'], expires: expires });
@@ -242,6 +248,129 @@ async function testPersonLogic() {
 
     const back = await ITConsole.openKeyring(await ITConsole.keyringText(s), PASS);
     check('People survive Save and Open, and the next id goes on (u-0003)', back.people.length === 2 && ITConsole.nextPersonId(back) === 'u-0003');
+}
+
+
+function daysAgo(n) {
+    const d = new Date(Date.now() - n * 86400000);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+//  The app's trust file  (text)  ->  the pinned key inside it
+function pinnedFrom(text) { return new Function(text + '\nreturn FLOGIC_IT_SIGNER;')(); }
+
+async function testAccessLogic() {
+    const P = FlogicPolicy, S = SignInCore;
+    const s = await ITConsole.newKeyring(PASS);
+    await ITConsole.addGroup(s, { label: 'Service Desk', group: 'service-desk', rules: { export: true, autoLockMin: 15 } });
+    await ITConsole.addGroup(s, { label: 'Change Team', group: 'change-team', rules: { export: false, autoLockMin: 10 } });
+
+    // ---- people and levels ----
+    check('Person: no level is refused', await throwsCode(function () { return ITConsole.addPerson(s, { name: 'X', groups: ['service-desk'], expires: '' }); }, 'bad-person'));
+    check('Person: a made-up level is refused', await throwsCode(function () { return ITConsole.addPerson(s, { name: 'X', groups: ['service-desk'], level: 'boss', expires: '' }); }, 'bad-person'));
+    check('Person: a Guest in two groups is refused', await throwsCode(function () { return ITConsole.addPerson(s, { name: 'X', groups: ['service-desk', 'change-team'], level: 'guest', expires: '' }); }, 'bad-person'));
+    check('Person: a last day in the past is refused', await throwsCode(function () { return ITConsole.addPerson(s, { name: 'X', groups: ['service-desk'], level: 'viewer', expires: '2020-01-01' }); }, 'bad-person'));
+    const fern = ITConsole.addPerson(s, { name: ' Fernando G ', groups: ['service-desk'], level: 'analyst', expires: '' });
+    check('Person: added with a level, reviewed today, no last day, and no key of any kind',
+          fern.id === 'u-0001' && fern.name === 'Fernando G' && fern.level === 'analyst' && fern.reviewed === ITConsole.today() && fern.expires === '' &&
+          Object.keys(fern).sort().join() === 'expires,groups,id,level,made,name,reviewed', JSON.stringify(fern));
+    const guest = ITConsole.addPerson(s, { name: 'Visitor V', groups: ['service-desk'], level: 'guest', expires: '' });
+    const viewer = ITConsole.addPerson(s, { name: 'DJ', groups: ['service-desk', 'change-team'], level: 'viewer', expires: '' });
+
+    // ---- no signing key,  no key file ----
+    check('Key file: no signing key yet is said plainly', await throwsCode(ITConsole.makeKeyFile(s, fern.id), 'no-signer'));
+    check('Trust file: none without a signing key', await throwsCode(function () { return ITConsole.trustFile(s); }, 'no-signer'));
+    const fp = await ITConsole.makeSigner(s);
+    const pinned = pinnedFrom(ITConsole.trustFile(s));
+    check('Signing key: made inside the keyring, and the trust file carries its public half only',
+          /^[2-9A-Z]{4}(-[2-9A-Z]{4}){3}$/.test(fp) && pinned.fingerprint === fp && !('d' in pinned.publicKey) &&
+          !/locked|wrapped/.test(ITConsole.trustFile(s)), fp);
+
+    // ---- key files ----
+    const made = await ITConsole.makeKeyFile(s, fern.id);
+    const c = await S.check(S.readKey(made.text), pinned);
+    check('Key file: signed by the keyring\'s key, for the person, at their level', c.sub === 'u-0001' && c.name === 'Fernando G' && c.level === 'analyst' &&
+          c.reviewed === ITConsole.today() && c.groups.length === 1 && c.groups[0].group === 'service-desk');
+    check('Key file: an Analyst\'s lasts 7 days, not a day more', Math.abs(new Date(c.expires) - new Date(c.issued) - 7 * 86400000) < 5000);
+    check('Key file: the app that trusts ANOTHER key refuses it', await throwsCode(S.check(S.readKey(made.text), FLOGIC_IT_SIGNER), 'wrong-issuer'));
+    check('Key file: the keyring notes when it ends (and nothing else about it)', fern.key && fern.key.until === c.expires &&
+          Object.keys(fern.key).sort().join() === 'made,until' && s.unsaved === true);
+    const g = JSON.parse((await ITConsole.makeKeyFile(s, guest.id)).file.claims);
+    check('Key file: a Guest\'s lasts 1 day, can\'t export, and locks after 5 minutes',
+          Math.abs(new Date(g.expires) - new Date(g.issued) - 86400000) < 5000 && g.groups[0].rules.export === false && g.groups[0].rules.autoLockMin === 5);
+    const v = JSON.parse((await ITConsole.makeKeyFile(s, viewer.id)).file.claims);
+    check('Key file: a Viewer in both groups can\'t export from either, 10 minutes at most',
+          v.groups.length === 2 && v.groups.every(function (x) { return x.rules.export === false && x.rules.autoLockMin === 10; }));
+    const ringText = await ITConsole.keyringText(s);
+    const rawSd = VaultCore.toB64(await rawKey(s.keys['service-desk'].key));
+    check('The saved keyring holds no key file, no plain group key and no passphrase',
+          ringText.indexOf(made.file.sig) < 0 && ringText.indexOf(rawSd) < 0 && ringText.indexOf(PASS) < 0 && ringText.indexOf('"claims"') < 0);
+
+    // ---- a last day cuts the key file short ----
+    ITConsole.editPerson(s, fern.id, { name: 'Fernando G', groups: ['service-desk'], level: 'analyst', expires: daysAgo(-2) });
+    const cut = JSON.parse((await ITConsole.makeKeyFile(s, fern.id)).file.claims);
+    check('Last day: the key file ends with it, not 7 days out', new Date(cut.expires) - Date.now() < 3 * 86400000);
+    ITConsole.editPerson(s, fern.id, { name: 'Fernando G', groups: ['service-desk'], level: 'analyst', expires: '' });
+
+    // ---- the 30-day review ----
+    fern.reviewed = daysAgo(25);
+    check('Review: 25 days in, it says a review is coming, and a key file can still be made',
+          ITConsole.personState(s, fern).code === 'review-soon' && ITConsole.personState(s, fern).canIssue === true, ITConsole.personState(s, fern).words);
+    fern.reviewed = daysAgo(P.REVIEW_EVERY_DAYS + 2);
+    check('Review: past 30 days, it\'s overdue and no key file can be made', ITConsole.personState(s, fern).code === 'review-due' &&
+          await throwsCode(ITConsole.makeKeyFile(s, fern.id), 'policy') === true);
+    fern.reviewed = '';
+    check('Review: never reviewed, no key file', ITConsole.personState(s, fern).code === 'unreviewed' && await throwsCode(ITConsole.makeKeyFile(s, fern.id), 'policy') === true);
+    ITConsole.reviewPerson(s, fern.id);
+    check('Review: "Still needed" marks today, and key files work again', fern.reviewed === ITConsole.today() && !!(await ITConsole.makeKeyFile(s, fern.id)));
+
+    // ---- more access counts as a fresh decision;  less doesn't ----
+    viewer.reviewed = daysAgo(20);
+    ITConsole.editPerson(s, viewer.id, { name: 'DJ', groups: ['change-team'], level: 'viewer', expires: '' });
+    check('Edit: taking a group away doesn\'t count as a review', viewer.reviewed === daysAgo(20) && viewer.groups.join() === 'change-team');
+    ITConsole.editPerson(s, viewer.id, { name: 'DJ', groups: ['change-team'], level: 'analyst', expires: '' });
+    check('Edit: raising the level does (it\'s a new decision, made today)', viewer.reviewed === ITConsole.today() && viewer.level === 'analyst');
+    check('Edit: an Analyst can\'t be made a two-group Guest', await throwsCode(function () {
+        return ITConsole.editPerson(s, viewer.id, { name: 'DJ', groups: ['change-team', 'service-desk'], level: 'guest', expires: '' }); }, 'bad-person'));
+
+    // ---- Renew everyone ----
+    let plan = ITConsole.renewPlan(s);
+    check('Renew everyone: Analysts and Viewers yes, the Guest by name only', plan.renew.map(function (p) { return p.id; }).join() === 'u-0001,u-0003' &&
+          plan.skip.length === 1 && plan.skip[0].person.id === 'u-0002' && /by name/.test(plan.skip[0].why), JSON.stringify(plan.skip));
+    fern.reviewed = daysAgo(40);
+    plan = ITConsole.renewPlan(s);
+    check('Renew everyone: someone whose review ran out is left out, with the reason', plan.renew.map(function (p) { return p.id; }).join() === 'u-0003' &&
+          plan.skip.some(function (x) { return x.person.id === 'u-0001' && /review/.test(x.why); }));
+    ITConsole.reviewPerson(s, fern.id);
+
+    // ---- ending access ----
+    ITConsole.endAccess(s, fern.id);
+    check('End access: no more key files, and not in Renew everyone', fern.ended === ITConsole.today() && ITConsole.personState(s, fern).code === 'ended' &&
+          await throwsCode(ITConsole.makeKeyFile(s, fern.id), 'policy') === true && ITConsole.renewPlan(s).renew.every(function (p) { return p.id !== fern.id; }));
+    check('End access: they stay on the list, for the record', s.people.length === 3);
+    ITConsole.reviewPerson(s, fern.id);
+    check('Give access back: a review, made today', !('ended' in fern) && ITConsole.personState(s, fern).canIssue === true);
+
+    // ---- the keyring keeps all of it ----
+    const back = await ITConsole.openKeyring(await ITConsole.keyringText(s), PASS);
+    check('Save and Open: levels, reviews and the signing key come back', back.people.map(function (p) { return p.level; }).join() === 'analyst,guest,analyst' &&
+          back.people[0].reviewed === ITConsole.today() && back.signing && back.signing.fingerprint === fp && back.upgraded === false);
+    check('Save and Open: the reopened keyring signs key files the same app trusts',
+          !!(await S.check((await ITConsole.makeKeyFile(back, 'u-0001')).file, pinned)));
+
+    // ---- an older keyring  (v1:  no levels,  no reviews,  no signing key) ----
+    const old = JSON.parse(await ITConsole.keyringText(s));
+    old.v = 1; delete old.signer; delete old.packs;
+    old.people = old.people.map(function (p) { return { id: p.id, name: p.name, groups: p.groups, expires: '2099-12-31', made: p.made }; });
+    const up = await ITConsole.openKeyring(JSON.stringify(old), PASS);
+    check('Older keyring: opens, and everyone starts as a Guest, not reviewed (IT has to look at each person)',
+          up.upgraded === true && up.people.every(function (p) { return p.level === 'guest' && p.reviewed === ''; }) && up.signing === null &&
+          ITConsole.personState(up, up.people[0]).canIssue === false);
+    const demoSigner = await readText('../sso-draft/demo/demo-it.flogic-signer');
+    check('Older keyring: a signing key locked with another passphrase can\'t be brought in', await throwsCode(ITConsole.importSigner(up, demoSigner), 'wrong-secret'));
+    check('Older keyring: a file that isn\'t a signing key is refused', await throwsCode(ITConsole.importSigner(up, '{"flogic":"keyring"}'), 'not-a-file'));
+    const demoRing = await ITConsole.openKeyring(await readText('../demo-data/packs/demo-it.flogic-keyring'), 'flogic demo keyring only');
+    check('Demo keyring: carries the demo signing key, the one this copy of the app trusts', demoRing.signing && demoRing.signing.fingerprint === FLOGIC_IT_SIGNER.fingerprint);
 }
 
 
@@ -446,16 +575,20 @@ async function testPackPage() {
           sameBytes(await VaultCore.openPack(pack, ring.keys['change-team'].key), csv));
     check('Page: it shows the size before and after', /\(\d+(\.\d)? (KB|MB)\) into demo_change_request\.flogic \(\d+(\.\d)? (KB|MB)\) for Change Team/
           .test($('pack-msg').textContent), $('pack-msg').textContent);
-    check('Page: packing doesn\'t mark the keyring unsaved', !visible('unsaved'));
-    $('lock-btn').click();
+    check('Page: the pack is on the "Packed so far" list (name, group, size: no data), and the keyring is unsaved',
+          $('pack-list').children.length === 1 && /demo_change_request\.flogic/.test($('pack-list').textContent) &&
+          /Change Team/.test($('pack-list').textContent) && visible('unsaved'));
+    check('Page: "Which data is for whom" shows it under Change Team', /Change Team[\s\S]*demo_change_request\.flogic/.test($('data-list').textContent));
+    $('lock-btn').click(); $('lock-btn').click();
     check('Page: Lock empties the Pack form', $('p-group').options.length === 0 && $('p-file').files.length === 0 && $('pack-msg').textContent === '');
 }
 
 
 async function testPersonPage() {
     await newPageKeyring();
-    check('Page: Make credential is off until there\'s a group', $('c-btn').disabled && visible('person-none'));
-    check('Page: expiry starts at Dec 31 of this year', $('c-expires').value === new Date().getFullYear() + '-12-31', $('c-expires').value);
+    check('Page: Add person is off until there\'s a group', $('c-btn').disabled && visible('person-none'));
+    check('Page: the older credential\'s end date starts at Dec 31 of this year', $('cred-expires').value === new Date().getFullYear() + '-12-31', $('cred-expires').value);
+    check('Page: a new person starts at the LOWEST level (Guest)', $('pp-level').value === 'guest' && $('pp-level').options.length === 3);
     type('g-label', 'Service Desk'); $('g-add').click();
     await until(function () { return $('group-list').children.length === 1; });
     type('g-label', 'Change Team'); $('g-export').checked = false; $('g-add').click();
@@ -468,8 +601,14 @@ async function testPersonPage() {
     check('Page: no group ticked: refused', /at least one group/.test($('person-msg').textContent) && !visible('code-panel'));
 
     $('c-groups').querySelector('input[value="service-desk"]').checked = true;
-    saved = [];
+    $('pp-level').value = 'analyst';
     $('c-btn').click();
+    await until(function () { return $('person-list').children.length === 1; });
+    check('Page: Add person lists them, with their level, and makes NO file', $('person-list').children.length === 1 &&
+          /Analyst/.test($('person-list').textContent) && /no key file yet/.test($('status-u-0001').textContent) && !visible('code-panel'),
+          $('person-list').textContent);
+    saved = [];
+    $('cred-u-0001').click();
     await until(function () { return visible('code-panel'); });
     const code = $('setup-code').textContent;
     check('Page: the setup code shows, big, in groups of 5', visible('code-panel') && /^[2-9A-Z]{5}-[2-9A-Z]{5}-[2-9A-Z]{5}$/.test(code) &&
@@ -486,7 +625,7 @@ async function testPersonPage() {
           /u-0001/.test($('person-list').textContent) && /Fernando G/.test($('person-list').textContent) &&
           /Service Desk/.test($('person-list').textContent) && visible('unsaved'));
     check('Page: the form empties for the next person', $('c-name').value === '' &&
-          $('c-groups').querySelectorAll('input:checked').length === 0);
+          $('c-groups').querySelectorAll('input:checked').length === 0 && $('pp-level').value === 'guest');
 
     $('copy-btn').click();
     await until(function () { return $('copy-msg').textContent !== ''; });
@@ -504,13 +643,147 @@ async function testPersonPage() {
     //  Show one more code,  then Lock:  it goes
     type('c-name', 'DJ');
     $('c-groups').querySelector('input[value="change-team"]').checked = true;
-    saved = [];
     $('c-btn').click();
+    await until(function () { return $('person-list').children.length === 2; });
+    saved = [];
+    $('cred-u-0002').click();
     await until(function () { return visible('code-panel'); });
     check('Page: DJ gets u-0002 and dj.flogic-id', saved[0] && saved[0].name === 'dj.flogic-id' && /u-0002/.test($('person-list').textContent));
     $('lock-btn').click(); $('lock-btn').click();
     check('Page: Lock takes the code and the people off the page', !isOpen() && $('setup-code').textContent === '' &&
           $('person-list').children.length === 0 && $('c-groups').children.length === 0);
+}
+
+
+async function testKeyFilePage() {
+    const S = SignInCore;
+    await newPageKeyring();
+    const fp = $('signer-print').textContent;
+    check('Page: a new keyring comes with its own signing key', /^[2-9A-Z]{4}(-[2-9A-Z]{4}){3}$/.test(fp) && visible('signer-has') && !visible('signer-none'), fp);
+    check('Page: it warns that the app next to it trusts a different key', /trusts a different signing key/.test($('todo').textContent) &&
+          /not this key/.test($('signer-trust').textContent), $('todo').textContent);
+    saved = [];
+    $('trust-btn').click();
+    await until(function () { return saved.length === 1; });
+    const pinned = saved[0] ? pinnedFrom(await (await saved[0].blob).text()) : null;
+    check('Page: "Download the app\'s trust file" gives it-signerI.js, with this key\'s public half', saved[0] && saved[0].name === 'it-signerI.js' &&
+          pinned && pinned.fingerprint === fp, saved[0] && saved[0].name);
+    check('Page: the level table shows the three built-in levels and the two rules', $('level-list').children.length === 3 &&
+          /Guest[\s\S]*Viewer[\s\S]*Analyst/.test($('level-list').textContent) && /7 days at most/.test($('rule-grant').textContent) &&
+          /Every 30 days/.test($('rule-review').textContent));
+
+    type('g-label', 'Service Desk'); $('g-add').click();
+    await until(function () { return $('group-list').children.length === 1; });
+    type('g-label', 'Change Team'); $('g-export').checked = false; $('g-add').click();
+    await until(function () { return $('group-list').children.length === 2; });
+
+    //  A Guest can be in one group only
+    type('c-name', 'Visitor V');
+    $('c-groups').querySelectorAll('input').forEach(function (i) { i.checked = true; });
+    $('c-btn').click();
+    check('Page: a Guest in two groups is refused', /1 group only/.test($('person-msg').textContent) && $('person-list').children.length === 0, $('person-msg').textContent);
+    $('pp-level').value = 'analyst'; $('pp-level').dispatchEvent(new W.Event('change'));
+    check('Page: picking a level says what it gives', /7 days/.test($('pp-level-hint').textContent) && /Export: yes/.test($('pp-level-hint').textContent), $('pp-level-hint').textContent);
+    type('c-name', 'Fernando G');
+    $('c-groups').querySelector('input[value="change-team"]').checked = false;
+    $('c-btn').click();
+    await until(function () { return $('person-list').children.length === 1; });
+    type('c-name', 'Visitor V');
+    $('c-groups').querySelector('input[value="service-desk"]').checked = true;
+    $('c-btn').click();
+    await until(function () { return $('person-list').children.length === 2; });
+    check('Page: the overview lists both, each with a level, no key file yet', /Analyst/.test($('person-u-0001').textContent) && /Guest/.test($('person-u-0002').textContent) &&
+          /no key file yet/.test($('status-u-0001').textContent) && /2 people have no key file yet/.test($('todo').textContent), $('todo').textContent);
+
+    //  No folder:  the key file downloads
+    saved = [];
+    $('make-u-0001').click();
+    await until(function () { return saved.length === 1 && /Saved Fernando G/.test($('issue-msg').textContent); }, 30000);
+    check('Page: with no folder, Make key file downloads flogic.flogic-key and says where it goes', saved[0] && saved[0].name === 'flogic.flogic-key' &&
+          /Never email it/.test($('issue-msg').textContent), $('issue-msg').textContent);
+    const first = saved[0] ? await (await saved[0].blob).text() : '{}';
+    const c1 = await S.check(S.readKey(first), pinned);
+    check('Page: that key file checks against the trust file: Fernando G, Analyst, Service Desk, 7 days',
+          c1.name === 'Fernando G' && c1.level === 'analyst' && c1.groups.map(function (g) { return g.group; }).join() === 'service-desk' &&
+          Math.abs(new Date(c1.expires) - new Date(c1.issued) - 7 * 86400000) < 5000);
+    check('Page: the row now says "good until", and the button says Renew', /key file good until/.test($('status-u-0001').textContent) &&
+          $('make-u-0001').textContent === 'Renew key file', $('status-u-0001').textContent);
+
+    //  Renew everyone needs the folder
+    $('renew-all').click();
+    check('Page: Renew everyone without a folder says to connect one', /Connect IT's Flogic folder first/.test($('issue-msg').textContent));
+    const root = makeMemoryFolder('Flogic keys');
+    W.showDirectoryPicker = async function () { return root; };
+    $('connect-folder').click();
+    check('Page: connects IT\'s folder', await until(function () { return /Connected: "Flogic keys"/.test($('folder-status').textContent); }), $('folder-status').textContent);
+    check('Page: and shows whose key file is NOT in it yet', await until(function () { return /not in their folder/.test($('status-u-0001').textContent); }), $('status-u-0001').textContent);
+    $('renew-all').click();
+    await until(function () { return /Renewed 1 person/.test($('issue-msg').textContent); }, 30000);
+    check('Page: Renew everyone renews the Analyst and leaves the Guest for IT to do by name',
+          /Renewed 1 person/.test($('issue-msg').textContent) && /Visitor V is a Guest: renew them by name/.test($('issue-msg').textContent) &&
+          root.__dirs.has('u-0001') && !root.__dirs.has('u-0002'), $('issue-msg').textContent);
+    check('Page: the row says it\'s in their folder', /in their folder/.test($('status-u-0001').textContent) && !/not in their folder/.test($('status-u-0001').textContent));
+    const inFolder = root.__dirs.get('u-0001').__files.get('flogic.flogic-key');
+    const c2 = await S.check(S.readKey(inFolder), pinned);
+    check('Page: the folder\'s key file is a newer one than the download', new Date(c2.issued) > new Date(c1.issued) && c2.serial !== c1.serial);
+    $('make-u-0002').click();
+    await until(function () { return /Put Visitor V/.test($('issue-msg').textContent); }, 30000);
+    const cg = await S.check(S.readKey(root.__dirs.get('u-0002').__files.get('flogic.flogic-key')), pinned);
+    check('Page: the Guest\'s key file, made by name: 1 day, no export', cg.level === 'guest' && cg.groups[0].rules.export === false &&
+          Math.abs(new Date(cg.expires) - new Date(cg.issued) - 86400000) < 5000);
+
+    //  End access:  two clicks,  and it says what it can't do
+    $('end-u-0001').click();
+    check('Page: End access asks first, and says the key file out there can\'t be taken back early', /can't be taken back early/.test($('issue-msg').textContent) &&
+          !/ended/.test($('person-u-0001').textContent), $('issue-msg').textContent);
+    $('end-u-0001').click();
+    check('Page: the second click ends it: no Make key file, no End access button', /Access ended/.test($('person-u-0001').textContent) &&
+          $('make-u-0001').disabled && !$('end-u-0001') && $('review-u-0001').textContent === 'Give access back');
+    $('review-u-0001').click();
+    check('Page: Give access back puts them back, reviewed today', !$('make-u-0001').disabled && !!$('end-u-0001') && /confirmed today/.test($('issue-msg').textContent));
+
+    //  Edit a person
+    $('edit-u-0002').click();
+    check('Page: Edit fills the form', $('c-name').value === 'Visitor V' && $('pp-level').value === 'guest' && $('c-btn').textContent === 'Save changes' && visible('pp-cancel'));
+    $('pp-level').value = 'viewer';
+    $('c-groups').querySelectorAll('input').forEach(function (i) { i.checked = true; });
+    $('c-btn').click();
+    check('Page: the Guest becomes a Viewer in both groups', /Viewer/.test($('person-u-0002').textContent) && /Service Desk, Change Team/.test($('person-u-0002').textContent) &&
+          $('c-btn').textContent === 'Add person', $('person-u-0002').textContent);
+
+    //  Save,  Lock,  Open:  it all comes back,  and Lock leaves nothing on the page
+    saved = [];
+    $('save-btn').click();
+    await until(function () { return saved.length === 1; });
+    const ringText = await (await saved[0].blob).text();
+    check('Page: the saved keyring holds no key file and no passphrase', ringText.indexOf('"claims"') < 0 && ringText.indexOf(c2.serial) < 0 && ringText.indexOf(PASS) < 0);
+    $('lock-btn').click();
+    check('Page: Lock takes the people, the to-do list and the signing key\'s name off the page', !isOpen() && $('person-list').children.length === 0 &&
+          $('todo').children.length === 0 && $('data-list').children.length === 0 && $('signer-print').textContent === '');
+    pick('open-file', 'it.flogic-keyring', ringText, 'application/json');
+    type('open-pass', PASS);
+    $('open-btn').click();
+    await until(isOpen);
+    check('Page: opened again: the same signing key, levels, and key file dates', $('signer-print').textContent === fp &&
+          /Analyst/.test($('person-u-0001').textContent) && /Viewer/.test($('person-u-0002').textContent) && /key file good until/.test($('status-u-0001').textContent));
+    $('lock-btn').click();
+
+    //  An older keyring  (no signing key,  no levels)
+    const old = JSON.parse(ringText);
+    old.v = 1; delete old.signer; delete old.packs;
+    old.people = old.people.map(function (p) { return { id: p.id, name: p.name, groups: p.groups, expires: '2099-12-31', made: p.made }; });
+    pick('open-file', 'old.flogic-keyring', JSON.stringify(old), 'application/json');
+    type('open-pass', PASS);
+    $('open-btn').click();
+    await until(isOpen);
+    check('Page: an older keyring opens, says what changed, and can\'t make key files yet', /older console/.test($('todo').textContent) &&
+          /no signing key yet/.test($('todo').textContent) && visible('signer-none') && $('make-u-0001').disabled && /Not reviewed yet/.test($('person-u-0001').textContent),
+          $('todo').textContent);
+    $('signer-make').click();
+    await until(function () { return visible('signer-has'); }, 30000);
+    $('review-u-0001').click();
+    check('Page: Make a signing key, then "Still needed": now a key file can be made', visible('signer-has') && !$('make-u-0001').disabled && visible('unsaved'));
+    $('lock-btn').click(); $('lock-btn').click();
 }
 
 
@@ -574,6 +847,11 @@ async function testDemoSet() {
     await until(isOpen);
     check('Page: opens the demo keyring (2 groups, 2 people)', isOpen() && $('group-list').children.length === 2 &&
           $('person-list').children.length === 2 && /2 groups · 2 people/.test($('keyring-counts').textContent));
+    check('Page: the demo keyring signs with the key the app trusts', $('signer-print').textContent === FLOGIC_IT_SIGNER.fingerprint &&
+          /trusts this key/.test($('signer-trust').textContent), $('signer-print').textContent + ' / ' + $('signer-trust').textContent);
+    check('Page: Fernando G is an Analyst, DJ a Viewer', /Analyst/.test($('person-u-0001').textContent) && /Viewer/.test($('person-u-0002').textContent));
+    check('Page: both demo packs are listed under their groups', /Service Desk[\s\S]*demo_incident\.flogic/.test($('data-list').textContent) &&
+          /Change Team[\s\S]*demo_change_request\.flogic/.test($('data-list').textContent));
     $('lock-btn').click();
 }
 
@@ -593,15 +871,28 @@ async function testRules() {
     const outside = html.match(/(src|href)\s*=\s*"(https?:)?\/\/[^"]*"/g);
     check('it-console.html loads nothing from the internet', !outside, outside);
 
+    //  The one thing the console may keep:  WHICH FOLDER was connected  (database "flogic-mailbox":  a browser handle,  nothing else).
     const dbs = indexedDB.databases ? await indexedDB.databases() : [];
-    check('Nothing in IndexedDB or localStorage afterward', dbs.length === 0 && localStorage.length === 0 && W.localStorage.length === 0,
-          dbs.length + ' databases, ' + localStorage.length + ' localStorage');
+    const others = dbs.filter(function (d) { return d.name !== 'flogic-mailbox'; });
+    check('Nothing in localStorage or sessionStorage afterward, and no database but the folder memory',
+          others.length === 0 && localStorage.length === 0 && W.localStorage.length === 0 && W.sessionStorage.length === 0,
+          dbs.map(function (d) { return d.name; }).join() + ' / ' + localStorage.length + ' localStorage');
+    const kept = await new Promise(function (r) {
+        const q = indexedDB.open('flogic-mailbox', 1);
+        q.onupgradeneeded = function () { q.result.createObjectStore('folder'); };
+        q.onsuccess = function () {
+            const t = q.result.transaction('folder', 'readonly').objectStore('folder').getAll();
+            t.onsuccess = function () { q.result.close(); r(t.result); };
+        };
+        q.onerror = function () { r(['?']); };
+    });
+    check('The folder memory holds no key, no passphrase and no name', !/passphrase|wrapped|"raw"|Fernando|correct horse/i.test(JSON.stringify(kept)), JSON.stringify(kept).slice(0, 200));
 }
 
 
 (async function run() {
-    const parts = [testKeyringLogic, testGroupLogic, testPackLogic, testPersonLogic,
-                   testKeyringPage, testGroupPage, testPackPage, testPersonPage, testDemoSet, testRules];
+    const parts = [testKeyringLogic, testGroupLogic, testPackLogic, testPersonLogic, testAccessLogic,
+                   testKeyringPage, testGroupPage, testPackPage, testPersonPage, testKeyFilePage, testDemoSet, testRules];
     for (const part of parts) {
         try { await part(); }
         catch (e) { check(part.name + ' finished', false, e.stack || e.message || e); }

@@ -286,7 +286,7 @@ async function dashFileChanged() {
     //  Otherwise:  the suggested tiles.
     const kept = dashTiles.filter(function (t) { return t.col === null || columnIndex(t.col) !== -1; });
     if (dashTiles.length > 0 && kept.length === dashTiles.length && dashTiles.some(function (t) { return t.mine; })) dashTiles = kept;
-    else suggestTiles();
+    else { suggestTiles(); levelView(); }
 
     refresh();
 }
@@ -376,6 +376,21 @@ function suggestTiles() {
 
     if (dashTiles.length === 1 && table.rowCount > 0 && cols.length > 0) {
         dashNote.textContent = 'No column here splits the rows into groups, so there\'s just the row count.  Edit  ->  "+ Add a tile"  to add your own.';
+    }
+}
+
+//  THE ACCESS LEVEL'S VIEW   (policyI.js:  each level says what the dashboard starts with).
+//  A level with a 'summary' dashboard  (a Guest)  starts with the first 3 suggested tiles:  the big numbers,
+//  not every chart.   Nothing is locked away by this:  it's what you see FIRST.   Edit still adds tiles.
+const DASH_SUMMARY_TILES = 3;
+function levelView() {
+    const v = window.FlogicVault;
+    let level = null;
+    try { level = v && typeof v.level === 'function' ? v.level() : null; } catch (e) { level = null; }
+    if (level === null || !level.view || level.view.dashboard !== 'summary') return;
+    if (dashTiles.length > DASH_SUMMARY_TILES) {
+        dashTiles = dashTiles.slice(0, DASH_SUMMARY_TILES);
+        dashNote.textContent = level.label + ' view: a short summary.  Edit  ->  "+ Add a tile"  for more.';
     }
 }
 

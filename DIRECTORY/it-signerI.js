@@ -1,5 +1,6 @@
 /*
-    it-signerS.js   -   the app's copy of IT's PUBLIC signing key.   (Made by  sso-draft/make-demo.mjs.)
+    it-signerI.js   -   the app's copy of IT's PUBLIC signing key.
+    (IT's console makes this file:  "Download the app's trust file".   The demo one:  sso-draft/make-demo.mjs.)
 
     The app believes a sign-in file only if this key's signature checks.   Nothing secret is here.
     Swap this file and you swap who the app trusts:  so it ships WITH the app,  and changes only with it.

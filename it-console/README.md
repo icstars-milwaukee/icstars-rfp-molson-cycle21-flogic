@@ -1,17 +1,19 @@
 # The Flogic IT console
 
-This page plays **Molson IT** for the Flogic demo. IT uses it to:
+This page plays **Molson IT** for the Flogic demo. IT uses it to decide **who can open which data, what they may do
+with it, and for how long**:
 
-- make **access groups** (like *Service Desk* or *Change Team*), each with its own key and rules
+- make **access groups** (like *Service Desk* or *Change Team*): each has its own key and rules
+- give each person an **access level** (Guest, Viewer, Analyst): what they may do with the data they can open
+- make each person's **key file** and put it in their drive folder, then **renew** it
 - **pack** a data file for one group, so only that group's people can open it
-- make each person's **credential file** and **setup code**, so they can sign in to Flogic
+- see all of it on one screen: who has what, until when, and what needs doing today
 
-It's a stand-in for what a real identity system (like Microsoft Entra ID) would do. It's never given to users, and it
-never ships inside the app's `DIRECTORY/` folder.
+It's a stand-in for what a real identity system (like Microsoft Entra ID) would do. It's never given to users.
 
 **It works offline in Chrome or Edge.** Open `it-console.html` straight from the folder (double-click it). It uses no
-network, no outside code and no internet fonts, and it saves nothing in the browser. Everything it makes is a file you
-download.
+network and no outside code. It looks like the app (same glass cards, same two themes), and the chip at the top right
+switches between Neo-Neutral and Neo-Dark.
 
 ---
 
@@ -19,11 +21,33 @@ download.
 
 | Word | What it is |
 |---|---|
-| **Keyring** (`.flogic-keyring`) | IT's own file: the groups, their keys, and the list of who has a credential. It's locked with the **IT passphrase**. |
-| **Group** | A team that shares access. Each group has one key and two rules: whether it can **export**, and the most minutes Flogic can sit idle before it **locks** itself. |
+| **Keyring** (`.flogic-keyring`) | IT's own file: the groups and their keys, the people, IT's signing key, and the list of what was packed. Locked with the **IT passphrase**. |
+| **Group** | **Which data.** A team that shares a key. Two rules: whether it can **export**, and the most idle minutes before Flogic **locks**. |
+| **Access level** | **What you may do with it.** Guest, Viewer or Analyst. Built into the app (`DIRECTORY/policyI.js`); it can't be changed from a screen. |
+| **Key file** (`flogic.flogic-key`) | A person's sign-in. It holds their group keys and is signed by IT. It lasts days, not months. |
+| **Signing key** | What IT signs key files with. It lives inside the keyring. The app carries its public half in `DIRECTORY/it-signerI.js` (the **trust file**). |
+| **Review** | Every 30 days IT confirms a person still needs access (**Still needed**). Without it, no new key file. |
 | **Data pack** (`.flogic`) | A data file (`.csv`, `.xlsx` or `.sql`), locked with one group's key. |
-| **Credential** (`.flogic-id`) | A person's "badge": their groups' keys, locked with a setup code. |
-| **Setup code** | 15 letters and numbers, like `7KQ4M-X9WTC-PR2HD`. The person types it once in Flogic to open their credential, then picks their own passphrase. |
+
+When a group and a level disagree, **the stricter one wins**. A Viewer in a group that can export still can't export.
+
+## The access levels
+
+| Level | For | Export | Auto-lock | Key file lasts | Renewed | Groups | The app opens with |
+|---|---|---|---|---|---|---|---|
+| **Guest** | a visitor, contractor or trainee who needs a look for a day | No | 5 min at most | 1 day | by name, each time | 1 at most | a short summary (3 tiles) |
+| **Viewer** | someone who reads the numbers but doesn't take data out | No | 10 min at most | 7 days | with "Renew everyone" | any number | the full dashboard |
+| **Analyst** | someone who works the data and hands reports to others | Yes, where the group allows it | 30 min at most | 7 days | with "Renew everyone" | any number | the full dashboard |
+
+## The rules that are built in
+
+These are in `DIRECTORY/policyI.js`, which both this console and the app load. Nobody can change them from a screen.
+
+1. **Short access.** A key file lasts 7 days at most (a Guest's: 1 day).
+2. **Renewal.** Access carries on only because IT renews it. Every 30 days IT has to click **Still needed** for each
+   person. After that, the console won't make them a key file.
+3. **Levels are enforced by the app too.** The app checks every key file at every sign-in. One that lasts too long, was
+   made after the review ran out, or gives more than its level allows is refused, **even if IT's own key signed it**.
 
 ---
 
@@ -32,105 +56,105 @@ download.
 ### 1. Open the keyring (or make one)
 
 - **The first time:** under **New keyring**, pick an IT passphrase (at least 12 characters, or 4 words) and type it
-  twice. Then make your groups (step 2) and **Save keyring**.
-- **Every time after that:** under **Open keyring**, pick the keyring file and type the IT passphrase. A wrong
-  passphrase says so and shows nothing.
+  twice. The new keyring comes with its own signing key. Go to **Signing key** → **Download the app's trust file**, and
+  put that `it-signerI.js` in the app's `DIRECTORY/` folder. Until you do, the top of the page warns that the app next to
+  the console trusts a different key.
+- **Every time after that:** under **Open keyring**, pick the keyring file and type the IT passphrase.
 
-**Save keyring** downloads the keyring again. Do it after every change: an **unsaved changes** mark shows until
-you do. (Your browser may name the new download `it (1).flogic-keyring`.) Keep the newest copy, and delete the older ones.
+**Save keyring** downloads the keyring again. Do it after every change: an **unsaved changes** mark shows until you do.
 
-> ⚠ **Nothing can get back a lost IT passphrase or a lost keyring file.** Without them, the groups' keys are gone, so
-> you'd have to make new groups, pack every file again, and give everyone a new credential. Keep the keyring somewhere
-> safe and backed up, and keep the passphrase somewhere else.
+> ⚠ **Nothing can get back a lost IT passphrase or a lost keyring file.** Without them, the groups' keys and the signing
+> key are gone: new groups, every file packed again, a new trust file in every copy of the app, and a new key file for
+> everyone.
 
 ### 2. Make the groups
 
-Under **Groups**, type a name, like *Service Desk*. The **id** (`service-desk`) fills itself in. You can change it
-before you click **Make group**, but never after. Then pick the rules:
+Under **Groups**, type a name, like *Service Desk*. The **id** fills itself in and can never change. Pick whether the
+group **can export**, and its **auto-lock** minutes (1–240).
 
-- **Can export:** whether this group can save a report or rows out of Flogic. It starts ticked. Untick it for groups
-  that should only look.
-- **Auto-lock:** the most idle minutes (1–240) before Flogic locks itself. People can pick a shorter time, but never a
-  longer one.
+### 3. Add people
 
-**Edit** changes a group's name and rules. People who already have a credential keep the old name and rules until you
-give them a new one.
+Under **People**: a name, an **access level**, their groups, and (only if you know it) their **last day**. A new person
+starts at Guest until you pick otherwise. Adding someone counts as their first review.
 
-### 3. Pack a data file
+### 4. Give them a key file
 
-Under **Pack a file**, pick the file and the group, then click **Pack**. You get `<name>.flogic` (for example
-`incident.csv` becomes `incident.flogic`), and the console shows the size before and after. Share the pack any way you
-like: without the group's key it can't be opened.
+The **Access** section at the top lists everyone: level, groups, key file, review, last day.
 
-Anyone can still see *which group* a pack is for and the original file's name, but not what's inside.
+- **Connect IT's Flogic folder** once: one folder in OneDrive, Google Drive or a share, with a subfolder per person
+  (named by their id, like `u-0001`). **Share each subfolder with that person only.**
+- **Make key file** writes `u-0001/flogic.flogic-key` into the folder. How long it lasts isn't a choice: the level
+  decides. With no folder connected, the file downloads instead, for you to put there. **Never email a key file.**
+- **Renew everyone** makes a fresh key file for everyone whose review is in date. Guests are left out on purpose:
+  renew them by name.
+- **Still needed** is the 30-day review. **End access** stops their key files (two clicks). **Edit** changes their
+  level, groups or last day; it reaches them with their next key file.
 
-### 4. Give a person a credential
+The few lines at the top of **Access** say what needs doing today: reviews run out, key files about to end, people
+with no key file yet.
 
-Under **People**, type their name, tick their groups (at least one), and check the expiry date (it starts at Dec 31 of
-this year). Then click **Make credential**:
+### 5. Pack a data file
 
-1. Their credential file downloads, named after their first name: `fernando.flogic-id`.
-2. Their **setup code** shows **once**, in big letters. **Give it to the person in person or over Teams, never in the
-   same email as the file.** Then click **I've handed it over. Hide it.**
-3. They're added to the keyring's list of people. **Save the keyring.**
+Under **Data packs**, pick the file and the group, then click **Pack**. You get `<name>.flogic`. The keyring remembers
+what was packed for which group (name, size and day only, never the data), and **Which data is for whom** shows it
+next to the group's people.
 
-The setup code isn't saved anywhere, not even in the keyring. If it's lost before the person uses it, just make them a
-new credential.
+### 6. Lock
 
-### 5. Lock
-
-**🔒 Lock** forgets everything on the page: the keys, the passphrase, the lists, and any setup code on screen. Closing
-the tab does the same. If there are unsaved changes, the first click warns you and the second one locks.
+**🔒 Lock** forgets everything on the page. With unsaved changes, the first click warns and the second one locks.
 
 ---
 
 ## What IT should know (the hard truths)
 
-This is a prototype, so these limits are real:
+- **The key file is the login.** Whoever gets a copy can sign in until its end date, after choosing their own PIN. The
+  drive account (with MFA) is what guards it. That's why key files are short.
+- **Access can't be taken back early.** **End access** stops new key files. The one the person holds works until its
+  end date: 7 days at most, 1 for a Guest. The console says this before it ends anyone's access.
+- **On a laptop where the drive folder syncs, the key file is a file on that laptop.** The app itself keeps nothing
+  readable (see the test below), but the synced folder does. The computer's own lock screen and the drive's MFA are the
+  real protection there.
+- **Export, auto-lock and the dashboard view are polite rules.** The app follows them, but someone with the browser's
+  developer tools could skip them. What can't be skipped: without a group's key its packs don't open, and a key file
+  that breaks the built-in rules isn't accepted.
+- **A group's key never changes.** Someone who once held a key file keeps the group key inside it. Really cutting them
+  off from old packs means a new group key and packing again ("key rotation"), which the console doesn't do yet.
+- **Whoever can change the app's files can change whom it trusts** (`it-signerI.js`) and what the rules are
+  (`policyI.js`). Ship the app from a place only IT can write to.
+- **The laptop's clock decides "ended".**
+- **The older way** (a `.flogic-id` credential file and a setup code) is still there while
+  `FlogicPolicy.ALLOW_LEGACY_CREDENTIALS` is `true`. It keeps whatever end date is typed, so it does **not** follow the
+  short-access and review rules. Set the flag to `false` to turn it off in both the console and the app.
 
-- **The setup code is one-time only by habit.** Nothing stops someone from using the same code twice, because there's
-  no server to remember it was used. Treat each code like a one-time password anyway.
-- **Taking access away isn't built yet.** Someone with a credential can open any pack made with their group's key, even
-  after they leave the keyring's list. Really removing them means a new key for the group and packing the files again
-  ("key rotation"), which the console doesn't do yet.
-- **Export and expiry are polite rules, not locks.** Flogic follows them, but someone who knows the browser's developer
-  tools could skip them. The locks that are real are the group keys: without a group's key, its packs can't be opened.
-  That's math, not a setting.
-- **An exported file is a plain file**, on purpose. Once someone exports a report, share it like any work document.
-- **Lock takes the keys off the page**, but the browser frees its memory when it chooses. Don't claim it "wipes" anything.
-- **A pack's label isn't secret:** its group and file name can be read without a key.
-
-**What can honestly be said:** Flogic never saves data in the browser (it keeps only locked keys), this console saves
-nothing in the browser at all, and nothing goes over the network.
+**What the console keeps in the browser:** only which folder was connected (a browser handle: no key, no names).
+**Forget this folder** removes it. Nothing else is stored, and nothing goes over the network.
 
 ---
 
 ## The demo set
 
-`demo-data/packs/` holds a ready-made keyring, two packs, two credentials, and a README with the demo passphrase and
-codes. **Everything there is made up**, which is the only reason the codes can be written down. It's made by:
+`demo-data/packs/` holds a ready-made keyring (passphrase in its README), two packs and two older-style credentials.
+**Everything there is made up.**
 
 ```text
-node it-console/make-demo-set.mjs
+node it-console/upgrade-demo-keyring.mjs     brings the demo keyring up to date, KEEPING its keys
+                                             (run it again when the demo people's 30-day review runs out)
+node it-console/make-demo-set.mjs            makes everything new: new keys, new setup codes
 ```
-
-Running it again makes new keys and codes for all of it, and anyone who already set up with the old files has to set up
-again.
 
 ## Tests
 
 ```text
-node it-console/run-console-test.mjs
+node it-console/run-console-test.mjs                           205 checks: the console's logic and its real page
+node sso-draft/run-node-test.mjs                                71: key files and the built-in rules
+node sso-draft/run-browser-test.mjs app-signin-test.html        50: the real app, signed in with a key file
+node sso-draft/run-browser-test.mjs folder-real-test.html       35: this console and the person's page on real folder handles
 ```
-
-This runs `console-test.html` in a headless Chrome (or Edge), opened as `file://`. It tests the keyring, groups, packing,
-credentials and the demo set, both in code and by clicking through the real page. It also checks that the console uses
-no network, no browser storage and no `innerHTML`.
 
 | File | What |
 |---|---|
 | `it-console.html` | The page |
-| `itconsoleI.js` | Its brain (the locks and keys themselves are in `../DIRECTORY/vaultcoreI.js`) |
-| `itconsoleI.css` | Its look: light, with a dark mode that follows the computer's setting |
+| `itconsoleI.js` | Its brain. The locks, key files and rules are in `../DIRECTORY/` (`vaultcoreI.js`, `signincoreI.js`, `policyI.js`, `mailboxI.js`) |
+| `itconsoleI.css` | Its look: the app's own colors and glass, in both themes |
 | `console-test.html`, `run-console-test.mjs` | The tests |
-| `make-demo-set.mjs` | Makes `demo-data/packs/` |
+| `make-demo-set.mjs`, `upgrade-demo-keyring.mjs` | Make, or bring up to date, `demo-data/packs/` |

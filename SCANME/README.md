@@ -7,6 +7,7 @@ The short, read-this-first documents for the agents (and people) working on Flog
 | File | What it is | For |
 |---|---|---|
 | `README.md` | This page: the index and the release conventions | everyone |
+| `QUESTIONS-v0.4.0.md` | Seven questions on the Sprint 3 finalization pass (branch `feature/sprint3-finalization`), each with the cautious choice taken meanwhile | DJ |
 | `SSO-PERMISSION-v0.1.0.md` | Permission, limits and the brief for a rough SSO-style sign-in | Fernando's agent |
 | `STANDBY-v0.3.0.md` | Fernando's agent on standby for the filekey build: what to watch, run, and do on Keystone | Fernando's agent |
 | `AUDIT-v0.3.0.md` | Security audit of filekey sign-in: what protects what, what held, what is open | everyone |

@@ -1,7 +1,7 @@
 /*
     ==========================================================
 
-        mailboxS.js   -   THE DRIVE FOLDER   (v0.3.0,  filekey)
+        mailboxI.js   -   THE DRIVE FOLDER   (filekey)
 
         IT keeps ONE parent folder in OneDrive / Google Drive / a share,  with a subfolder per person,
         each shared with that person only:

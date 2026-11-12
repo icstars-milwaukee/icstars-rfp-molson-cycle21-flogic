@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { SignInCore, Mailbox, makeMemoryFolder, repo, draft } from './load-core.mjs';
 
-const pinned = new Function(fs.readFileSync(path.join(draft, 'it-signerS.js'), 'utf8') + '\nreturn FLOGIC_IT_SIGNER;')();
+const pinned = new Function(fs.readFileSync(path.join(repo, 'DIRECTORY', 'it-signerI.js'), 'utf8') + '\nreturn FLOGIC_IT_SIGNER;')();
 const run = new Function(fs.readFileSync(path.join(draft, 'mailbox-testsS.js'), 'utf8') + '\nreturn runMailboxTests;')();
 
 const results = [];

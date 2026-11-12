@@ -28,9 +28,10 @@
 <iframe id="frame" title="the page under test"></iframe>
 
 <script src="../DIRECTORY/vaultcoreI.js"></script>
-<script src="signincoreS.js"></script>
-<script src="mailboxS.js"></script>
-<script src="it-signerS.js"></script>
+<script src="../DIRECTORY/policyI.js"></script>
+<script src="../DIRECTORY/signincoreI.js"></script>
+<script src="../DIRECTORY/mailboxI.js"></script>
+<script src="../DIRECTORY/it-signerI.js"></script>
 <script>
 'use strict';
 
@@ -93,7 +94,7 @@ async function run() {
 
     const signer = await SignInCore.openSigner(SignInCore.readSigner(await text('sso-draft/demo/demo-it.flogic-signer')), ITPASS);
     const ring = await SignInCore.keyringGroups(await text('demo-data/packs/demo-it.flogic-keyring'), ITPASS);
-    const fern = ring.people[0], sd = ring.groups.filter(function (g) { return g.group === 'service-desk'; });
+    const fern = Object.assign({}, ring.people[0], { level: 'analyst', reviewed: (function (d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })(new Date()) }), sd = ring.groups.filter(function (g) { return g.group === 'service-desk'; });
 
     const it = await Mailbox.openIT(root);
     const kf = await SignInCore.issueKey(signer, fern, sd, new Date(Date.now() + 7 * 86400000));
@@ -106,7 +107,7 @@ async function run() {
     await root.getDirectoryHandle('Fernando (old)', { create: true });
     const ids = await it.people();
     check('IT: lists real subfolders, ignores odd names and files', ids.length === 1 && ids[0] === 'u-0001', JSON.stringify(ids));
-    const kf2 = await SignInCore.issueKey(signer, fern, sd, new Date(Date.now() + 14 * 86400000));
+    const kf2 = await SignInCore.issueKey(signer, fern, sd, new Date(Date.now() + 7 * 86400000));
     await it.putKeyFor('u-0001', JSON.stringify(kf2));
     check('IT: writing again replaces the file (no "(1)" copies)', JSON.parse(await it.getKeyFor('u-0001')).sig === kf2.sig &&
           (await (async function () { const n = []; for await (const e of sub.keys()) n.push(e); return n; })()).join() === 'flogic.flogic-key');
@@ -134,25 +135,26 @@ async function run() {
     await root.removeEntry('u-0001', { recursive: true });
 
     // ---- 4.  IT's page on a real folder,  and remembering it after a reload ----
-    const ringText = await text('demo-data/packs/demo-it.flogic-keyring');
-    const signerText = await text('sso-draft/demo/demo-it.flogic-signer');
+    //  IT's page is the real console now  (it-console/):  the keyring carries the signing key.
+    function freshRing(t) { const k = JSON.parse(t); k.people.forEach(function (p) { p.reviewed = (function (d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })(new Date()); }); return JSON.stringify(k); }
+    const ringText = freshRing(await text('demo-data/packs/demo-it.flogic-keyring'));
     async function openIT() {
-        pick('ring-file', 'demo-it.flogic-keyring', ringText); pick('signer-file', 'demo-it.flogic-signer', signerText);
-        type('it-pass', ITPASS); click('open');
-        return until(function () { return !$('open-part').hidden; }, 30000);
+        pick('open-file', 'demo-it.flogic-keyring', ringText);
+        type('open-pass', ITPASS); click('open-btn');
+        return until(function () { return !$('main').hidden; }, 30000);
     }
-    await load('it-issue.html');
+    await load('../it-console/it-console.html');
     picker(root);
     check('IT page: opens', await openIT());
     click('connect-folder');
     check('IT page: connects the real folder', await until(function () { return /Connected: "FlogicDemo"/.test(txt('folder-status')); }), txt('folder-status'));
     click('make-u-0001');
     check('IT page: Make key file writes into the real folder', await until(function () { return /Put Fernando G/.test(txt('issue-msg')); }, 30000), txt('issue-msg'));
-    check('IT page: the row shows "good until"', await until(function () { return /good until/.test(txt('status-u-0001')); }), txt('status-u-0001'));
+    check('IT page: the row shows "good until", and that it\'s in their folder', await until(function () { return /in their folder/.test(txt('status-u-0001')); }) && await until(function () { return /good until/.test(txt('status-u-0001')); }), txt('status-u-0001'));
     const fresh = await readFile(await root.getDirectoryHandle('u-0001'), 'flogic.flogic-key');
     check('IT page: the file in the real folder checks', !!(await SignInCore.check(SignInCore.readKey(fresh), FLOGIC_IT_SIGNER)));
 
-    await load('it-issue.html');
+    await load('../it-console/it-console.html');
     noPicker();
     check('IT page, reloaded: opens', await openIT());
     check('IT page, reloaded: the folder is remembered, no picking again', await until(function () { return /Connected: "FlogicDemo"/.test(txt('folder-status')); }), txt('folder-status'));
@@ -176,7 +178,7 @@ async function run() {
 
     //  IT renews on the real folder;  the person's page should take it in by itself
     await wait(20);
-    const renewed = await SignInCore.issueKey(signer, fern, sd, new Date(Date.now() + 21 * 86400000));
+    const renewed = await SignInCore.issueKey(signer, fern, sd, new Date(Date.now() + 7 * 86400000));
     await (await Mailbox.openIT(root)).putKeyFor('u-0001', JSON.stringify(renewed));
     type('pin', PIN); click('go');
     check('person page: takes in the renewal from the real folder by itself', await until(function () { return w().SignInPage.signedIn() && $('renewed'); }, 30000), txt('why'));
@@ -216,7 +218,7 @@ async function run() {
     dropOn('folder-drop', new (w().File)(['not a key'], 'notes.txt'));
     check('drop: dropping something else says so', await until(function () { return /isn't a Flogic key file/.test(txt('why')); }), txt('why'));
 
-    await load('it-issue.html');
+    await load('../it-console/it-console.html');
     check('IT page: has the drop area too', !!$('folder-drop'));
 
     await opfs.removeEntry('FlogicDemo', { recursive: true });

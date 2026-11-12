@@ -42,7 +42,11 @@ async function runCoreTests(check, env) {
     const sd = ring.groups.find(function (g) { return g.group === 'service-desk'; });
     const ct = ring.groups.find(function (g) { return g.group === 'change-team'; });
     check('keyring: both demo groups open', !!sd && !!ct && ring.groups.length === 2);
-    const fern = ring.people.find(function (p) { return p.id === 'u-0001'; });
+    const today = (function (d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })(new Date());
+    function person(id, level) {                     //  the keyring's person,  reviewed today,  at this access level
+        return Object.assign({}, ring.people.find(function (p) { return p.id === id; }), { level: level || 'analyst', reviewed: today });
+    }
+    const fern = person('u-0001');
 
     // ---- IT makes a filekey ----
     const kf = await S.issueKey(signer, fern, [sd], soon(7 * day));
@@ -101,10 +105,10 @@ async function runCoreTests(check, env) {
     check('copy: another file\'s claims pasted in don\'t open these keys', await code(function () { return S.unlock(moved, PIN, env.pinned); }, 'wrong-pin'));
 
     // ---- renewals ----
-    const renewed = await S.issueKey(signer, fern, [sd], soon(14 * day));
+    const renewed = await S.issueKey(signer, fern, [sd], soon(7 * day));
     check('renew: a newer key file is spotted', await S.isNewer(renewed, copy, env.pinned) === true);
     check('renew: the same file again is not newer', await S.isNewer(kf, copy, env.pinned) === false);
-    const djKey = await S.issueKey(signer, ring.people.find(function (p) { return p.id === 'u-0002'; }), [ct], soon(day));
+    const djKey = await S.issueKey(signer, person('u-0002'), [ct], soon(day));
     check('renew: someone else\'s key file isn\'t taken as mine', await code(function () { return S.isNewer(djKey, copy, env.pinned); }, 'damaged'));
     check('renew: a forged one isn\'t either', await code(function () { return S.isNewer(forged, copy, env.pinned); }, 'wrong-issuer'));
 
@@ -144,4 +148,43 @@ async function runCoreTests(check, env) {
     check('session: open before the end date', s4.alive());
     await new Promise(function (r) { setTimeout(r, 1800); });
     check('session: the end date ends it, even mid-session', ended[0] === 'expired' && s4.keyFor('service-desk') === null);
+
+    // ---- the built-in rules  (policyI.js):   short access,  the review,  the access levels ----
+    const P = FlogicPolicy;
+    const ago = function (days) { const d = new Date(Date.now() - days * day); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+    check('policy: three access levels, lowest first', P.LEVELS.map(function (l) { return l.id; }).join() === 'guest,viewer,analyst' && P.LOWEST === 'guest');
+    check('policy: no level lasts longer than the built-in most (7 days)', P.LEVELS.every(function (l) { return l.grantDays <= P.GRANT_MAX_DAYS; }) && P.GRANT_MAX_DAYS === 7);
+    check('policy: IT can\'t make a key file that lasts 8 days', await code(function () { return S.issueKey(signer, fern, [sd], soon(8 * day)); }, 'policy'));
+    check('policy: a Guest\'s key file can\'t last 2 days', await code(function () { return S.issueKey(signer, person('u-0001', 'guest'), [sd], soon(2 * day)); }, 'policy'));
+    const auto = await S.issueKey(signer, fern, [sd]);
+    const autoClaims = JSON.parse(auto.claims);
+    check('policy: with no end date given, an Analyst\'s key file lasts 7 days', Math.abs(new Date(autoClaims.expires) - new Date(autoClaims.issued) - 7 * day) < 5000);
+    const guestKey = await S.issueKey(signer, person('u-0001', 'guest'), [sd]);
+    const guestClaims = JSON.parse(guestKey.claims);
+    check('policy: a Guest\'s lasts 1 day', Math.abs(new Date(guestClaims.expires) - new Date(guestClaims.issued) - day) < 5000);
+    check('policy: the key file names the level and the review day', autoClaims.level === 'analyst' && autoClaims.reviewed === today && guestClaims.level === 'guest');
+    check('policy: a Guest can\'t export, whatever the group says', guestClaims.groups[0].rules.export === false && autoClaims.groups[0].rules.export === true);
+    check('policy: a Guest locks after 5 idle minutes, not the group\'s 15', guestClaims.groups[0].rules.autoLockMin === 5 && autoClaims.groups[0].rules.autoLockMin === 15);
+    check('policy: a Guest gets one group only', await code(function () { return S.issueKey(signer, person('u-0001', 'guest'), [sd, ct]); }, 'policy'));
+    check('policy: a Viewer in an exporting group still can\'t export', JSON.parse((await S.issueKey(signer, person('u-0001', 'viewer'), [sd])).claims).groups[0].rules.export === false);
+    check('policy: no level, no key file', await code(function () { return S.issueKey(signer, person('u-0001', 'boss'), [sd]); }, 'policy'));
+    check('policy: never reviewed, no key file', await code(function () { return S.issueKey(signer, Object.assign({}, fern, { reviewed: undefined }), [sd]); }, 'policy'));
+    check('policy: reviewed 29 days ago still renews', !!(await S.issueKey(signer, Object.assign({}, fern, { reviewed: ago(29) }), [sd])));
+    check('policy: reviewed 32 days ago doesn\'t, until IT reviews again', await code(function () { return S.issueKey(signer, Object.assign({}, fern, { reviewed: ago(32) }), [sd]); }, 'policy'));
+    check('policy: a person\'s own last day cuts the key file short', new Date(JSON.parse((await S.issueKey(signer, Object.assign({}, fern, { expires: ago(-2) }), [sd])).claims).expires) - Date.now() < 3 * day);
+    check('policy: past their last day, no key file', await code(function () { return S.issueKey(signer, Object.assign({}, fern, { expires: ago(1) }), [sd]); }, 'policy'));
+
+    //  IT's real key signs a file that breaks the rules  (a changed console,  or a mistake):  the APP still says no
+    async function signAnyway(change) {
+        const c = JSON.parse(auto.claims); change(c);
+        const text = JSON.stringify(c);
+        const sig = await signer.sign(new TextEncoder().encode('FLGKEY4\n' + text));
+        return { flogic: 'key', v: 4, claims: text, sig: V.toB64(new Uint8Array(sig)), keys: auto.keys };
+    }
+    check('app: signed by IT but lasting 90 days is refused', await code(async function () { return S.check(await signAnyway(function (c) { c.expires = soon(90 * day).toISOString(); }), env.pinned); }, 'policy'));
+    check('app: signed by IT but with no access level is refused', await code(async function () { return S.check(await signAnyway(function (c) { delete c.level; }), env.pinned); }, 'policy'));
+    check('app: signed by IT but a Viewer who can export is refused', await code(async function () { return S.check(await signAnyway(function (c) { c.level = 'viewer'; }), env.pinned); }, 'policy'));
+    check('app: signed by IT but made after the review ran out is refused', await code(async function () { return S.check(await signAnyway(function (c) { c.reviewed = ago(40); }), env.pinned); }, 'policy'));
+    check('app: signed by IT but a 4-hour auto-lock is refused', await code(async function () { return S.check(await signAnyway(function (c) { c.groups[0].rules.autoLockMin = 240; }), env.pinned); }, 'policy'));
+    check('app: an old-format (v3) key file is refused, and says to ask IT', await code(function () { S.readKey(JSON.stringify({ flogic: 'key', v: 3, claims: '{}', sig: '', keys: { entries: [] } })); }, 'bad-version'));
 }

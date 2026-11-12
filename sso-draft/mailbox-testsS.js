@@ -12,7 +12,7 @@ async function runMailboxTests(check, env, S, Mailbox, makeMemoryFolder) {
     const signer = await S.openSigner(S.readSigner(await env.text('sso-draft/demo/demo-it.flogic-signer')), PASS);
     const ring = await S.keyringGroups(await env.text('demo-data/packs/demo-it.flogic-keyring'), PASS);
     const sd = ring.groups.find(function (g) { return g.group === 'service-desk'; });
-    const fern = ring.people.find(function (p) { return p.id === 'u-0001'; });
+    const fern = Object.assign({}, ring.people.find(function (p) { return p.id === 'u-0001'; }), { level: 'analyst', reviewed: (function (d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })(new Date()) });
 
     // ---- IT writes a filekey into the person's subfolder ----
     const root = makeMemoryFolder('Flogic keys');
@@ -53,7 +53,7 @@ async function runMailboxTests(check, env, S, Mailbox, makeMemoryFolder) {
 
     // ---- renewal through the folder ----
     await new Promise(function (r) { setTimeout(r, 20); });
-    const renewed = await S.issueKey(signer, fern, [sd], new Date(Date.now() + 14 * day));
+    const renewed = await S.issueKey(signer, fern, [sd], new Date(Date.now() + 7 * day));
     await it.putKeyFor('u-0001', JSON.stringify(renewed));
     check('renew: the person\'s page sees a newer filekey', await S.isNewer(S.readKey(await mine.getKey()), copy, env.pinned) === true);
 
