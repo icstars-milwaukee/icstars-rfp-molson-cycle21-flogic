@@ -3,7 +3,7 @@
 
         vaultI.js   -   SIGNING IN,  AND LOCK
 
-        The plan:  roaches/access-and-encryption-handoff.md.   The locks and keys:  vaultcoreI.js.
+        The locks and keys:  vaultcoreI.js.
 
         What it does:
             -  the full-screen UNLOCK CARD  (before the app shows anything)

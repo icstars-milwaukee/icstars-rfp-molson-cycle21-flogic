@@ -3,7 +3,6 @@
 
         vaultcoreI.js   -   THE LOCKS AND KEYS   (crypto + file shapes only)
 
-        The plan:  roaches/access-and-encryption-handoff.md
 
         This file has NO page and NO saving in it.  It only knows how to:
             -  make codes            (recovery codes,  setup codes:   7KQ4M-X9WTC-...)
