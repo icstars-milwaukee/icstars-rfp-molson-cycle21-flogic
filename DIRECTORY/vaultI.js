@@ -351,24 +351,38 @@
 
     // ---- KEY-FILE SIGN-IN,  THE FIRST TIME ON THIS LAPTOP:   your drive folder  (or the file itself),  then a PIN ----
 
-    let folder = null;              //  the person's drive folder  (Mailbox.openPersonal),  once connected.   Read only.
+    //  THE REMEMBERED FOLDER:   ONE PER PERSON   ('person:u-0002'),   and only ever used AFTER that person's PIN.
+    //
+    //  Before,  the laptop remembered ONE folder for everybody,  and the sign-in screen read the key file in it by itself.
+    //  So after Frank locked,  "Someone new on this laptop" read FRANK's key file from his still-connected folder and
+    //  offered whoever was at the desk a NEW PIN for Frank:  in,  as Frank,  without his PIN.   (Found in the demo run.)
+    //
+    //  Now:   -  a new person always picks their folder  (or key file)  in the browser's own window:  nothing is read by itself
+    //         -  the remembered folder is looked at only inside a PIN sign-in,  for that same person  (to pick up a renewal)
+    //         -  "Forget me"  and  "too many wrong PINs"  forget that person's folder too
+    function folderSlot(id) { return 'person:' + id; }
 
-    //  The folder this browser remembers,  if it's still allowed.   ask:  only straight after a click.
-    async function reconnect(ask) {
-        if (folder) return folder;
+    //  This person's remembered folder,  if it's still allowed.   ask:  only straight after a click.   Read only.
+    async function reconnect(ask, id) {
         if (!Mailbox.supported()) return null;
         try {
-            const h = await Mailbox.recall('person');
+            let h = await Mailbox.recall(folderSlot(id));
+            if (!h) h = await Mailbox.recall('person');             //  remembered before each person had their own
             if (!h || !await Mailbox.allowed(h, 'read', ask)) return null;
-            folder = await Mailbox.openPersonal(h);
-        } catch (e) { console.warn('Vault: the drive folder isn\'t available:', e); folder = null; }
-        return folder;
+            return await Mailbox.openPersonal(h);
+        } catch (e) { console.warn('Vault: the drive folder isn\'t available:', e); return null; }
     }
 
-    //  The key file in the folder   ->   read  (not checked yet),  or null
-    async function keyFromFolder() {
-        if (!folder) return null;
-        const t = await folder.getKey();
+    async function forgetFolder(id) {
+        for (const slot of [folderSlot(id), 'person']) {
+            try { await Mailbox.forget(slot); } catch (e) { /* nothing remembered */ }
+        }
+    }
+
+    //  The key file in a folder   ->   read  (not checked yet),  or null
+    async function keyFromFolder(f) {
+        if (!f) return null;
+        const t = await f.getKey();
         return t ? S.readKey(t) : null;
     }
 
@@ -392,13 +406,17 @@
             why.textContent = e.code && e.code !== 'cancelled' && !e.raw ? keyWords(e) : Mailbox.whyNot(e);
         }
         async function useFolder(h) {
-            folder = await Mailbox.openPersonal(h);
-            try { await Mailbox.remember(h, 'person'); } catch (e) { /* works this visit;  asks again next time */ }
-            const t = await folder.getKey();
+            const f = await Mailbox.openPersonal(h);
+            const t = await f.getKey();
             if (!t) {
-                why.textContent = 'There\'s no key file in "' + folder.name + '" yet. Pick the folder IT shared with you, or ask IT to put your key there.';
-                folder = null;
+                why.textContent = 'There\'s no key file in "' + f.name + '" yet. Pick the folder IT shared with you, or ask IT to put your key there.';
                 return;
+            }
+            //  Remember the folder under the name of the person its key file is for   (so renewals reach THEM,  after THEIR PIN)
+            let who = null;
+            try { who = JSON.parse(S.readKey(t).claims).sub; } catch (e) { who = null; }
+            if (typeof who === 'string' && Mailbox.PERSON.test(who)) {
+                try { await Mailbox.remember(h, folderSlot(who)); } catch (e) { /* works this visit;  asks again next time */ }
             }
             await take(t);
         }
@@ -445,12 +463,7 @@
                 legacyOn ? button('Set up with a credential file', setupScreen, 'vault-quiet') : null,
                 button('Open a plain file without signing in', plainMode, 'vault-quiet')].filter(Boolean));
 
-        //  A folder this browser already remembers,  still allowed:  straight to the PIN
-        reconnect(false).then(async function (f) {
-            if (!f || !box.contains(why)) return;
-            try { const k = await keyFromFolder(); if (k && box.contains(why)) { await S.check(k, TRUSTED); choosePinScreen(k); } }
-            catch (e) { if (box.contains(why)) why.textContent = keyWords(e); }
-        });
+        //  (Nothing is read from a remembered folder here:  a new person picks their own.   See THE REMEMBERED FOLDER,  above.)
     }
 
     function pinField(label, id) {
@@ -512,9 +525,10 @@
                     //  RENEWAL:  a newer key file in the drive folder replaces this one,  under the same PIN.
                     //  (Ending soon?  Then it's worth asking for the folder again.   Otherwise:  only if it's still allowed.)
                     const endingSoon = new Date(o.claims.expires) - Date.now() < P.RENEW_WHEN_DAYS_LEFT * 86400000;
-                    if (await reconnect(endingSoon)) {
+                    const theirs = await reconnect(endingSoon, copy.id);
+                    if (theirs) {
                         try {
-                            const k = await keyFromFolder();
+                            const k = await keyFromFolder(theirs);
                             if (k && await S.isNewer(k, copy, TRUSTED)) {
                                 await S.check(k, TRUSTED);
                                 const fresh = await S.claim(k, typed, TRUSTED);
@@ -536,8 +550,7 @@
                 if (e.code === 'wrong-pin') { await saveCopy(e.copy); copy = e.copy; }
                 if (e.code === 'wiped') {
                     //  Forget the folder too:  otherwise the card would just offer "pick a new PIN" to whoever is at the desk.
-                    folder = null;
-                    try { await Mailbox.forget('person'); } catch (x) { /* nothing remembered */ }
+                    await forgetFolder(copy.id);
                     await forgetCopy(copy.id);
                     lockReason = e.message;
                     startScreen();
@@ -555,6 +568,7 @@
                 forget.textContent = 'Click again to forget ' + copy.name + ' on this laptop';
                 return;
             }
+            await forgetFolder(copy.id);            //  the folder too:  a new PIN needs the folder picked again,  by whoever can reach it
             await forgetCopy(copy.id);
             startScreen();
         }, 'vault-quiet');
