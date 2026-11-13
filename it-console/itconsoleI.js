@@ -134,7 +134,10 @@ const ITConsole = (function () {
                       expires: isDay(p.expires) ? p.expires : '', made: isDay(p.made) ? p.made : '',
                       reviewed: isDay(p.reviewed) ? p.reviewed : '' };
         if (isDay(p.ended)) out.ended = p.ended;
-        if (p.key && typeof p.key.until === 'string' && !isNaN(new Date(p.key.until))) out.key = { until: p.key.until, made: isDay(p.key.made) ? p.key.made : '' };
+        if (p.key && typeof p.key.until === 'string' && !isNaN(new Date(p.key.until))) {
+            out.key = { until: p.key.until, made: isDay(p.key.made) ? p.key.made : '' };
+            if (typeof p.key.by === 'string') out.key.by = p.key.by;       //  which signing key signed it
+        }
         return out;
     }
 
@@ -443,9 +446,12 @@ const ITConsole = (function () {
     }
 
     //  Their newest key file,  from the keyring's own note.     'none'  |  'good'  |  'soon'  (renew now)  |  'ended'
-    function keyState(p, now) {
+    //  |  'replaced'  (signed with a signing key this keyring no longer uses:  the app refuses it)
+    //      signedBy   the fingerprint of the keyring's signing key today   (left out:  not checked)
+    function keyState(p, now, signedBy) {
         const t = now || new Date();
         if (!p.key || !p.key.until) return { code: 'none', words: 'No key file yet' };
+        if (signedBy && p.key.by && p.key.by !== signedBy) return { code: 'replaced', words: 'Key file no longer works (signed with the old signing key)' };
         const end = new Date(p.key.until);
         if (end <= t) return { code: 'ended', words: 'Key file ended ' + S.niceDate(end) };
         const soon = end - t < P.RENEW_WHEN_DAYS_LEFT * 86400000;
@@ -515,7 +521,7 @@ const ITConsole = (function () {
         });
         const file = await S.issueKey(s.signing, p, groups);
         const until = new Date(JSON.parse(file.claims).expires);
-        p.key = { until: until.toISOString(), made: today() };
+        p.key = { until: until.toISOString(), made: today(), by: s.signing.fingerprint };
         s.unsaved = true;
         return { person: p, file: file, text: JSON.stringify(file, null, 2), until: until };
     }
@@ -651,6 +657,9 @@ const ITConsole = (function () {
 
     function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
 
+    //  The open keyring's signing key  (its fingerprint),  or ''
+    function signedBy() { return session && session.signing ? session.signing.fingerprint : ''; }
+
     function refresh() {
         const open = session !== null;
         show('start', !open);
@@ -681,15 +690,17 @@ const ITConsole = (function () {
         const lines = [];
         if (!session.signing) lines.push(['bad', 'There\'s no signing key yet, so no key file can be made. See "Signing key" below.']);
         else if (trustProblem()) lines.push(['warn', trustProblem()]);
-        let due = 0, soon = 0, renew = 0, none = 0;
+        let due = 0, soon = 0, renew = 0, none = 0, replaced = 0;
         for (const p of session.people) {
-            const st = personState(session, p), k = keyState(p);
+            const st = personState(session, p), k = keyState(p, null, signedBy());
             if (st.code === 'review-due' || st.code === 'unreviewed') due++;
             if (st.code === 'review-soon') soon++;
             if (st.canIssue && (k.code === 'soon' || k.code === 'ended')) renew++;
             if (st.canIssue && k.code === 'none') none++;
+            if (st.canIssue && k.code === 'replaced') replaced++;
         }
         if (due) lines.push(['bad', plural(due, 'person needs', 'people need') + ' a review before they can get a new key file.']);
+        if (replaced) lines.push(['bad', plural(replaced, 'person holds', 'people hold') + ' a key file signed with the old signing key. It no longer opens the app: make each of them a new one.']);
         if (none) lines.push(['warn', plural(none, 'person has', 'people have') + ' no key file yet.']);
         if (renew) lines.push(['warn', plural(renew, 'key file', 'key files') + ' ended or about to end. "Renew everyone" makes fresh ones.']);
         if (soon) lines.push(['', plural(soon, 'review', 'reviews') + ' due within a week.']);
@@ -702,7 +713,7 @@ const ITConsole = (function () {
         const body = $('person-list');
         body.replaceChildren();
         for (const p of session.people) {
-            const st = personState(session, p), k = keyState(p), l = P.level(p.level);
+            const st = personState(session, p), k = keyState(p, null, signedBy()), l = P.level(p.level);
             const tr = el('tr');
             tr.id = 'person-' + p.id;
             if (st.code === 'ended' || st.code === 'past') tr.className = 'gone';
@@ -721,7 +732,7 @@ const ITConsole = (function () {
             const key = el('td');
             key.id = 'status-' + p.id;
             const where = inFolder.get(p.id);
-            key.appendChild(el('span', k.words.replace(/^K/, 'k').replace(/^N/, 'n'), 'state ' + (st.code === 'ended' || st.code === 'past' ? 'off' : k.code)));
+            key.appendChild(el('span', k.words.replace(/^K/, 'k').replace(/^N/, 'n'), 'state ' + (st.code === 'ended' || st.code === 'past' ? 'off' : k.code === 'replaced' ? 'ended' : k.code)));
             if (folder && where) key.appendChild(el('span', where === 'yes' ? 'in their folder' : where === 'no' ? 'not in their folder' : 'folder copy unreadable', 'where ' + where));
             tr.appendChild(key);
 
@@ -948,7 +959,7 @@ const ITConsole = (function () {
         if (!p) return;
         if (endArmed !== id) {
             endArmed = id;
-            const k = keyState(p);
+            const k = keyState(p, null, signedBy());
             say('issue-msg', 'End ' + p.name + '\'s access? No more key files for them. ' +
                 (k.code === 'good' || k.code === 'soon' ? 'The key file they hold still works until ' + S.niceDate(new Date(p.key.until)) + ': it can\'t be taken back early. ' : '') +
                 'Click "End access" again to confirm.', 'warn');
@@ -1252,8 +1263,15 @@ const ITConsole = (function () {
     //  The key this copy of the app trusts  (../DIRECTORY/it-signerI.js),  if the page loaded it.
     function appTrusts() { return typeof FLOGIC_IT_SIGNER !== 'undefined' && FLOGIC_IT_SIGNER ? FLOGIC_IT_SIGNER.fingerprint : null; }
 
+    //  The app's trust file is there,  but still the blank one it ships with:  key-file sign-in is off in the app.
+    function appTrustBlank() { return typeof FLOGIC_IT_SIGNER !== 'undefined' && !FLOGIC_IT_SIGNER; }
+
+    const TRUST_BLANK_WORDS = 'The app next to this console has no trust file yet, so nobody can sign in to it with a key file. ' +
+                              'Download the trust file and put it in DIRECTORY/, in place of it-signerI.js.';
+
     function trustProblem() {
         if (!session || !session.signing) return '';
+        if (appTrustBlank()) return TRUST_BLANK_WORDS + ' See "Signing key" below.';
         const app = appTrusts();
         if (app === null || app === session.signing.fingerprint) return '';
         return 'The app next to this console trusts a different signing key (' + app + '). Key files made here won\'t open in it until ' +
@@ -1268,6 +1286,7 @@ const ITConsole = (function () {
         if (!has) return;
         $('signer-print').textContent = session.signing.fingerprint;
         const app = appTrusts();
+        if (appTrustBlank()) { say('signer-trust', TRUST_BLANK_WORDS, 'warn'); return; }
         say('signer-trust', app === null ? '' : app === session.signing.fingerprint
             ? 'The app next to this console trusts this key.' : 'The app next to this console trusts ' + app + ', not this key. Download the trust file and put it in DIRECTORY/.',
             app === session.signing.fingerprint ? 'good' : 'warn');
@@ -1432,6 +1451,9 @@ const ITConsole = (function () {
         });
         $('open-btn').addEventListener('click', onOpen);
         $('new-btn').addEventListener('click', onNew);
+        //  Enter in a passphrase box  =  its button   (not while it's already working)
+        $('open-pass').addEventListener('keydown', function (e) { if (e.key === 'Enter' && !$('open-btn').disabled) { e.preventDefault(); onOpen(); } });
+        $('new-pass2').addEventListener('keydown', function (e) { if (e.key === 'Enter' && !$('new-btn').disabled) { e.preventDefault(); onNew(); } });
         $('save-btn').addEventListener('click', onSave);
         $('lock-btn').addEventListener('click', onLock);
         $('g-add').addEventListener('click', onGroupSave);
