@@ -482,6 +482,9 @@ async function countTiles(isCurrent) {
 function dayOf(text) {
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(text).trim());
     if (m) return m[1] + '-' + m[2] + '-' + m[3];
+    //  Written the everyday way  (3/15/06,  15-Mar-2006)?   Read it exactly as the query engine does  (queryI.js:  writtenIso),
+    //  so a tile and an answer never disagree about the year of  12/31/99.
+    if (typeof writtenIso === 'function') { const iso = writtenIso(String(text)); if (iso !== null) return iso; }
     const t = Date.parse(text);
     if (isNaN(t)) return null;
     const d = new Date(t);
@@ -1003,7 +1006,12 @@ function exportCheck() {
     if (v === null) return { ok: true };
     try {
         if (typeof v.state === 'function' && v.state() === 'locked') return { ok: false, why: 'Locked' };
-        if (v.canExport() !== true) return { ok: false, why: 'Your group can\'t export' };
+        if (v.canExport() !== true) {
+            //  The vault knows WHY  (the group's rule,  or the person's access level:  "A Viewer can't export")
+            let why = '';
+            try { why = typeof v.whyNoExport === 'function' ? String(v.whyNoExport() || '') : ''; } catch (e) { why = ''; }
+            return { ok: false, why: why || 'Your group can\'t export' };
+        }
         return { ok: true };
     } catch (problem) {
         console.warn('Dashboard: the vault couldn\'t say if exporting is allowed, so Export stays off.', problem);

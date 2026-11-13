@@ -96,6 +96,17 @@
             const g = groupOf(pack.group);
             return g !== null && g.rules.export === true;
         },
+        //  WHY exporting is off right now,  in a few words   ('':  it isn't off).
+        //  A LEVEL that can't export  (Guest,  Viewer)  is said as the level's rule:  the group may well allow it.
+        whyNoExport: function () {
+            if (state === 'locked') return 'Locked';
+            if (state !== 'unlocked' || pack === null) return '';
+            const g = groupOf(pack.group);
+            if (g !== null && g.rules.export === true) return '';
+            const l = me.level && P !== null ? P.level(me.level) : null;
+            if (l && !l.can.export) return 'A ' + l.label + ' can\'t export';
+            return (g ? g.label : pack.label) + ' can\'t export';
+        },
         stamp: function () {
             if (state !== 'unlocked' || pack === null) return '';
             const g = groupOf(pack.group);
@@ -855,8 +866,11 @@
         if (e.target !== queryExport || window.FlogicVault.canExport()) return;
         e.stopImmediatePropagation();
         e.preventDefault();
-        const g = pack !== null ? pack.label : 'your group';
-        if (typeof setQueryStatus === 'function') setQueryStatus(g + ' can\'t export.  (IT sets this for each group.)', true);
+        const l = me !== null && me.level && P !== null ? P.level(me.level) : null;
+        const why = window.FlogicVault.whyNoExport() || 'Your group can\'t export';
+        if (typeof setQueryStatus === 'function') {
+            setQueryStatus(why + '.  (' + (l && !l.can.export ? 'IT sets each person\'s access level.' : 'IT sets this for each group.') + ')', true);
+        }
     }, true);
 
 

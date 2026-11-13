@@ -137,6 +137,13 @@ body.vault-up { overflow: hidden; }
     max-width: calc(100vw - 24px);
 }
 
+/*  The bar floats over the bottom-left corner,  so the page keeps a strip free under it:
+      scroll-padding   when the browser brings a button into view  (Tab,  a search hit),  it stops ABOVE the bar
+      padding-bottom   the last thing on the page can always be scrolled clear of it
+    (Found in the demo run:  the bar sat on top of "← Back to file" and "Drag mode".)  */
+html { scroll-padding-bottom: 64px; }
+body { padding-bottom: 56px; }
+
 #vaultBar[hidden],
 body.focus #vaultBar { display: none; }
 
