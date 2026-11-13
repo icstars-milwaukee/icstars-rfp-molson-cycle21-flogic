@@ -178,6 +178,10 @@ const SignInCore = (function (VaultCore, FlogicPolicy) {
         return k;
     }
 
+    //  Said when the key file was signed by another key than the one this app trusts.   (The usual cause:  IT replaced
+    //  its signing key,  so every older key file stopped working.   The person can't fix that:  IT makes a new one.)
+    const WRONG_ISSUER = 'This key file wasn\'t made by the IT signing key this app trusts. Ask IT for a new key file.';
+
     //  Signature,  issuer,  the built-in rules,  and that the claims match these keys.   ->  the claims      (no end-date check:  see check)
     async function verify(claimsText, sig, keys, pinned) {
         const key = await trustedKey(pinned);
@@ -186,10 +190,10 @@ const SignInCore = (function (VaultCore, FlogicPolicy) {
         let c = null;
         try { c = JSON.parse(claimsText); } catch (e) { /* fall through */ }
         if (!ok) {
-            if (c && c.iss && c.iss !== pinned.fingerprint) throw fail('wrong-issuer', 'This key file wasn\'t made by this company\'s IT.');
+            if (c && c.iss && c.iss !== pinned.fingerprint) throw fail('wrong-issuer', WRONG_ISSUER);
             throw fail('bad-signature', 'This key file has been changed since IT made it.');
         }
-        if (c.iss !== pinned.fingerprint) throw fail('wrong-issuer', 'This key file wasn\'t made by this company\'s IT.');
+        if (c.iss !== pinned.fingerprint) throw fail('wrong-issuer', WRONG_ISSUER);
         const broken = FlogicPolicy.claimsProblem(c);                     //  signed by IT,  and still not allowed
         if (broken) throw fail('policy', broken);
         if (keys && await hashText(JSON.stringify(keys)) !== c.keys) throw fail('damaged', 'This key file\'s keys don\'t match it.');
