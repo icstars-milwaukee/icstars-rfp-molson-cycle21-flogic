@@ -1102,9 +1102,75 @@ function dateMs(v) {
     return ms;
 }
 
+//  ---- WRITTEN DATES:   how people  (and Excel)  write them ----
+//
+//      3/15/06      3/15/2006      15-Mar-2006      15 March 06      Mar 15, 2006
+//
+//  Slashes are read the US way  (month / day / year).   Only when that can't be  (the first number is over 12,
+//  like 15/3/2006)  is it read day first.
+//
+//  A 2-DIGIT YEAR  is read the way Excel reads one:    00 to 29  ->  2000 to 2029       30 to 99  ->  1930 to 1999
+//  (So  12/31/99  is 1999,  and  01/01/00  is 2000:  the day after.   Never 1900,  never 2099.)
+//
+//  The engine turns these into the standard words  (2006-03-15),  so they sort,  compare and count like any date.
+const DATE_SLASH = /^\s*(\d{1,2})\/(\d{1,2})\/(\d{4}|\d{2})\s*$/;
+const DATE_NAMED = /^\s*(\d{1,2})[- ]([A-Za-z]{3,9})\.?[- ,]\s*(\d{4}|\d{2})\s*$/;      //  15-Mar-2006    15 March 06
+const DATE_NAMED_US = /^\s*([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})\s*$/;             //  Mar 15, 2006
+const MONTH_NAMES = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+const TWO_DIGIT_YEAR_SPLIT = 30;             //  under this:  20xx.    From this on:  19xx.    (Excel's own rule)
+
+function fullYear(words) {
+    const n = Number(words);
+    return words.length === 4 ? n : n < TWO_DIGIT_YEAR_SPLIT ? 2000 + n : 1900 + n;
+}
+
+//  'mar'  'March'  'sept'   ->   3,  3,  9      (0:  not a month)
+function monthNumber(word) {
+    const w = word.toLowerCase();
+    for (let k = 0; k < 12; k++) if (MONTH_NAMES[k].indexOf(w) === 0) return k + 1;
+    return 0;
+}
+
+//  A written date   ->   [year, month, day]      (null:  it isn't one.   The standard  2006-03-15  isn't "written":  see readDate.)
+function writtenDate(s) {
+    if (typeof s !== 'string' || s.length < 6 || s.length > 24) return null;
+    let year, month, day;
+    let m = DATE_SLASH.exec(s);
+    if (m !== null) {
+        month = +m[1]; day = +m[2]; year = fullYear(m[3]);
+        if (month > 12 && day <= 12) { const swap = month; month = day; day = swap; }      //  15/3/2006:  it can only be day first
+    } else if ((m = DATE_NAMED.exec(s)) !== null) {
+        day = +m[1]; month = monthNumber(m[2]); year = fullYear(m[3]);
+    } else if ((m = DATE_NAMED_US.exec(s)) !== null) {
+        month = monthNumber(m[1]); day = +m[2]; year = +m[3];
+    } else {
+        return null;
+    }
+    if (month < 1 || month > 12 || day < 1) return null;
+    if (day > new Date(Date.UTC(year, month, 0)).getUTCDate()) return null;                //  no Feb 30
+    return [year, month, day];
+}
+
+//  '3/15/06'  ->  '2006-03-15'      (null:  not a written date)
+function writtenIso(s) {
+    const d = writtenDate(s);
+    return d === null ? null : pad(d[0], 4) + '-' + pad(d[1], 2) + '-' + pad(d[2], 2);
+}
+
+//  Words next to a DATE,  written the everyday way   ->   the standard words     WHERE Start > '3/1/06'   ->   > '2006-03-01'
+//  (Anything else:  the same node,  untouched.)
+function dateLiteral(node, otherTy) {
+    if (node.t !== 'lit' || typeof node.v !== 'string' || !(otherTy === 'date' || otherTy === 'timestamp')) return node;
+    const iso = writtenIso(node.v);
+    return iso === null ? node : { t: 'lit', v: iso, ty: 'text' };
+}
+
 function readDate(s) {
     const m = DATE_WORDS.exec(s);
-    if (m === null) return null;
+    if (m === null) {
+        const w = writtenDate(s);
+        return w === null ? null : utc(w[0], w[1] - 1, w[2]);
+    }
     const year = +m[1], month = +m[2], day = +m[3];
     if (month < 1 || month > 12 || day < 1 || day > 31) return null;
     const ms = utc(year, month - 1, day, +(m[4] || 0), +(m[5] || 0), +(m[6] || 0), m[7] ? Math.round(Number(m[7]) * 1000) : 0);
@@ -1792,6 +1858,7 @@ function* lookAtKinds(table, only) {
     if (!table.kinds) {
         table.kinds = new Array(width);                 //  (undefined  =  not worked out yet)
         table.looks = new Array(width).fill(null);
+        table.written = new Array(width).fill(false);   //  a DATE column whose cells are written the everyday way  (3/15/06):  see writtenDate
     }
     const kindsOut = table.kinds, looksOut = table.looks;
 
@@ -1815,6 +1882,8 @@ function* lookAtKinds(table, only) {
     const canReal = new Array(m).fill(true);
     const canDate = new Array(m).fill(true);
     const canTime = new Array(m).fill(true);
+    const canWritten = new Array(m).fill(true);         //  every cell a date,  written the standard way OR the everyday way  (3/15/06,  15-Mar-2006)?
+    const sawWritten = new Array(m).fill(false);        //  ...and at least one of them the everyday way
     const canLook = new Array(m).fill(true);            //  every cell a number,  some with a look  ($116,450.00)?
     const looks = new Array(m).fill(null);
     const anything = new Array(m).fill(false);
@@ -1840,6 +1909,10 @@ function* lookAtKinds(table, only) {
             if (canReal[k] && !CELL_REAL.test(v)) canReal[k] = false;
             if (canDate[k] && !CELL_DATE.test(v)) canDate[k] = false;
             if (canTime[k] && !CELL_TIME.test(v) && !CELL_DATE.test(v)) canTime[k] = false;
+            if (canWritten[k] && !CELL_DATE.test(v)) {
+                if (writtenDate(v) === null) canWritten[k] = false;
+                else sawWritten[k] = true;
+            }
             if (canLook[k] && !CELL_REAL.test(v)) {                 //  (a plain number fits a money column too:  0,  1200)
                 const L = lookOf(v);
                 const was = looks[k];
@@ -1863,8 +1936,10 @@ function* lookAtKinds(table, only) {
             : money ? (looks[k].places > 0 ? 'real' : 'int')
             : canDate[k] ? 'date'
             : canTime[k] ? 'timestamp'
+            : canWritten[k] && sawWritten[k] ? 'date'
             : 'text';
         looksOut[todo[k]] = money ? looks[k] : null;
+        table.written[todo[k]] = kindsOut[todo[k]] === 'date' && !canDate[k];
     }
 }
 
@@ -2057,7 +2132,8 @@ function cx(node, scope, ctx) {
         case 'cmp': {
             let A = cx(node.a, scope, ctx), B = cx(node.b, scope, ctx);
             //  Money words against a number:   salary > '$100,000'   ->   salary > 100000
-            const la = lookLiteral(node.a, B.ty), lb = lookLiteral(node.b, A.ty);
+            //  ...and a date written the everyday way against a date:   Start > '3/1/06'   ->   Start > '2006-03-01'
+            const la = dateLiteral(lookLiteral(node.a, B.ty), B.ty), lb = dateLiteral(lookLiteral(node.b, A.ty), A.ty);
             if (la !== node.a) A = cx(la, scope, ctx);
             if (lb !== node.b) B = cx(lb, scope, ctx);
             const a = A.f, b = B.f;
@@ -2126,7 +2202,7 @@ function cx(node, scope, ctx) {
 
         case 'between': {
             const E = cx(node.e, scope, ctx);
-            const e = E.f, lo = cx(lookLiteral(node.lo, E.ty), scope, ctx).f, hi = cx(lookLiteral(node.hi, E.ty), scope, ctx).f, not = node.not;
+            const e = E.f, lo = cx(dateLiteral(lookLiteral(node.lo, E.ty), E.ty), scope, ctx).f, hi = cx(dateLiteral(lookLiteral(node.hi, E.ty), E.ty), scope, ctx).f, not = node.not;
             return { f: function (row, env) {
                 const x = e(row, env);
                 if (x === null) return null;
@@ -2144,7 +2220,7 @@ function cx(node, scope, ctx) {
         case 'in': {
             const E = cx(node.e, scope, ctx);
             const e = E.f;
-            const list = node.list.map(function (item) { return cx(lookLiteral(item, E.ty), scope, ctx).f; });
+            const list = node.list.map(function (item) { return cx(dateLiteral(lookLiteral(item, E.ty), E.ty), scope, ctx).f; });
             const not = node.not;
             return { f: function (row, env) {
                 if (list.length === 0) return not;
@@ -2771,6 +2847,7 @@ function tableSource(table, alias) {
             for (let j = 0; j < width; j++) if (cols[j].used) used.push(j);
             const numeric = used.map(function (j) { const k = kindAt(table, j); return k === 'int' || k === 'real' || k === 'num'; });
             const looked  = used.map(function (j) { return lookAt(table, j) !== null; });     //  money:  $116,450.00  ->  116450
+            const dated   = used.map(function (j) { kindAt(table, j); return !!(table.written && table.written[j]); });    //  dates:  3/15/06  ->  2006-03-15
             const isNull = table.isNull || null;
             const emptyIsNull = table.emptyIsNull !== false;
             const n = table.rowCount;
@@ -2784,6 +2861,8 @@ function tableSource(table, alias) {
             function empty(i, j) { return (isNull !== null && isNull(i, j)) || (isNull === null && emptyIsNull) ? null : ''; }
             //  Money:  $116,450.00  ->  116450   (a cell that doesn't fit stays as words)
             function money(s) { const L = lookOf(s); return L === null ? s : L.n; }
+            //  A written date:  3/15/06  ->  2006-03-15   (a cell that isn't one stays as it is)
+            function written(s) { const iso = writtenIso(s); return iso === null ? s : iso; }
 
             //  The WHERE's own columns,  and the rest
             let preU = null, restU = null, preUpTo = 0;
@@ -2818,7 +2897,7 @@ function tableSource(table, alias) {
                         cells = cutPre ? table.rowUpTo(i, testTo) : table.row(i);
                         for (let k = 0; k < nPre; k++) {
                             const u = preU[k], j = used[u], s = cells[j];
-                            scratch[j] = s === undefined ? null : s === '' ? empty(i, j) : numeric[u] && CELL_REAL.test(s) ? Number(s) : looked[u] ? money(s) : s;
+                            scratch[j] = s === undefined ? null : s === '' ? empty(i, j) : numeric[u] && CELL_REAL.test(s) ? Number(s) : looked[u] ? money(s) : dated[u] ? written(s) : s;
                         }
                     }
                     if (!truthy(pre.test(scratch, env))) continue;                 //  doesn't pass:  the rest is never cut
@@ -2830,7 +2909,7 @@ function tableSource(table, alias) {
                         work += upTo;
                         for (let k = 0; k < nRest; k++) {
                             const u = restU[k], j = used[u], s = cells[j];
-                            row[j] = s === undefined ? null : s === '' ? empty(i, j) : numeric[u] && CELL_REAL.test(s) ? Number(s) : looked[u] ? money(s) : s;
+                            row[j] = s === undefined ? null : s === '' ? empty(i, j) : numeric[u] && CELL_REAL.test(s) ? Number(s) : looked[u] ? money(s) : dated[u] ? written(s) : s;
                         }
                     }
                     if (!sink(row)) return;
@@ -2843,7 +2922,7 @@ function tableSource(table, alias) {
                     const cells = cutAll ? table.rowUpTo(i, upTo) : table.row(i);
                     for (let u = 0; u < nUsed; u++) {
                         const j = used[u], s = cells[j];
-                        row[j] = s === undefined ? null : s === '' ? empty(i, j) : numeric[u] && CELL_REAL.test(s) ? Number(s) : looked[u] ? money(s) : s;
+                        row[j] = s === undefined ? null : s === '' ? empty(i, j) : numeric[u] && CELL_REAL.test(s) ? Number(s) : looked[u] ? money(s) : dated[u] ? written(s) : s;
                     }
                 }
                 if (!sink(row)) return;
