@@ -291,6 +291,7 @@ const ITConsole = (function () {
     async function packFile(s, fileName, bytes, groupId, made) {
         const problem = packProblem(fileName);
         if (problem) throw fail('bad-pack', problem);
+        if (!bytes || !(bytes.byteLength > 0)) throw fail('bad-pack', '"' + fileName + '" is empty (0 bytes), so there\'s nothing to pack.');
         const g = s.groups.find(function (x) { return x.group === groupId; });
         if (!g) throw fail('bad-pack', 'Pick a group first.');
         //  groupLabel:  so the app can say "This pack is for Change Team"  before it has a key   (DJ's V4 request)
