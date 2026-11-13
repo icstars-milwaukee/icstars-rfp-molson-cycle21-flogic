@@ -204,9 +204,20 @@ const SignInCore = (function (VaultCore, FlogicPolicy) {
         }
         return c;
     }
+    //  Is the key file usable RIGHT NOW,  by this computer's clock?
+    //  A key file made in "the future"  (more than a day ahead of this computer)  means the COMPUTER's date is wrong
+    //  (a laptop whose clock says 2006).   That's said in plain words:  it's the person's to fix,  not IT's.
+    const CLOCK_SLACK = 86400000;                //  a day:  time zones,  and clocks that are a little off
+
     function notEnded(c, now) {
+        const t = now || new Date();
+        const made = new Date(c.issued);
+        if (!isNaN(made) && made - t > CLOCK_SLACK) {
+            throw fail('clock', 'Your computer\'s date looks wrong. It says today is ' + niceDay(t) + ', but this key file was made on ' + niceDay(made) +
+                                '. Set the date and time on this computer, then try again.');
+        }
         const end = new Date(c.expires);
-        if (isNaN(end) || end <= (now || new Date())) throw fail('expired', 'Your access ended on ' + niceDate(end) + '. IT renews it in your drive.');
+        if (isNaN(end) || end <= t) throw fail('expired', 'Your access ended on ' + niceDate(end) + '. IT renews it in your drive.');
     }
 
     //  The whole check of a filekey from the drive.   ->  the claims
@@ -282,6 +293,10 @@ const SignInCore = (function (VaultCore, FlogicPolicy) {
 
     function niceDate(d) {
         return isNaN(d) ? 'an unknown date' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    }
+    //  The day only:   Mar 15, 2006
+    function niceDay(d) {
+        return isNaN(d) ? 'an unknown date' : d.toLocaleDateString(undefined, { dateStyle: 'medium' });
     }
 
 
