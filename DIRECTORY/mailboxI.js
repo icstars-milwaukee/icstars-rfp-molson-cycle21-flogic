@@ -30,6 +30,7 @@ const Mailbox = (function () {
     'use strict';
 
     const KEY_FILE = 'flogic.flogic-key';
+    const STAMP_FILE = 'flogic-keyring.stamp';                   //  in IT's folder only:  which save of the keyring is the newest
     const PERSON = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;           //  a keyring person id,  e.g.  u-0001
     const MAX_FILE = 256 * 1024;
     const MAX_LISTED = 2000;
@@ -156,6 +157,17 @@ const Mailbox = (function () {
                 const sub = await tryHandle(function () { return root.getDirectoryHandle(mustBePerson(id)); });
                 if (!sub) return null;
                 const h = await tryHandle(function () { return sub.getFileHandle(KEY_FILE); });
+                return h ? readText(h) : null;
+            },
+            //  THE KEYRING'S STAMP:  one small file next to the subfolders,  saying which save of IT's keyring is the newest.
+            //  (No key,  no name:  a number and a date.   IT's console reads it so two IT people don't overwrite each other.)
+            putStamp: async function (text) {
+                const h = await root.getFileHandle(STAMP_FILE, { create: true });
+                const w = await h.createWritable();
+                try { await w.write(text); } finally { await w.close(); }
+            },
+            getStamp: async function () {
+                const h = await tryHandle(function () { return root.getFileHandle(STAMP_FILE); });
                 return h ? readText(h) : null;
             },
             //  ->  the person ids that have a subfolder  (odd names ignored)

@@ -84,11 +84,15 @@ const ITConsole = (function () {
     //          unsaved }                      true after a change,  until Save
     // ------------------------------------------------------
 
+    //  SAVES ARE COUNTED.   rev:  how many times this keyring has been saved.   ring:  a random name for the keyring itself.
+    //  Neither is secret.   They let the page notice "someone else saved a newer copy"  (see THE KEYRING'S STAMP,  below).
+    function newRingId() { return VaultCore.toB64(crypto.getRandomValues(new Uint8Array(9))); }
+
     async function newKeyring(passphrase) {
         const problem = VaultCore.passphraseProblem(passphrase);
         if (problem) throw fail('weak-passphrase', problem);
         return { groups: [], people: [], packs: [], keys: {}, check: await VaultCore.newGroupKey(),
-                 signer: null, signing: null, passphrase: passphrase, unsaved: true };
+                 signer: null, signing: null, passphrase: passphrase, unsaved: true, rev: 0, ring: newRingId() };
     }
 
 
@@ -175,6 +179,8 @@ const ITConsole = (function () {
             signing: signing,
             passphrase: passphrase,
             unsaved: false,
+            rev: Number.isInteger(k.rev) && k.rev > 0 ? k.rev : 0,
+            ring: typeof k.ring === 'string' ? k.ring : '',
             upgraded: !(k.v >= KEYRING_VERSION),         //  an older keyring:  the page says what changed
         };
     }
@@ -185,7 +191,7 @@ const ITConsole = (function () {
         const keys = s.groups.map(function (g) { return { group: g.group, keyVersion: g.keyVersion, key: s.keys[g.group].key }; });
         keys.push({ group: CHECK_ID, keyVersion: 1, key: s.check });
         const locked = await VaultCore.lockKeys(KEYRING_PERSON, keys, s.passphrase);
-        return JSON.stringify({ flogic: 'keyring', v: KEYRING_VERSION, groups: s.groups, people: s.people,
+        return JSON.stringify({ flogic: 'keyring', v: KEYRING_VERSION, rev: s.rev || 0, ring: s.ring || '', groups: s.groups, people: s.people,
                                 packs: s.packs || [], signer: s.signer || null, locked: locked }, null, 2);
     }
 
@@ -630,6 +636,7 @@ const ITConsole = (function () {
     function markUnsaved() {
         session.unsaved = true;
         lockArmed = false;
+        saveArmed = false;
         refresh();
     }
 
@@ -689,6 +696,7 @@ const ITConsole = (function () {
         const list = $('todo');
         list.replaceChildren();
         const lines = [];
+        if (newerStamp && stampIsNewer(newerStamp)) lines.push(['bad', newerWords(newerStamp)]);
         if (!session.signing) lines.push(['bad', 'There\'s no signing key yet, so no key file can be made. See "Signing key" below.']);
         else if (trustProblem()) lines.push(['warn', trustProblem()]);
         let due = 0, soon = 0, renew = 0, none = 0, replaced = 0;
@@ -703,7 +711,7 @@ const ITConsole = (function () {
         if (due) lines.push(['bad', plural(due, 'person needs', 'people need') + ' a review before they can get a new key file.']);
         if (replaced) lines.push(['bad', plural(replaced, 'person holds', 'people hold') + ' a key file signed with the old signing key. It no longer opens the app: make each of them a new one.']);
         if (none) lines.push(['warn', plural(none, 'person has', 'people have') + ' no key file yet.']);
-        if (renew) lines.push(['warn', plural(renew, 'key file', 'key files') + ' ended or about to end. "Renew everyone" makes fresh ones.']);
+        if (renew) lines.push(['warn', plural(renew, 'key file', 'key files') + ' ended or about to end. "Renew everyone" makes fresh ones (a Guest\'s is renewed by name).']);
         if (soon) lines.push(['', plural(soon, 'review', 'reviews') + ' due within a week.']);
         if (session.upgraded) lines.push(['warn', 'This keyring is from an older console. Everyone starts as a Guest, not reviewed: set each person\'s level, then save.']);
         if (lines.length === 0) lines.push(['good', session.people.length ? 'Nothing needs doing today.' : 'Start with a group, then add a person.']);
@@ -849,6 +857,65 @@ const ITConsole = (function () {
         show('connect-folder', false);
         show('folder-drop', false);
         say('folder-status', 'Connected: "' + folder.name + '". Key files go into each person\'s subfolder.', 'good');
+        lookAtStamp();
+    }
+
+
+    // ------------------------------------------------------
+    //    THE KEYRING'S STAMP      two IT people,  one keyring file:  don't let one save silently undo the other's
+    //
+    //    The keyring is saved as a download,  so the page can't see the file on the drive.   What it CAN see is IT's
+    //    Flogic folder.   So each save leaves a small stamp there:   { rev  (which save),  saved  (when),  ring  (which keyring) }.
+    //    Before a save,  and when the folder is connected,  the page reads it.   A stamp from a LATER save than the copy
+    //    that's open means someone else saved in between:  the page says so,  and Save has to be clicked twice.
+    //    It only warns.   It doesn't merge.   No folder connected:  no check.
+    // ------------------------------------------------------
+
+    let newerStamp = null;          //  the stamp of a newer save than the open copy,  or null
+    let saveArmed = false;          //  Save over a newer copy:  the first click warns,  the second one saves
+
+    async function readStamp() {
+        if (!folder || typeof folder.getStamp !== 'function') return null;
+        try {
+            const t = await folder.getStamp();
+            const o = t ? JSON.parse(t) : null;
+            return o && o.flogic === 'keyring-stamp' && Number.isInteger(o.rev) ? o : null;
+        } catch (e) { return null; }
+    }
+
+    //  Is that stamp from a later save of THIS keyring?
+    function stampIsNewer(stamp) {
+        if (!stamp || !session) return false;
+        if (stamp.ring && session.ring && stamp.ring !== session.ring) return false;       //  another keyring's stamp
+        return stamp.rev > (session.rev || 0);
+    }
+
+    function newerWords(stamp) {
+        const when = new Date(stamp.saved);
+        return 'Someone saved a newer copy of this keyring' + (isNaN(when) ? '' : ' on ' + S.niceDate(when)) +
+               ' (save ' + stamp.rev + '; the copy open here is save ' + (session.rev || 0) + '). ' +
+               'Saving this copy would undo their changes. Open the newest keyring file and make your changes there.';
+    }
+
+    async function lookAtStamp() {
+        const mine = session;
+        const stamp = await readStamp();
+        if (session !== mine || !session) return;
+        newerStamp = stampIsNewer(stamp) ? stamp : null;
+        if (newerStamp) say('keyring-msg', newerWords(newerStamp), 'bad');
+        drawTodo();
+    }
+
+    //  The folder already holds a key file under this person's id,  made out to a DIFFERENT name?
+    //  (Two copies of the keyring each hand out "the next id",  so two people can end up with the same one.)
+    //  ->  that other name,  or ''
+    async function folderHoldsAnother(p) {
+        if (!folder) return '';
+        try {
+            const t = await folder.getKeyFor(p.id);
+            const c = t ? JSON.parse(JSON.parse(t).claims) : null;
+            return c && typeof c.name === 'string' && c.name !== p.name ? c.name : '';
+        } catch (e) { return ''; }
     }
 
     async function reconnect() {
@@ -918,7 +985,19 @@ const ITConsole = (function () {
                '. Put it in their drive folder, shared with them only. Never email it.';
     }
 
+    let clashArmed = null;          //  a key file for another name is in the folder:  the first click warns,  the second one replaces it
+
     async function onMakeKey(id, button) {
+        const who = session.people.find(function (x) { return x.id === id; });
+        const other = who ? await folderHoldsAnother(who) : '';
+        if (other && clashArmed !== id) {
+            clashArmed = id;
+            say('issue-msg', 'Stop: the folder ' + id + ' already holds a key file for "' + other + '", not ' + who.name + '. ' +
+                'Another copy of this keyring may have given the id ' + id + ' to someone else. Check with your team before going on. ' +
+                'If ' + who.name + ' was only renamed, click the button again to replace it.', 'bad');
+            return;
+        }
+        clashArmed = null;
         await busy(button, 'issue-msg', async function () {
             const made = await makeKeyFile(session, id);
             const words = await deliver(made);
@@ -935,6 +1014,8 @@ const ITConsole = (function () {
         const left = plan.skip.map(function (x) { return x.why; });
         await busy($('renew-all'), 'issue-msg', async function () {
             for (const p of plan.renew) {
+                const other = await folderHoldsAnother(p);
+                if (other) { left.push(p.name + ': their folder (' + p.id + ') holds a key file for "' + other + '". Renew them by name, to check.'); continue; }
                 try { await deliver(await makeKeyFile(session, p.id)); renewed++; }
                 catch (e) { left.push(p.name + ': ' + e.message); }
             }
@@ -1331,6 +1412,9 @@ const ITConsole = (function () {
         keyringName = name;
         lockArmed = false;
         endArmed = null;
+        clashArmed = null;
+        saveArmed = false;
+        newerStamp = null;
         inFolder = new Map();
         $('open-pass').value = '';
         $('new-pass').value = '';
@@ -1389,12 +1473,39 @@ const ITConsole = (function () {
 
     async function onSave() {
         await busy($('save-btn'), 'keyring-msg', async function () {
-            const text = await keyringText(session);
+            //  Did someone else save since this copy was opened?   (Only known while IT's folder is connected.)
+            const stamp = await readStamp();
+            if (stampIsNewer(stamp) && !saveArmed) {
+                saveArmed = true;
+                newerStamp = stamp;
+                say('keyring-msg', newerWords(stamp) + ' (To save this copy anyway, click "Save keyring" again.)', 'bad');
+                drawTodo();
+                return;
+            }
+            const was = session.rev || 0;
+            const sameRing = stamp && (!stamp.ring || !session.ring || stamp.ring === session.ring);
+            if (!session.ring) session.ring = newRingId();
+            session.rev = Math.max(was, sameRing ? stamp.rev : 0) + 1;
+            let text;
+            try { text = await keyringText(session); }
+            catch (e) { session.rev = was; throw e; }
             download(keyringName, new Blob([text], { type: 'application/json' }));
+            let stamped = !folder;
+            if (folder && typeof folder.putStamp === 'function') {
+                try {
+                    await folder.putStamp(JSON.stringify({ flogic: 'keyring-stamp', rev: session.rev, saved: new Date().toISOString(), ring: session.ring }));
+                    stamped = true;
+                } catch (e) { console.warn('Flogic IT: the keyring stamp couldn\'t be written to the folder:', e); }
+            }
             session.unsaved = false;
             session.upgraded = false;
             lockArmed = false;
-            say('keyring-msg', 'Saved ' + keyringName + '. Keep it, and its passphrase, somewhere safe.', 'good');
+            saveArmed = false;
+            newerStamp = null;
+            say('keyring-msg', 'Saved ' + keyringName + ' (save ' + session.rev + '). Keep it, and its passphrase, somewhere safe.' +
+                (folder ? (stamped ? '' : ' The folder couldn\'t be told about this save, so a teammate won\'t be warned if they save an older copy.')
+                        : ' If more than one person edits this keyring, connect IT\'s Flogic folder first: without it, nobody is warned when one save undoes another.'),
+                stamped && folder ? 'good' : folder ? 'warn' : 'good');
             refresh();
         });
     }
@@ -1407,6 +1518,9 @@ const ITConsole = (function () {
         folderLook++;
         lockArmed = false;
         endArmed = null;
+        clashArmed = null;
+        saveArmed = false;
+        newerStamp = null;
         keyringName = 'it.flogic-keyring';
         $('open-file').value = '';
         say('keyring-msg', '');
