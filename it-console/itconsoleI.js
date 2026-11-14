@@ -1127,7 +1127,12 @@ const ITConsole = (function () {
                 const p = editPerson(session, editingPerson, who);
                 resetPersonForm();
                 markUnsaved();
-                say('person-msg', 'Changed ' + p.name + '. Make them a new key file so it reaches them, then save the keyring.', 'good');
+                //  The key file they already hold is still good?   Then say so:  the app goes on believing it until it ends.
+                const held = keyState(p, null, signedBy());
+                const still = held.code === 'good' || held.code === 'soon'
+                    ? ' Until then, a laptop they already use may keep their old level and groups: the key file they hold is good until ' +
+                      S.niceDate(new Date(p.key.until)) + ' and can\'t be taken back early.' : '';
+                say('person-msg', 'Changed ' + p.name + '. Make them a new key file so it reaches them, then save the keyring.' + still, still ? 'warn' : 'good');
                 return;
             }
             const p = addPerson(session, who);
