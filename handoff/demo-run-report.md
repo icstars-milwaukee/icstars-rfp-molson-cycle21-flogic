@@ -25,7 +25,7 @@
 - **The folder picker.** Playwright can't drive it, and I had no computer-use tool. I answered the native "Select Folder" window and Edge's own "Allow" prompt through their own controls with Windows UI Automation, scoped to the test browser's process. So the folder steps ran on real folder handles, but **no hand clicked the picker**. Treat them as tested, with that caveat.
 - **Drag-and-drop of a folder: not tested. Needs a human.** (Both pages.)
 - **Clocks.** `page.clock.install` before the page loads, then `fastForward`.
-- **Where the evidence is.** Screenshots, downloads and the step-by-step log are in the scratch folder on Fernando's machine, not in the repo: `%LOCALAPPDATA%\Temp\claude\…\scratchpad\demo\` (`shots\`, `downloads\`, `final.log`). The stand-in for the shared drive is `Documents\flogic-demo-run\` (Edge refuses folders under AppData). Ask Fernando if you want the screenshots committed.
+- **Where the evidence is.** Screenshots, downloads and the step-by-step log are in the scratch folder on Fernando's machine, not in the repo: `%LOCALAPPDATA%\Temp\claude\…\scratchpad\demo\` (`shots\`, `downloads\`, `final.log`). The stand-in for the shared drive is `Documents\flogic-demo-run\` (Edge refuses folders under AppData). The screenshots this report names are in `handoff/shots/`. The other ninety or so stayed on Fernando's machine.
 
 ---
 
@@ -140,7 +140,7 @@ After the fix: Dana saved (save 1). Luis and Priya were refused with "Someone sa
 1. **The reason for "no export" was wrong.**
    - Expected: something a Viewer in Finance can make sense of. Actual: "Your group can't export" and "Finance can't export. (IT sets this for each group.)" Finance *can* export. Morgan's level can't.
    - Fix: `01e8ca7`. It now says "A Viewer can't export" and "(IT sets each person's access level.)". Where the group is the reason (HR), it still names the group.
-2. **The Lock bar covered "← Back to file" and "Drag mode".** The bar is fixed to the bottom-left corner and Morgan's is long (three groups). Fix: `01e8ca7` keeps a strip of the page free under it. It can still overlap at some scroll positions on a narrow window, until you scroll. Screenshot: `uc3-STOPPED.png`.
+2. **The Lock bar covered "← Back to file" and "Drag mode".** The bar is fixed to the bottom-left corner and Morgan's is long (three groups). Fix: `01e8ca7` keeps a strip of the page free under it. It can still overlap at some scroll positions on a narrow window, until you scroll. Screenshot (the bar lying over the page): `uc3-lock-bar-overlap.png`.
 3. **Dates written the everyday way were not dates.**
    - Steps: `SELECT Project, Start, YEAR(Start) FROM Projects ORDER BY Start`.
    - Expected: 2006 for `3/15/06`, `2006-03-15` and `15-Mar-2006`, in date order. Actual: `YEAR` came back empty, the order was A to Z ("01-Aug-2006" first), and `WHERE Start < '2006-02-01'` returned 55 wrong rows.
