@@ -201,19 +201,31 @@
         <!-- ======================  DATA PACKS  ====================== -->
         <section class="card" id="pack">
             <h2>Data packs</h2>
-            <p class="hint">Locks a data file for one group. Only that group's people can open the <code>.flogic</code> file it makes.
-               Anyone can still see which group it's for, and the file's name.</p>
+            <p class="hint">Locks data files for one or more groups. Only people in those groups can open the <code>.flogic</code> file it makes.
+               Anyone can still see which groups it's for, and the file's name. Every pack is signed with IT's signing key, so nobody else can make or change one.</p>
+            <p class="hint">Export starts as the strictest rule of the file's groups: if one group can't export, nobody exports that file.
+               You can tick a group back on. The app still checks each person's own level and group.</p>
             <div class="form-row">
-                <label>Data file (.csv, .xlsx, .sql) <input type="file" id="p-file" accept=".csv,.xlsx,.sql"></label>
-                <label>For the group <select id="p-group"></select></label>
+                <label>Data files (.csv, .xlsx, .sql): pick one or many <input type="file" id="p-file" accept=".csv,.xlsx,.sql" multiple></label>
             </div>
-            <button type="button" id="p-btn" class="primary">Pack</button>
+            <div class="table-wrap" id="p-queue-wrap" hidden>
+                <table>
+                    <thead><tr><th>File</th><th>For</th><th>Can export</th><th></th></tr></thead>
+                    <tbody id="p-queue"></tbody>
+                </table>
+            </div>
+            <div class="form-row">
+                <button type="button" id="p-btn" class="primary">Pack</button>
+                <button type="button" id="p-same" hidden>Same groups for every file</button>
+                <button type="button" id="p-clear" class="quiet" hidden>Clear the list</button>
+            </div>
+            <p id="p-where" class="hint"></p>
             <p id="pack-msg" class="msg" role="status"></p>
 
             <h3>Packed so far</h3>
             <div class="table-wrap">
                 <table>
-                    <thead><tr><th>Pack</th><th>From</th><th>For</th><th>Size</th><th>Made</th></tr></thead>
+                    <thead><tr><th>Pack</th><th>From</th><th>For</th><th>Can export</th><th>Size</th><th>Made</th></tr></thead>
                     <tbody id="pack-list"></tbody>
                 </table>
             </div>

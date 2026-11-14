@@ -207,6 +207,11 @@ td .no { color: var(--bad); font-weight: 600; }
 fieldset { border: 1px solid var(--glass-edge); border-radius: 12px; padding: 8px 12px 0; margin: 0 0 14px; }
 legend { font-weight: 600; font-size: 13px; color: var(--text-soft); padding: 0 4px; }
 #c-groups label.inline { margin-bottom: 8px; }
+#p-queue label.inline { margin: 0 12px 6px 0; }
+#p-queue label.inline.off { color: var(--text-soft); }
+#p-queue .row-note { display: block; font-size: 12px; margin-top: 4px; }
+#p-queue .row-note.warn { color: var(--warn); }
+#p-queue .row-note.bad { color: var(--bad); }
 
 /*  A level,  as a chip.   The three levels read low to high:  amber,  blue,  green.  */
 .chip { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 10px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }

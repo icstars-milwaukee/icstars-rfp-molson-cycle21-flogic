@@ -79,6 +79,31 @@
         return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     }
 
+    //  THE EXPORT RULE for the open pack.   null:  export is allowed.   Otherwise  { why,  by:  'level' | 'group' | 'pack' }.
+    //
+    //    An older pack  (one group):    that group's rule  (already cut down by the person's level:  policyI.js).
+    //    A SHARED pack  (IT-signed):    allowed if ANY of the pack's groups that the person is in has BOTH
+    //                                   the pack's "export" for that group  (IT ticked it when packing)
+    //                                   AND the person's own rule for that group.
+    //    So a pack can only narrow what a person may do,  never widen it.
+    function noExport() {
+        const l = me.level && P !== null ? P.level(me.level) : null;
+        const levelWhy = l && !l.can.export ? { why: 'A ' + l.label + ' can\'t export', by: 'level' } : null;
+        if (!Array.isArray(pack.groups)) {
+            const g = groupOf(pack.group);
+            if (g !== null && g.rules.export === true) return null;
+            return levelWhy || { why: (g ? g.label : pack.label) + ' can\'t export', by: 'group' };
+        }
+        const mine = pack.groups.filter(function (pg) { return groupOf(pg.group) !== null; });
+        if (mine.some(function (pg) { return pg.export === true && groupOf(pg.group).rules.export === true; })) return null;
+        if (levelWhy) return levelWhy;
+        const groupsSayNo = mine.filter(function (pg) { return groupOf(pg.group).rules.export !== true; });
+        if (groupsSayNo.length === mine.length) {
+            return { why: groupsSayNo.map(function (pg) { return groupOf(pg.group).label; }).join(' and ') + ' can\'t export', by: 'group' };
+        }
+        return { why: 'IT turned off export for this file', by: 'pack' };
+    }
+
     //  What the dashboard reads.   (Only reads.   Nothing here hands out a key.)
     window.FlogicVault = Object.freeze({
         state: function () { return state; },
@@ -90,22 +115,18 @@
         level: function () { return me === null || !me.level || P === null ? null : P.level(me.level); },
         //  When their key file ends  (a Date),  or null.
         accessEnds: function () { return me === null || !me.endsAt ? null : new Date(me.endsAt); },
-        openPack: function () { return pack === null ? null : Object.assign({}, pack); },
+        openPack: function () { return pack === null ? null : Object.assign({}, pack, pack.groups ? { groups: pack.groups.map(function (g) { return Object.assign({}, g); }) } : {}); },
         canExport: function () {
             if (state !== 'unlocked' || pack === null) return state !== 'locked';    //  a plain file:  yes   (locked:  no)
-            const g = groupOf(pack.group);
-            return g !== null && g.rules.export === true;
+            return noExport() === null;
         },
         //  WHY exporting is off right now,  in a few words   ('':  it isn't off).
         //  A LEVEL that can't export  (Guest,  Viewer)  is said as the level's rule:  the group may well allow it.
         whyNoExport: function () {
             if (state === 'locked') return 'Locked';
             if (state !== 'unlocked' || pack === null) return '';
-            const g = groupOf(pack.group);
-            if (g !== null && g.rules.export === true) return '';
-            const l = me.level && P !== null ? P.level(me.level) : null;
-            if (l && !l.can.export) return 'A ' + l.label + ' can\'t export';
-            return (g ? g.label : pack.label) + ' can\'t export';
+            const n = noExport();
+            return n === null ? '' : n.why;
         },
         stamp: function () {
             if (state !== 'unlocked' || pack === null) return '';
@@ -854,22 +875,39 @@
             say(e.code === 'bad-version' ? e.message : '"' + file.name + '" isn\'t a Flogic data pack.');
             return;
         }
-        const name = label.groupLabel || label.group;
+        //  An older pack:  one group.   A SHARED pack  (v2):  one or more,  each with IT's export rule for this file.
+        const shared = label.v === V.PACK_VERSION;
+        const onPack = shared ? label.groups : [{ group: label.group, label: label.groupLabel || label.group, keyVersion: label.keyVersion }];
+        const name = onPack.map(function (g) { return g.label || g.group; }).join(' + ');
         if (state !== 'unlocked') { say('"' + file.name + '" is a locked data pack for ' + name + '.  Sign in to open it.'); return; }
-        const mine = keys.get(label.group);
-        if (!mine) { say('This pack is for ' + name + '.  You\'re not in that group.'); return; }
-        if (mine.keyVersion !== label.keyVersion) {
-            say('This pack was locked with a newer ' + name + ' key.  Ask IT for a new credential file.');
+        //  Which of its groups opens it for me?   (In more than one?   One whose export IT allowed,  if there is one:  the stamp names it.)
+        const held = onPack.filter(function (g) { return keys.has(g.group); });
+        if (held.length === 0) {
+            say('This pack is for ' + name + '.  You\'re not in ' + (onPack.length === 1 ? 'that group.' : onPack.length === 2 ? 'either group.' : 'any of those groups.'));
             return;
         }
+        const fits = held.filter(function (g) { return keys.get(g.group).keyVersion === g.keyVersion; });
+        if (fits.length === 0) {
+            say('This pack was locked with a newer ' + (held[0].label || held[0].group) + ' key.  Ask IT to renew your access.');
+            return;
+        }
+        const via = fits.find(function (g) { return g.export === true && groupOf(g.group) && groupOf(g.group).rules.export === true; }) || fits[0];
+        if (shared) {
+            //  IT signed it?   (Everyone in a group holds its key,  so anyone in it COULD make a pack.   Only IT can sign one.)
+            if (S === null || TRUSTED === null) { say('"' + file.name + '" is a shared pack, and this app has no IT trust file to check it with.  Ask IT.'); return; }
+            try { await V.checkPackSignature(bytes, await S.trustedKey(TRUSTED), TRUSTED.fingerprint); }
+            catch (e) { say('"' + file.name + '": ' + (e.code === 'wrong-issuer' || e.code === 'bad-signature' ? e.message : 'its signature can\'t be checked.') ); return; }
+            if (myOpen !== openId || state !== 'unlocked') return;
+        }
         let plain;
-        try { plain = await V.openPack(bytes, mine.key); }
+        try { plain = await V.openPack(bytes, keys.get(via.group).key, via.group); }
         catch (e) { say('"' + file.name + '" can\'t be opened with your key.  It may have been changed since IT made it.'); return; }
         bytes = null;
         if (myOpen !== openId || state !== 'unlocked') return;          //  locked  (or another file picked)  meanwhile
 
-        pack = { group: label.group, label: name, fileName: label.fileName || file.name.replace(/\.flogic$/i, ''),
-                 rows: label.rows, made: label.made };
+        pack = { group: via.group, label: name, fileName: label.fileName || file.name.replace(/\.flogic$/i, ''),
+                 rows: label.rows, made: label.made,
+                 groups: shared ? onPack.map(function (g) { return { group: g.group, label: g.label, export: g.export === true }; }) : undefined };
         changed();
         loadFile(new File([plain], pack.fileName), null);
     }
@@ -881,11 +919,11 @@
         if (e.target !== queryExport || window.FlogicVault.canExport()) return;
         e.stopImmediatePropagation();
         e.preventDefault();
-        const l = me !== null && me.level && P !== null ? P.level(me.level) : null;
+        const n = me !== null && pack !== null ? noExport() : null;
         const why = window.FlogicVault.whyNoExport() || 'Your group can\'t export';
-        if (typeof setQueryStatus === 'function') {
-            setQueryStatus(why + '.  (' + (l && !l.can.export ? 'IT sets each person\'s access level.' : 'IT sets this for each group.') + ')', true);
-        }
+        const who = n === null ? 'IT sets this for each group.' : n.by === 'level' ? 'IT sets each person\'s access level.'
+                  : n.by === 'pack' ? 'IT sets this for each file it packs.' : 'IT sets this for each group.';
+        if (typeof setQueryStatus === 'function') setQueryStatus(why + '.  (' + who + ')', true);
     }, true);
 
 

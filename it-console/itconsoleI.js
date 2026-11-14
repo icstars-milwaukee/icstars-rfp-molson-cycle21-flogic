@@ -145,9 +145,14 @@ const ITConsole = (function () {
         return out;
     }
 
+    //  An older entry  (one group,  no export list):  export: null  =  "the group's own rule".
     function cleanPackEntry(e) {
-        return { pack: String(e.pack), fileName: String(e.fileName), group: String(e.group),
-                 bytes: Number(e.bytes) || 0, made: isDay(e.made) ? e.made : '' };
+        const groups = Array.isArray(e.groups) && e.groups.length ? e.groups.map(String) : [String(e.group)];
+        const out = { pack: String(e.pack), fileName: String(e.fileName), group: groups[0], groups: groups,
+                      export: Array.isArray(e.export) ? e.export.map(String) : null,
+                      bytes: Number(e.bytes) || 0, made: isDay(e.made) ? e.made : '' };
+        if (typeof e.by === 'string') out.by = e.by;
+        return out;
     }
 
 
@@ -269,12 +274,19 @@ const ITConsole = (function () {
 
 
     // ------------------------------------------------------
-    //    3.  PACK A FILE      incident.csv   ->   incident.flogic   (locked with one group's key)
+    //    3.  PACK A FILE      incident.csv   ->   incident.flogic   (a SHARED pack:  one or more groups,  signed by IT)
     //
-    //    The header  (readable without the key):   { group, groupLabel, keyVersion, fileName, rows: null, made }
+    //    VaultCore.makeSharedPack:   the file is locked with a fresh key,  and that key is locked once per group.
+    //    The label  (readable without a key):   which groups,  each group's EXPORT rule for this file,  the name,  the day.
+    //    IT's signing key signs it all,  so nobody else  (not even someone in the group)  can make or change a pack.
     //    rows: null,  because the console has no reader.   The app counts the rows after it opens the pack.
     //
-    //    The keyring keeps a LIST of what was packed  (name,  group,  size,  day):  never the data,  never a key.
+    //    THE EXPORT RULE PER GROUP.   It starts as the STRICTEST of the pack's groups:   if any group can't export,
+    //    nobody exports this file.   IT can tick a group back on  (only a group whose own rule allows export).
+    //    That's LOOSENING:  that group could export data another group isn't allowed to.   The page warns,  and asks twice.
+    //    The app still needs the person's own group rule and level to allow it:   a pack never gives more than that.
+    //
+    //    The keyring keeps a LIST of what was packed  (name,  groups,  who may export,  size,  day):  never the data,  never a key.
     // ------------------------------------------------------
 
     const PACK_TYPES = ['.csv', '.xlsx', '.sql'];
@@ -294,21 +306,54 @@ const ITConsole = (function () {
         return String(fileName).replace(/\.[^.\\/]+$/, '') + '.flogic';
     }
 
-    async function packFile(s, fileName, bytes, groupId, made) {
+    //  The groups,  in the keyring's order,  for these ids   (unknown ids dropped)
+    function packGroups(s, groupIds) {
+        return s.groups.filter(function (g) { return groupIds.indexOf(g.group) >= 0; });
+    }
+
+    //  STRICTEST WINS:  the export rule a pack for these groups starts with.   ->  the group ids that may export   ([] or all of them)
+    function strictExport(s, groupIds) {
+        const gs = packGroups(s, groupIds);
+        return gs.length > 0 && gs.every(function (g) { return g.rules.export === true; }) ? gs.map(function (g) { return g.group; }) : [];
+    }
+
+    //  LOOSENING:  groups that may export this file although another group on it can't export at all.
+    //  ->  { open: [labels that may export],  closed: [labels that can't] }    or  null  (nothing loosened)
+    function loosened(s, groupIds, exportIds) {
+        const gs = packGroups(s, groupIds);
+        const closed = gs.filter(function (g) { return g.rules.export !== true; });
+        const open = gs.filter(function (g) { return exportIds.indexOf(g.group) >= 0; });
+        return closed.length > 0 && open.length > 0 ? { open: open.map(function (g) { return g.label; }), closed: closed.map(function (g) { return g.label; }) } : null;
+    }
+
+    //  packFile(s, fileName, bytes, groupIds  ['finance', 'hr'],  exportIds  (which of them may export:  default strictest),  made)
+    async function packFile(s, fileName, bytes, groupIds, exportIds, made) {
         const problem = packProblem(fileName);
         if (problem) throw fail('bad-pack', problem);
         if (!bytes || !(bytes.byteLength > 0)) throw fail('bad-pack', '"' + fileName + '" is empty (0 bytes), so there\'s nothing to pack.');
-        const g = s.groups.find(function (x) { return x.group === groupId; });
-        if (!g) throw fail('bad-pack', 'Pick a group first.');
-        //  groupLabel:  so the app can say "This pack is for Change Team"  before it has a key   (DJ's V4 request)
-        const header = { group: g.group, groupLabel: g.label, keyVersion: g.keyVersion, fileName: String(fileName),
-                         rows: null, made: made || today() };
-        const pack = await VaultCore.makePack(bytes, header, s.keys[g.group].key);
+        if (!s.signing) throw fail('no-signer', 'This keyring has no signing key yet, and every pack is signed. Make one under "Signing key".');
+        const ids = Array.isArray(groupIds) ? groupIds : [groupIds];
+        const gs = packGroups(s, ids);
+        if (gs.length === 0) throw fail('bad-pack', 'Pick at least one group for "' + fileName + '".');
+        if (gs.length !== new Set(ids).size) throw fail('bad-pack', 'A group picked for "' + fileName + '" isn\'t in this keyring.');
+        const ex = Array.isArray(exportIds) ? exportIds : strictExport(s, ids);
+        for (const id of ex) {
+            const g = gs.find(function (x) { return x.group === id; });
+            if (!g) throw fail('bad-pack', 'Export was ticked for a group that isn\'t on "' + fileName + '".');
+            if (g.rules.export !== true) throw fail('bad-pack', g.label + ' can\'t export at all (the group\'s own rule), so it can\'t export "' + fileName + '" either.');
+        }
+        const day = made || today();
+        const pack = await VaultCore.makeSharedPack(bytes, { fileName: String(fileName), rows: null, made: day },
+            gs.map(function (g) {
+                return { group: g.group, label: g.label, keyVersion: g.keyVersion, export: ex.indexOf(g.group) >= 0, key: s.keys[g.group].key };
+            }), s.signing);
         if (!Array.isArray(s.packs)) s.packs = [];
-        s.packs.push({ pack: packName(fileName), fileName: String(fileName), group: g.group, bytes: pack.length, made: header.made });
+        const groupList = gs.map(function (g) { return g.group; });
+        s.packs.push({ pack: packName(fileName), fileName: String(fileName), group: groupList[0], groups: groupList,
+                       export: groupList.filter(function (id) { return ex.indexOf(id) >= 0; }), bytes: pack.length, made: day, by: s.signing.fingerprint });
         if (s.packs.length > PACK_LOG_MAX) s.packs.splice(0, s.packs.length - PACK_LOG_MAX);
         s.unsaved = true;
-        return { bytes: pack, name: packName(fileName), header: header };
+        return { bytes: pack, name: packName(fileName), groups: groupList, export: ex.slice() };
     }
 
     //  1627725  ->  '1.6 MB'
@@ -636,6 +681,7 @@ const ITConsole = (function () {
     function markUnsaved() {
         session.unsaved = true;
         lockArmed = false;
+        packArmed = false;
         saveArmed = false;
         refresh();
     }
@@ -777,7 +823,7 @@ const ITConsole = (function () {
         body.replaceChildren();
         for (const g of session.groups) {
             const people = session.people.filter(function (p) { return !p.ended && p.groups.indexOf(g.group) >= 0; });
-            const packs = (session.packs || []).filter(function (k) { return k.group === g.group; });
+            const packs = (session.packs || []).filter(function (k) { return (k.groups || [k.group]).indexOf(g.group) >= 0; });
             const names = Array.from(new Set(packs.map(function (k) { return k.pack; })));
             const tr = el('tr');
             const name = el('td');
@@ -858,6 +904,7 @@ const ITConsole = (function () {
         show('folder-drop', false);
         say('folder-status', 'Connected: "' + folder.name + '". Key files go into each person\'s subfolder.', 'good');
         lookAtStamp();
+        if (session) drawGroupChoices();
     }
 
 
@@ -970,6 +1017,7 @@ const ITConsole = (function () {
         say('folder-status', canUseFolders() ? 'Not connected: key files will download instead, for you to put in each person\'s folder.'
                                              : 'This browser can\'t use a drive folder: key files download instead.');
         show('forget-folder', false);
+        if (session) drawGroupChoices();
     }
 
     //  Put one key file where it goes:  the person's subfolder,  or a download.
@@ -1187,25 +1235,235 @@ const ITConsole = (function () {
     //    DATA PACKS
     // ------------------------------------------------------
 
-    //  The group list for "Pack":  rebuilt when the groups change,  keeping the choice.
+    //  THE LIST OF FILES TO PACK.   Pick one or many files;  each gets a row:  its groups,  and who may export it.
+    //  A row:  { id,  file,  groups: [ids],  exportIds: [ids],  note,  kind }
+    //  New rows start with NO group:  the old one-file form kept its last group,  and it was easy to pack for the wrong one.
+    let queue = [];
+    let queueSeq = 0;
+    let packArmed = false;          //  a loosened export rule:  the first click on Pack warns,  the second one packs
+
+    //  Rebuilt when the groups change  (and on every refresh).   Keeps the focus on the same box,  for the keyboard.
     function drawGroupChoices() {
-        const select = $('p-group');
-        const was = select.value;
-        select.replaceChildren();
-        if (session.groups.length === 0) {
-            select.appendChild(el('option', 'Make a group first'));
-            select.disabled = true;
-            $('p-btn').disabled = true;
+        const none = session.groups.length === 0;
+        //  A group that's gone  (or renamed:  the label is looked up)  drops out of each row
+        for (const r of queue) {
+            r.groups = r.groups.filter(function (id) { return session.groups.some(function (g) { return g.group === id; }); });
+            r.exportIds = r.exportIds.filter(function (id) { return r.groups.indexOf(id) >= 0 && groupAllowsExport(id); });
+        }
+        drawQueue();
+        $('p-file').disabled = none;
+        $('p-btn').disabled = none || queue.length === 0;
+        $('p-btn').textContent = queue.length > 1 ? 'Pack ' + queue.length + ' files' : 'Pack';
+        $('p-where').textContent = none ? 'Make a group first.'
+            : folder ? 'Packs go into IT\'s folder: packs/<group>/ (a pack for two groups goes into both). Share each group\'s packs folder with that group.'
+                     : 'IT\'s folder isn\'t connected, so each pack downloads. Connect it (under "Access") to put packs in a folder per group.';
+    }
+
+    function groupAllowsExport(id) {
+        const g = session.groups.find(function (x) { return x.group === id; });
+        return !!g && g.rules.export === true;
+    }
+
+    function drawQueue() {
+        const focused = document.activeElement && document.activeElement.id;
+        const body = $('p-queue');
+        body.replaceChildren();
+        for (const r of queue) {
+            const tr = el('tr');
+            const name = el('td');
+            name.appendChild(el('strong', r.file.name));
+            name.appendChild(el('span', size(r.file.size), 'sub-id'));
+            if (r.note) name.appendChild(el('span', r.note, 'row-note ' + (r.kind || '')));
+            tr.appendChild(name);
+
+            const forCell = el('td');
+            for (const g of session.groups) {
+                const box = document.createElement('input');
+                box.type = 'checkbox';
+                box.id = 'pq-' + r.id + '-for-' + g.group;
+                box.checked = r.groups.indexOf(g.group) >= 0;
+                box.addEventListener('change', function () { onRowGroup(r.id, g.group, box.checked); });
+                const lab = el('label', null, 'inline');
+                lab.appendChild(box);
+                lab.appendChild(document.createTextNode(g.label));
+                forCell.appendChild(lab);
+            }
+            tr.appendChild(forCell);
+
+            const exCell = el('td');
+            if (r.groups.length === 0) exCell.appendChild(el('span', 'Pick a group first', 'hint'));
+            for (const g of packGroups(session, r.groups)) {
+                const box = document.createElement('input');
+                box.type = 'checkbox';
+                box.id = 'pq-' + r.id + '-ex-' + g.group;
+                box.checked = r.exportIds.indexOf(g.group) >= 0;
+                box.disabled = g.rules.export !== true;
+                box.addEventListener('change', function () { onRowExport(r.id, g.group, box.checked); });
+                const lab = el('label', null, 'inline' + (box.disabled ? ' off' : ''));
+                lab.title = box.disabled ? g.label + ' can\'t export at all: that\'s the group\'s own rule (under "Groups").' : '';
+                lab.appendChild(box);
+                lab.appendChild(document.createTextNode(g.label + (box.disabled ? ' (never)' : '')));
+                exCell.appendChild(lab);
+            }
+            const loose = loosened(session, r.groups, r.exportIds);
+            if (loose) {
+                exCell.appendChild(el('span', loose.closed.join(' and ') + ' can\'t export, but ' + loose.open.join(' and ') +
+                    ' will be able to export this file, ' + loose.closed.join(' and ') + '\'s data included.', 'row-note warn'));
+            }
+            tr.appendChild(exCell);
+
+            const act = el('td', null, 'actions');
+            act.appendChild(rowButton('Remove', 'pq-' + r.id + '-remove', function () { onRowRemove(r.id); }, 'quiet'));
+            tr.appendChild(act);
+            body.appendChild(tr);
+        }
+        show('p-queue-wrap', queue.length > 0);
+        show('p-same', queue.length > 1);
+        show('p-clear', queue.length > 0);
+        if (focused && $(focused)) $(focused).focus();
+    }
+
+    function findRow(id) { return queue.find(function (r) { return r.id === id; }); }
+
+    function queueChanged() {
+        packArmed = false;
+        drawGroupChoices();
+    }
+
+    //  A group ticked or unticked:  the row's export goes back to the STRICTEST rule of its groups.
+    function onRowGroup(id, group, on) {
+        const r = findRow(id);
+        if (!r) return;
+        r.groups = session.groups.map(function (g) { return g.group; }).filter(function (g) { return g === group ? on : r.groups.indexOf(g) >= 0; });
+        r.exportIds = strictExport(session, r.groups);
+        r.note = ''; r.kind = '';
+        say('pack-msg', '');
+        queueChanged();
+    }
+
+    function onRowExport(id, group, on) {
+        const r = findRow(id);
+        if (!r) return;
+        r.exportIds = r.groups.filter(function (g) { return g === group ? on : r.exportIds.indexOf(g) >= 0; });
+        say('pack-msg', '');
+        queueChanged();
+    }
+
+    function onRowRemove(id) {
+        queue = queue.filter(function (r) { return r.id !== id; });
+        say('pack-msg', '');
+        queueChanged();
+        if (queue.length === 0) $('p-file').focus();
+    }
+
+    //  "Same groups for every file":  the FIRST row's groups and export,  copied to the rest.
+    function onSameGroups() {
+        if (queue.length < 2) return;
+        const first = queue[0];
+        if (first.groups.length === 0) { say('pack-msg', 'Pick the groups for the first file, then click this to give every file the same.', 'bad'); return; }
+        for (const r of queue.slice(1)) { r.groups = first.groups.slice(); r.exportIds = first.exportIds.slice(); r.note = ''; r.kind = ''; }
+        say('pack-msg', 'Every file is now for ' + groupLabels(first.groups).join(' and ') + '.', 'good');
+        queueChanged();
+    }
+
+    function onClearQueue() {
+        queue = [];
+        $('p-file').value = '';
+        say('pack-msg', '');
+        queueChanged();
+    }
+
+    //  Files picked:  each one is a new row  (pick again to add more).   A file that can't be packed is said on its row.
+    function onFilesPicked() {
+        const files = Array.from($('p-file').files || []);
+        say('pack-msg', '');
+        for (const f of files) {
+            const problem = packProblem(f.name) || (f.size === 0 ? '"' + f.name + '" is empty (0 bytes), so there\'s nothing to pack.' : '');
+            queue.push({ id: ++queueSeq, file: f, groups: [], exportIds: [], note: problem, kind: problem ? 'bad' : '' });
+        }
+        $('p-file').value = '';                 //  so the same file can be picked again,  and the box doesn't name only one
+        if (files.length) say('pack-msg', plural(files.length, 'file', 'files') + ' added. Tick the groups for each one, then click Pack.', 'good');
+        queueChanged();
+    }
+
+    //  The same pack name twice in one go would overwrite itself.
+    function sameNames() {
+        const seen = new Map();
+        for (const r of queue) {
+            const n = packName(r.file.name).toLowerCase();
+            seen.set(n, (seen.get(n) || 0) + 1);
+        }
+        return function (r) { return seen.get(packName(r.file.name).toLowerCase()) > 1; };
+    }
+
+    //  Put one pack where it goes:  each of its groups' folders,  or one download.
+    async function deliverPack(p) {
+        if (folder && typeof folder.putPack === 'function') {
+            let replaced = 0;
+            for (const g of p.groups) if (await folder.putPack(g, p.name, p.bytes)) replaced++;
+            return { where: 'folder', replaced: replaced };
+        }
+        download(p.name, new Blob([p.bytes], { type: 'application/octet-stream' }));
+        return { where: 'download', replaced: 0 };
+    }
+
+    async function onPack() {
+        if (queue.length === 0) { say('pack-msg', 'Pick one or more data files first.', 'bad'); $('p-file').focus(); return; }
+        if (!session.signing) { say('pack-msg', 'This keyring has no signing key yet, and every pack is signed. Make one under "Signing key".', 'bad'); return; }
+        const twice = sameNames();
+        let blocked = 0;
+        for (const r of queue) {
+            const problem = packProblem(r.file.name) || (r.file.size === 0 ? '"' + r.file.name + '" is empty (0 bytes), so there\'s nothing to pack.' : '') ||
+                            (r.groups.length === 0 ? 'Pick at least one group.' : '') ||
+                            (twice(r) ? 'Another file in the list makes the same pack name (' + packName(r.file.name) + '). Pack them one at a time.' : '');
+            r.note = problem; r.kind = problem ? 'bad' : '';
+            if (problem) blocked++;
+        }
+        if (blocked) {
+            packArmed = false;
+            drawQueue();
+            say('pack-msg', plural(blocked, 'file needs', 'files need') + ' a fix first (said on ' + (blocked === 1 ? 'its row' : 'their rows') + '). Nothing was packed.', 'bad');
             return;
         }
-        for (const g of session.groups) {
-            const o = el('option', g.label + ' (' + g.group + ')');
-            o.value = g.group;
-            select.appendChild(o);
+        //  LOOSENING:  ask twice
+        const loose = queue.filter(function (r) { return loosened(session, r.groups, r.exportIds); });
+        if (loose.length && !packArmed) {
+            packArmed = true;
+            drawQueue();
+            say('pack-msg', 'Check the export rule: ' + loose.map(function (r) {
+                const l = loosened(session, r.groups, r.exportIds);
+                return '"' + r.file.name + '" lets ' + l.open.join(' and ') + ' export data that ' + l.closed.join(' and ') + ' can\'t';
+            }).join('; ') + '. Click "' + $('p-btn').textContent + '" again to pack anyway, or untick it.', 'warn');
+            return;
         }
-        if (session.groups.some(function (g) { return g.group === was; })) select.value = was;
-        select.disabled = false;
-        $('p-btn').disabled = false;
+        packArmed = false;
+        const done = [], failed = [];
+        let toFolder = 0, downloaded = 0, replaced = 0;
+        await busy($('p-btn'), 'pack-msg', async function () {
+            const total = queue.length;
+            for (const r of queue.slice()) {
+                say('pack-msg', 'Packing ' + (done.length + failed.length + 1) + ' of ' + total + ': ' + r.file.name + '…');
+                try {
+                    const p = await packFile(session, r.file.name, await r.file.arrayBuffer(), r.groups, r.exportIds);
+                    const d = await deliverPack(p);
+                    if (d.where === 'folder') toFolder++; else downloaded++;
+                    replaced += d.replaced;
+                    done.push(r.file.name + ' → ' + p.name + ' (' + groupLabels(p.groups).join(' + ') + ')');
+                    queue = queue.filter(function (x) { return x !== r; });
+                } catch (e) {
+                    r.note = e.message || String(e); r.kind = 'bad';
+                    failed.push(r.file.name);
+                }
+            }
+        });
+        if (!session) return;
+        if (done.length) markUnsaved(); else drawGroupChoices();
+        const where = toFolder ? ' Put in IT\'s folder under packs/<group>/' + (replaced ? ' (' + plural(replaced, 'older pack', 'older packs') + ' of the same name replaced)' : '') + '.'
+                    : downloaded ? ' They downloaded: give each one to its groups.' : '';
+        say('pack-msg', (done.length ? 'Packed ' + plural(done.length, 'file', 'files') + ': ' + done.join('; ') + '.' + where + ' Save the keyring to remember them.' : '') +
+            (failed.length ? (done.length ? ' ' : '') + plural(failed.length, 'file wasn\'t', 'files weren\'t') + ' packed: ' + failed.join(', ') + ' (why is on ' + (failed.length === 1 ? 'its row' : 'their rows') + ').' : ''),
+            failed.length ? (done.length ? 'warn' : 'bad') : 'good');
+        if (queue.length === 0) $('p-file').value = '';
     }
 
     function drawPacks() {
@@ -1216,28 +1474,14 @@ const ITConsole = (function () {
             const tr = el('tr');
             tr.appendChild(el('td', k.pack, 'mono'));
             tr.appendChild(el('td', k.fileName));
-            tr.appendChild(el('td', groupLabels([k.group])[0]));
+            tr.appendChild(el('td', groupLabels(k.groups || [k.group]).join(' + ')));
+            tr.appendChild(el('td', k.export === null || k.export === undefined ? 'the group\'s rule'
+                                  : k.export.length ? groupLabels(k.export).join(', ') : 'nobody'));
             tr.appendChild(el('td', size(k.bytes)));
             tr.appendChild(el('td', k.made));
             body.appendChild(tr);
         }
         $('pack-none').hidden = packs.length > 0;
-    }
-
-    async function onPack() {
-        const file = $('p-file').files[0];
-        if (!file) { say('pack-msg', 'Pick a data file first.', 'bad'); return; }
-        const problem = packProblem(file.name);
-        if (problem) { say('pack-msg', problem, 'bad'); return; }
-        const groupId = $('p-group').value;
-        await busy($('p-btn'), 'pack-msg', async function () {
-            const p = await packFile(session, file.name, await file.arrayBuffer(), groupId);
-            download(p.name, new Blob([p.bytes], { type: 'application/octet-stream' }));
-            const g = session.groups.find(function (x) { return x.group === groupId; });
-            markUnsaved();
-            say('pack-msg', 'Packed ' + file.name + ' (' + size(file.size) + ') into ' + p.name + ' (' + size(p.bytes.length) +
-                ') for ' + g.label + '.', 'good');
-        });
     }
 
 
@@ -1430,6 +1674,8 @@ const ITConsole = (function () {
         say('signer-msg', '');
         resetGroupForm();
         say('group-msg', '');
+        queue = [];
+        packArmed = false;
         $('p-file').value = '';
         say('pack-msg', '');
         $('c-groups').replaceChildren();
@@ -1537,8 +1783,10 @@ const ITConsole = (function () {
         $('signer-file2').value = '';
         resetGroupForm();
         say('group-msg', '');
-        for (const id of ['group-list', 'person-list', 'data-list', 'pack-list', 'todo', 'p-group', 'c-groups']) $(id).replaceChildren();   //  hidden isn't enough:  take the names off the page
+        for (const id of ['group-list', 'person-list', 'data-list', 'pack-list', 'todo', 'p-queue', 'c-groups']) $(id).replaceChildren();   //  hidden isn't enough:  take the names off the page
         $('p-file').value = '';
+        queue = [];
+        packArmed = false;
         say('pack-msg', '');
         resetPersonForm();
         hideCode();
@@ -1581,7 +1829,9 @@ const ITConsole = (function () {
         $('g-label').addEventListener('input', onLabelInput);
         $('g-id').addEventListener('input', onIdInput);
         $('p-btn').addEventListener('click', onPack);
-        $('p-file').addEventListener('change', function () { say('pack-msg', ''); });
+        $('p-file').addEventListener('change', onFilesPicked);
+        $('p-same').addEventListener('click', onSameGroups);
+        $('p-clear').addEventListener('click', onClearQueue);
         $('c-btn').addEventListener('click', onPersonSave);
         $('pp-cancel').addEventListener('click', function () { resetPersonForm(); say('person-msg', ''); });
         $('pp-level').addEventListener('change', drawLevelHint);
@@ -1619,7 +1869,7 @@ const ITConsole = (function () {
         today: today,
         newKeyring: newKeyring, readKeyring: readKeyring, openKeyring: openKeyring, keyringText: keyringText,
         slugify: slugify, groupIdProblem: groupIdProblem, rulesProblem: rulesProblem, addGroup: addGroup, editGroup: editGroup,
-        packProblem: packProblem, packName: packName, packFile: packFile,
+        packProblem: packProblem, packName: packName, packFile: packFile, strictExport: strictExport, loosened: loosened,
         nextPersonId: nextPersonId, defaultExpiry: defaultExpiry, expiryProblem: expiryProblem,
         personProblem: personProblem, addPerson: addPerson, editPerson: editPerson, reviewPerson: reviewPerson, endAccess: endAccess,
         personState: personState, keyState: keyState,

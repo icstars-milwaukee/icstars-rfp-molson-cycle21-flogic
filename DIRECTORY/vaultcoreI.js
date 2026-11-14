@@ -10,6 +10,8 @@
             -  lock a key with another key,  and unlock it (wrapKey / unwrapKey,  AES-GCM)
             -  make and open CREDENTIAL files   (.flogic-id:   a person's "badge")
             -  make and open DATA PACKS         (.flogic:      a data file,  locked with a group's key)
+            -  make and open SHARED PACKS       (.flogic v2:   one file for one or more groups,  signed by IT,
+                                                 with an export rule per group)
 
         Two pages use it:  the app  (vaultI.js)  and IT's console  (it-console/).
         Everything is the browser's own  crypto.subtle.   No libraries.   No network.
@@ -283,13 +285,17 @@ const VaultCore = (function () {
         let header;
         try { header = JSON.parse(unutf8.decode(b.subarray(12, 12 + n))); }
         catch (e) { throw fail('not-a-pack', 'This data pack\'s label is damaged.'); }
-        if (header.v > VERSION) throw fail('bad-version', 'This data pack is from a newer version of the app.');
+        if (header.v === PACK_VERSION) header = readShared(header);
+        else if (header.v > VERSION) throw fail('bad-version', 'This data pack is from a newer version of the app.');
         return { header: header, front: b.subarray(0, 12 + n), at: 12 + n, bytes: b };
     }
 
     //  Open a pack with its group's key   ->   the file's bytes  (an ArrayBuffer)
-    async function openPack(packBytes, groupKey) {
+    //  A SHARED pack  (v2)  needs to know WHICH of its groups the key is for:   groupId.
+    //  (v2:  check IT's signature FIRST,  with checkPackSignature.   openPack only unlocks.)
+    async function openPack(packBytes, groupKey, groupId) {
         const p = readPackHeader(packBytes);
+        if (p.header.v === PACK_VERSION) return openShared(p, groupKey, groupId);
         try {
             return await subtle.decrypt(
                 { name: 'AES-GCM', iv: p.bytes.subarray(p.at, p.at + 12), additionalData: p.front },
@@ -302,12 +308,139 @@ const VaultCore = (function () {
     }
 
 
+    // ------------------------------------------------------
+    //    SHARED DATA PACKS   (.flogic,  v2)      one file,  one or more groups,  signed by IT
+    //
+    //     bytes 0–7      "FLGPACK1"                (the same start:  an older app says "from a newer version")
+    //     bytes 8–11     N  =  the header's length
+    //     next N bytes   the header  (JSON):   { v: 2,  signed: "<JSON text>",  sig: "<b64>" }
+    //     next 12 bytes  the IV
+    //     the rest       the locked file   (AES-GCM,  under a FRESH random file key)
+    //
+    //    signed  =  { id,  fileName,  rows,  made,  iss  (IT's signing key fingerprint),
+    //                 groups: [{ group,  label,  keyVersion,  export,  iv,  wrapped }],     the file key,  locked once per group
+    //                 data:   SHA-256 (b64) of  IV + the locked file }
+    //    sig     =  IT's signature  (ECDSA P-256)  over   "FLGPACK2\n" + signed
+    //
+    //    Why the signature:   everyone in a group holds that group's key,  so anyone in it COULD make a pack.
+    //    The signature says IT made THIS one,  with THESE groups and THESE export rules,  around THIS data.
+    //    Change a group,  an export rule,  a locked key,  or one byte of the data,  and the app refuses it.
+    //
+    //    export,  per group:   may that group's people export this file?   It can only narrow:  the app ALSO needs
+    //    the person's own group rule and level to allow it.
+    // ------------------------------------------------------
+
+    const PACK_VERSION = 2;
+    const PACK_SIGN_MAGIC = 'FLGPACK2\n';
+    const SIG = { name: 'ECDSA', hash: 'SHA-256' };
+
+    function sharedKeyLabel(id, group, keyVersion) {
+        return utf8.encode('flogic-pack|' + id + '|' + group + '|' + keyVersion);
+    }
+
+    //  info:     { fileName,  made,  rows  (or null) }
+    //  groups:   [{ group,  label,  keyVersion,  export  (true / false),  key  (the group's key) }]
+    //  signer:   { fingerprint,  sign(bytes) }     IT's signing key,  open   (SignInCore.openSigner)
+    async function makeSharedPack(fileBytes, info, groups, signer) {
+        if (!signer || typeof signer.sign !== 'function') throw fail('no-signer', 'A shared pack has to be signed by IT\'s signing key.');
+        if (!Array.isArray(groups) || groups.length === 0) throw fail('no-group', 'Pick at least one group.');
+        const ids = groups.map(function (g) { return g.group; });
+        if (new Set(ids).size !== ids.length) throw fail('no-group', 'A group is in the list twice.');
+
+        const id = toB64(randomBytes(12));
+        //  The file key:  random,  used for this one pack.   Its raw bytes are only ever in this function,  and only locked.
+        //  (Group keys can encrypt and decrypt,  not "wrap",  so the key's 32 bytes are encrypted like data.)
+        const raw = randomBytes(32);
+        const fileKey = await subtle.importKey('raw', raw, { name: 'AES-GCM', length: 256 }, false, ['encrypt']);
+        const locks = [];
+        try {
+            for (const g of groups) {
+                const iv = randomBytes(12);
+                const wrapped = await subtle.encrypt({ name: 'AES-GCM', iv: iv, additionalData: sharedKeyLabel(id, g.group, g.keyVersion) }, g.key, raw);
+                locks.push({ group: String(g.group), label: String(g.label || g.group), keyVersion: g.keyVersion, export: g.export === true,
+                             iv: toB64(iv), wrapped: toB64(new Uint8Array(wrapped)) });
+            }
+        } finally { raw.fill(0); }
+
+        const iv = randomBytes(12);
+        const locked = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv: iv, additionalData: utf8.encode('flogic-pack|' + id) }, fileKey, fileBytes));
+        const body = new Uint8Array(12 + locked.length);
+        body.set(iv, 0);
+        body.set(locked, 12);
+
+        const signed = JSON.stringify({ id: id, fileName: String(info.fileName), rows: info.rows === undefined ? null : info.rows, made: info.made,
+                                        iss: signer.fingerprint, groups: locks, data: await sha256(body) });
+        const sig = await signer.sign(utf8.encode(PACK_SIGN_MAGIC + signed));
+        const head = utf8.encode(JSON.stringify({ v: PACK_VERSION, signed: signed, sig: toB64(new Uint8Array(sig)) }));
+
+        const pack = new Uint8Array(12 + head.length + body.length);
+        pack.set(utf8.encode(PACK_MAGIC), 0);
+        new DataView(pack.buffer).setUint32(8, head.length);
+        pack.set(head, 12);
+        pack.set(body, 12 + head.length);
+        return pack;
+    }
+
+    async function sha256(bytes) { return toB64(new Uint8Array(await subtle.digest('SHA-256', bytes))); }
+
+    //  A v2 header,  read  (no key,  no signature check yet).   The readable label is the SIGNED text,  parsed:
+    //  what the app shows is exactly what IT signed  (or the pack is refused at checkPackSignature).
+    function readShared(header) {
+        let s;
+        try { s = JSON.parse(header.signed); } catch (e) { s = null; }
+        if (!s || typeof header.sig !== 'string' || !Array.isArray(s.groups) || s.groups.length === 0 || typeof s.data !== 'string') {
+            throw fail('not-a-pack', 'This data pack\'s label is damaged.');
+        }
+        return { v: PACK_VERSION, id: String(s.id), fileName: s.fileName, rows: s.rows, made: s.made, iss: s.iss, data: s.data,
+                 groups: s.groups.map(function (g) {
+                     return { group: String(g.group), label: String(g.label), keyVersion: g.keyVersion, export: g.export === true, iv: g.iv, wrapped: g.wrapped };
+                 }),
+                 signed: header.signed, sig: header.sig };
+    }
+
+    //  IT signed this pack,  with the key the app trusts?     publicKey:  a CryptoKey  (ECDSA,  verify).    fingerprint:  its fingerprint.
+    //  Throws  'wrong-issuer'  (made with another IT signing key)   or   'bad-signature'  (changed,  or not made by IT).
+    async function checkPackSignature(packBytes, publicKey, fingerprint) {
+        const p = readPackHeader(packBytes);
+        if (p.header.v !== PACK_VERSION) return p.header;               //  an older pack  (v1)  carries no signature
+        const h = p.header;
+        let ok = false;
+        try { ok = await subtle.verify(SIG, publicKey, fromB64(h.sig), utf8.encode(PACK_SIGN_MAGIC + h.signed)); } catch (e) { ok = false; }
+        if (!ok) {
+            if (h.iss && fingerprint && h.iss !== fingerprint) throw fail('wrong-issuer', 'This pack was made with an IT signing key this app doesn\'t trust. Ask IT to pack it again.');
+            throw fail('bad-signature', 'This pack has been changed since IT made it.');
+        }
+        if (fingerprint && h.iss !== fingerprint) throw fail('wrong-issuer', 'This pack was made with an IT signing key this app doesn\'t trust. Ask IT to pack it again.');
+        if (await sha256(p.bytes.subarray(p.at)) !== h.data) throw fail('bad-signature', 'This pack has been changed since IT made it.');
+        return h;
+    }
+
+    async function openShared(p, groupKey, groupId) {
+        const h = p.header;
+        const g = h.groups.find(function (x) { return x.group === groupId; });
+        if (!g) throw fail('locked-out', 'This pack isn\'t for that group.');
+        let raw = null;
+        try {
+            raw = new Uint8Array(await subtle.decrypt({ name: 'AES-GCM', iv: fromB64(g.iv), additionalData: sharedKeyLabel(h.id, g.group, g.keyVersion) },
+                                                      groupKey, fromB64(g.wrapped)));
+            if (raw.length !== 32) throw new Error('not a file key');
+            const fileKey = await subtle.importKey('raw', raw, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+            raw.fill(0);
+            return await subtle.decrypt({ name: 'AES-GCM', iv: p.bytes.subarray(p.at, p.at + 12), additionalData: utf8.encode('flogic-pack|' + h.id) },
+                                        fileKey, p.bytes.subarray(p.at + 12));
+        } catch (e) {
+            throw fail('locked-out', 'This pack can\'t be opened with your key (it may have been changed).');
+        } finally { if (raw) raw.fill(0); }
+    }
+
+
     return Object.freeze({
         ROUNDS: ROUNDS, VERSION: VERSION,
         makeCode: makeCode, normalizeCode: normalizeCode, formatCode: formatCode, passphraseProblem: passphraseProblem,
         newGroupKey: newGroupKey, lockKeys: lockKeys, unlockKeys: unlockKeys,
         makeCredential: makeCredential, readCredential: readCredential, openCredential: openCredential,
         makePack: makePack, readPackHeader: readPackHeader, openPack: openPack,
+        PACK_VERSION: PACK_VERSION, makeSharedPack: makeSharedPack, checkPackSignature: checkPackSignature,
         toB64: toB64, fromB64: fromB64,
     });
 

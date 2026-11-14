@@ -8,6 +8,7 @@
 
             <IT's folder>/u-0001/flogic.flogic-key        Fernando's filekey
             <IT's folder>/u-0002/flogic.flogic-key        DJ's filekey
+            <IT's folder>/packs/finance/ledger.flogic     a data pack for Finance  (IT shares packs/finance with Finance)
 
         The person connects THEIR folder  (the one IT shared with them)  once.   Flogic reads  flogic.flogic-key  from it.
         Flogic never writes to the person's folder.
@@ -125,6 +126,16 @@ const Mailbox = (function () {
     }
     function mustBePerson(id) { if (typeof id !== 'string' || !PERSON.test(id)) throw fail('not-a-file', 'That isn\'t a person id.'); return id; }
 
+    //  Pack folders and names:  from strict patterns only   (a group id:  a-z 0-9 and dashes.   A pack:  no slashes,  no  ..,  ends .flogic)
+    const PACKS_DIR = 'packs';
+    const GROUP = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
+    const PACK_NAME = /^[^\\/:*?"<>|\u0000-\u001f]{1,200}\.flogic$/;
+    function mustBeGroup(id) { if (typeof id !== 'string' || !GROUP.test(id)) throw fail('not-a-file', 'That isn\'t a group id.'); return id; }
+    function mustBePackName(n) {
+        if (typeof n !== 'string' || !PACK_NAME.test(n) || /^\.|\.\.|[ .]\.flogic$/.test(n)) throw fail('not-a-file', 'That pack name can\'t be used as a file name: "' + n + '".');
+        return n;
+    }
+
 
     // ---- THE PERSON:  their own folder.   Read only. ----
 
@@ -170,6 +181,18 @@ const Mailbox = (function () {
                 const h = await tryHandle(function () { return root.getFileHandle(STAMP_FILE); });
                 return h ? readText(h) : null;
             },
+            //  DATA PACKS:   <IT's folder>/packs/<group id>/<name>.flogic      (IT shares each group's packs folder with that group)
+            //  A pack for 2 groups goes into both folders.   ->  true if it replaced a pack of the same name.
+            putPack: async function (groupId, fileName, bytes) {
+                const packs = await root.getDirectoryHandle(PACKS_DIR, { create: true });
+                const sub = await packs.getDirectoryHandle(mustBeGroup(groupId), { create: true });
+                const name = mustBePackName(fileName);
+                const was = await tryHandle(function () { return sub.getFileHandle(name); });
+                const h = await sub.getFileHandle(name, { create: true });
+                const w = await h.createWritable();
+                try { await w.write(bytes); } finally { await w.close(); }
+                return !!was;
+            },
             //  ->  the person ids that have a subfolder  (odd names ignored)
             people: async function () {
                 const out = [];
@@ -184,7 +207,7 @@ const Mailbox = (function () {
 
 
     return Object.freeze({
-        KEY_FILE: KEY_FILE, PERSON: PERSON, supported: supported, pick: pick, fromDrop: fromDrop, whyNot: whyNot,
+        KEY_FILE: KEY_FILE, PERSON: PERSON, PACKS_DIR: PACKS_DIR, supported: supported, pick: pick, fromDrop: fromDrop, whyNot: whyNot,
         openPersonal: openPersonal, openIT: openIT,
         remember: remember, recall: recall, forget: forget, allowed: allowed,
     });

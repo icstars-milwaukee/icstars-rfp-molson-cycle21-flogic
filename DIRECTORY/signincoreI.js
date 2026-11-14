@@ -367,16 +367,26 @@ const SignInCore = (function (VaultCore, FlogicPolicy) {
                 const k = keys.find(function (x) { return x.group === group; });
                 return k ? k.key : null;
             },
+            //  A shared pack  (v2)  is only opened with  o.pinned  (IT's public key):  its signature is checked first.
             openPack: async function (bytes) {
                 if (!this.alive()) { end(over || 'expired'); throw fail('locked', 'You\'re signed out.'); }
                 touch();
                 const p = VaultCore.readPackHeader(bytes);
-                const k = keys.find(function (x) { return x.group === p.header.group && x.keyVersion === p.header.keyVersion; });
-                if (!k) {
-                    const g = claims.groups.find(function (x) { return x.group === p.header.group; });
-                    throw fail('not-in-group', 'This pack is for ' + (g ? g.label : p.header.group) + '. You\'re not in that group.');
+                const wanted = p.header.v === VaultCore.PACK_VERSION ? p.header.groups : [{ group: p.header.group, keyVersion: p.header.keyVersion, label: p.header.groupLabel }];
+                let k = null, via = null;
+                for (const w of wanted) {
+                    k = keys.find(function (x) { return x.group === w.group && x.keyVersion === w.keyVersion; }) || null;
+                    if (k) { via = w.group; break; }
                 }
-                return { header: p.header, bytes: await VaultCore.openPack(bytes, k.key) };
+                if (!k) {
+                    const names = wanted.map(function (w) { const g = claims.groups.find(function (x) { return x.group === w.group; }); return g ? g.label : (w.label || w.group); });
+                    throw fail('not-in-group', 'This pack is for ' + names.join(' and ') + '. You\'re not in ' + (names.length > 1 ? 'any of those groups.' : 'that group.'));
+                }
+                if (p.header.v === VaultCore.PACK_VERSION) {
+                    if (!o.pinned) throw fail('bad-signature', 'This pack can\'t be checked: the app has no IT trust file.');
+                    await VaultCore.checkPackSignature(bytes, await trustedKey(o.pinned), o.pinned.fingerprint);
+                }
+                return { header: p.header, via: via, bytes: await VaultCore.openPack(bytes, k.key, via) };
             },
         };
     }
@@ -385,7 +395,7 @@ const SignInCore = (function (VaultCore, FlogicPolicy) {
     return Object.freeze({
         ROUNDS: ROUNDS, VERSION: VERSION, MAX_TRIES: MAX_TRIES,
         fingerprint: fingerprint,
-        newSigner: newSigner, readSigner: readSigner, openSigner: openSigner, pin: pin,
+        newSigner: newSigner, readSigner: readSigner, openSigner: openSigner, pin: pin, trustedKey: trustedKey,
         issueKey: issueKey, readKey: readKey, check: check,
         pinProblem: pinProblem, claim: claim, unlock: unlock, isNewer: isNewer, notEnded: notEnded,
         keyringGroups: keyringGroups, startSession: startSession, niceDate: niceDate,
