@@ -2338,7 +2338,10 @@ function updatePosition(y) {
 
     if (matches.length === 0) {
         statusText.textContent = (word === ''
-            ? (showingAnswer() ? 'The answer has no rows:  nothing matched' : 'This file only has a header row')
+            ? (showingAnswer() ? 'The answer has no rows:  nothing matched'
+               //  (no rows AND no column names:  the file has nothing in it at all)
+               : headerCells.every(function (name) { return String(name).trim() === ''; }) ? 'This file is empty:  there\'s nothing in it'
+               : 'This file only has a header row')
             : 'No rows match "' + word + '"') + fileNote;
         return;
     }

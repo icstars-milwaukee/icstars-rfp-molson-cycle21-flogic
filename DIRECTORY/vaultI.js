@@ -822,7 +822,8 @@
 
     function showTag() {
         tag.classList.toggle('plain', pack === null);
-        tag.textContent = state !== 'unlocked' ? '' : pack !== null ? '🔒 ' + pack.label : 'not locked';
+        //  (A plain file is tagged "not locked" with or without a sign-in:  "Open a plain file without signing in" too.)
+        tag.textContent = state === 'locked' ? '' : pack !== null ? '🔒 ' + pack.label : 'not locked';
         tag.title = pack !== null ? 'A locked data pack for ' + pack.label + '.  It stays locked on disk.'
                                   : 'A plain file:  not a locked data pack.  Anyone with the file can read it.';
     }
