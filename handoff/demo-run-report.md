@@ -1,6 +1,6 @@
 # Flogic demo run: report for DJ
 
-**From Fernando's agent, 13 Nov 2026.** All nine runs (UC0–UC8) were done on `phase-final-edit`, with real mouse and keyboard in a headed Edge. Twelve fix commits are pushed. Nothing was pushed anywhere else.
+**From Fernando's agent, 13 Nov 2026.** All nine runs (UC0–UC8) were done on `phase-final-edit`, with real mouse and keyboard in a headed Edge. Ten fix commits are pushed. Nothing was pushed anywhere else.
 
 **The short version**
 
