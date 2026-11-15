@@ -3,10 +3,10 @@
 
         itconsoleI.js   -   IT'S CONSOLE   (it plays Molson's IT department for the demo)
 
-        The locks and keys:     ../DIRECTORY/vaultcoreI.js    (VaultCore)
-        Key files:              ../DIRECTORY/signincoreI.js   (SignInCore)
-        The built-in rules:     ../DIRECTORY/policyI.js       (FlogicPolicy)
-        The drive folder:       ../DIRECTORY/mailboxI.js      (Mailbox,  the page only)
+        The locks and keys:     ../DataPage/vaultcoreI.js    (VaultCore)
+        Key files:              ../DataPage/signincoreI.js   (SignInCore)
+        The built-in rules:     ../DataPage/policyI.js       (FlogicPolicy)
+        The drive folder:       ../DataPage/mailboxI.js      (Mailbox,  the page only)
         This file never does crypto itself,  and never decides a rule itself.
 
         IT uses it to:
@@ -515,7 +515,7 @@ const ITConsole = (function () {
     //    5.  IT'S SIGNING KEY     (inside the keyring,  locked with the same IT passphrase)
     //
     //    The app believes a key file only if THIS key signed it.   The app carries the PUBLIC half
-    //    in  DIRECTORY/it-signerI.js   ("the trust file").   A new signing key  =  a new trust file for every copy of the app.
+    //    in  DataPage/it-signerI.js   ("the trust file").   A new signing key  =  a new trust file for every copy of the app.
     // ------------------------------------------------------
 
     async function makeSigner(s) {
@@ -541,7 +541,7 @@ const ITConsole = (function () {
         return opened.fingerprint;
     }
 
-    //  The text of  DIRECTORY/it-signerI.js   (nothing secret in it)
+    //  The text of  DataPage/it-signerI.js   (nothing secret in it)
     function trustFile(s) {
         if (!s.signer) throw fail('no-signer', 'This keyring has no signing key yet.');
         const pin = S.pin(s.signer);
@@ -1591,14 +1591,14 @@ const ITConsole = (function () {
     //    THE SIGNING KEY,  AND THE APP'S TRUST FILE
     // ------------------------------------------------------
 
-    //  The key this copy of the app trusts  (../DIRECTORY/it-signerI.js),  if the page loaded it.
+    //  The key this copy of the app trusts  (../DataPage/it-signerI.js),  if the page loaded it.
     function appTrusts() { return typeof FLOGIC_IT_SIGNER !== 'undefined' && FLOGIC_IT_SIGNER ? FLOGIC_IT_SIGNER.fingerprint : null; }
 
     //  The app's trust file is there,  but still the blank one it ships with:  key-file sign-in is off in the app.
     function appTrustBlank() { return typeof FLOGIC_IT_SIGNER !== 'undefined' && !FLOGIC_IT_SIGNER; }
 
     const TRUST_BLANK_WORDS = 'The app next to this console has no trust file yet, so nobody can sign in to it with a key file. ' +
-                              'Download the trust file and put it in DIRECTORY/, in place of it-signerI.js.';
+                              'Download the trust file and put it in DataPage/, in place of it-signerI.js.';
 
     function trustProblem() {
         if (!session || !session.signing) return '';
@@ -1606,7 +1606,7 @@ const ITConsole = (function () {
         const app = appTrusts();
         if (app === null || app === session.signing.fingerprint) return '';
         return 'The app next to this console trusts a different signing key (' + app + '). Key files made here won\'t open in it until ' +
-               'DIRECTORY/it-signerI.js is replaced with this keyring\'s trust file. See "Signing key" below.';
+               'DataPage/it-signerI.js is replaced with this keyring\'s trust file. See "Signing key" below.';
     }
 
     function drawSigner() {
@@ -1619,7 +1619,7 @@ const ITConsole = (function () {
         const app = appTrusts();
         if (appTrustBlank()) { say('signer-trust', TRUST_BLANK_WORDS, 'warn'); return; }
         say('signer-trust', app === null ? '' : app === session.signing.fingerprint
-            ? 'The app next to this console trusts this key.' : 'The app next to this console trusts ' + app + ', not this key. Download the trust file and put it in DIRECTORY/.',
+            ? 'The app next to this console trusts this key.' : 'The app next to this console trusts ' + app + ', not this key. Download the trust file and put it in DataPage/.',
             app === session.signing.fingerprint ? 'good' : 'warn');
     }
 
@@ -1628,7 +1628,7 @@ const ITConsole = (function () {
         await busy(button, 'signer-msg', async function () {
             const fp = await makeSigner(session);
             markUnsaved();
-            say('signer-msg', 'Made a signing key (' + fp + '). Download the trust file, put it in the app\'s DIRECTORY/ folder, and save the keyring.', 'good');
+            say('signer-msg', 'Made a signing key (' + fp + '). Download the trust file, put it in the app\'s DataPage/ folder, and save the keyring.', 'good');
         });
     }
 
@@ -1647,7 +1647,7 @@ const ITConsole = (function () {
     function onTrustFile() {
         try {
             download('it-signerI.js', new Blob([trustFile(session)], { type: 'text/javascript' }));
-            say('signer-msg', 'Saved it-signerI.js. Put it in the app\'s DIRECTORY/ folder, in place of the one there. Nothing in it is secret.', 'good');
+            say('signer-msg', 'Saved it-signerI.js. Put it in the app\'s DataPage/ folder, in place of the one there. Nothing in it is secret.', 'good');
         } catch (e) { say('signer-msg', e.message, 'bad'); }
     }
 

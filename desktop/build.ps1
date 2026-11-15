@@ -1,6 +1,6 @@
 # Builds both Windows apps, side by side in desktop\out\:   Flogic.exe  (staff)   and   Flogic IT.exe  (IT)
 #   powershell -File desktop\build.ps1
-# Each is built with the trust file in DIRECTORY\it-signerI.js as it is NOW.   Never commit a filled-in one.
+# Each is built with the trust file in DataPage\it-signerI.js as it is NOW.   Never commit a filled-in one.
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $out = Join-Path $here 'out'

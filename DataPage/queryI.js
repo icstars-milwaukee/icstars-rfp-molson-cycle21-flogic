@@ -15,9 +15,9 @@
         It works on ANY open file:  a CSV,  an Excel sheet,  or a SQL dump's table
         (they're all just tables to it).
 
-            testI.html   =  what's there     (skeleton)
-            styleI.css   =  how it looks     (clothes)
-            scriptI.js   =  what it does     (brain)
+            flogic.html   =  what's there     (skeleton)
+            flogicI.css   =  how it looks     (clothes)
+            flogicI.js   =  what it does     (brain)
             xlsxI.js     =  reads Excel files     (a translator)
             sqlI.js      =  reads SQL dumps       (a translator)
             queryI.js    =  answers SQL questions (the query engine)
@@ -1742,7 +1742,7 @@ function isWindow(node) {
 //
 //    THE TABLES  (where the rows come from)
 //
-//    The brain hands the engine its tables  (see "QUERY" in scriptI.js).   Each one is:
+//    The brain hands the engine its tables  (see "QUERY" in flogicI.js).   Each one is:
 //
 //        { name,        what it's called in a query   ("sales")
 //          columns,     its column names               (["name", "age", "city"])

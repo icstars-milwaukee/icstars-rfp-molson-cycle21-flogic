@@ -6,11 +6,11 @@
         This file READS EXCEL FILES  (.xlsx).
         It's a translator:  it turns the first sheet into the same
         kind of text a CSV file has, and hands it to the brain
-        (scriptI.js),  which does everything else  (storage, search, scrolling).
+        (flogicI.js),  which does everything else  (storage, search, scrolling).
 
-            testI.html   =  what's there     (skeleton)
-            styleI.css   =  how it looks     (clothes)
-            scriptI.js   =  what it does     (brain)
+            flogic.html   =  what's there     (skeleton)
+            flogicI.css   =  how it looks     (clothes)
+            flogicI.js   =  what it does     (brain)
             xlsxI.js     =  reads Excel files  (the translator)
 
     ==========================================================

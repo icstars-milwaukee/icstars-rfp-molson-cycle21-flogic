@@ -5,12 +5,12 @@
 
         This file READS SQL DUMPS  (.sql).
         It's a translator,  like xlsxI.js:  it turns ONE TABLE of the dump into the same
-        kind of text a CSV file has,  and hands it to the brain  (scriptI.js),
+        kind of text a CSV file has,  and hands it to the brain  (flogicI.js),
         which does everything else  (storage, search, scrolling).
 
-            testI.html   =  what's there     (skeleton)
-            styleI.css   =  how it looks     (clothes)
-            scriptI.js   =  what it does     (brain)
+            flogic.html   =  what's there     (skeleton)
+            flogicI.css   =  how it looks     (clothes)
+            flogicI.js   =  what it does     (brain)
             xlsxI.js     =  reads Excel files     (a translator)
             sqlI.js      =  reads SQL dumps       (a translator)
 

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <!--  No network,  no outside code:  only this folder's files and the app's own core files in  ../DIRECTORY/  -->
+    <!--  No network,  no outside code:  only this folder's files and the app's own core files in  ../DataPage/  -->
     <meta http-equiv="Content-Security-Policy"
           content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'">
     <title>Flogic IT console</title>
@@ -237,7 +237,7 @@
         <section class="card" id="signer">
             <h2>Signing key</h2>
             <p class="hint">Every key file is signed with IT's signing key. It lives inside the keyring, locked with the IT passphrase.
-               The app carries the public half in <span class="mono">DIRECTORY/it-signerI.js</span> (the "trust file"), and refuses
+               The app carries the public half in <span class="mono">DataPage/it-signerI.js</span> (the "trust file"), and refuses
                key files signed by any other key.</p>
 
             <div id="signer-has" hidden>
@@ -269,11 +269,11 @@
 
 </div>
 
-<script src="../DIRECTORY/vaultcoreI.js"></script>
-<script src="../DIRECTORY/policyI.js"></script>
-<script src="../DIRECTORY/signincoreI.js"></script>
-<script src="../DIRECTORY/mailboxI.js"></script>
-<script src="../DIRECTORY/it-signerI.js"></script>
+<script src="../DataPage/vaultcoreI.js"></script>
+<script src="../DataPage/policyI.js"></script>
+<script src="../DataPage/signincoreI.js"></script>
+<script src="../DataPage/mailboxI.js"></script>
+<script src="../DataPage/it-signerI.js"></script>
 <script src="itconsoleI.js"></script>
 </body>
 </html>

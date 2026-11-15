@@ -1,7 +1,7 @@
 /*
     ==========================================================
 
-        THE NANDO NOTES  -  scriptI.js
+        THE NANDO NOTES  -  flogicI.js
 
         This file is the BRAIN of the page.
         It makes things HAPPEN when you click and type.
@@ -72,13 +72,13 @@
 // ----------------------------------------------------------
 
 const WINDOW_SIZE = 15;          //  how many rows fit in the window  (plus the header).
-                                 //  If you change this, change the 15 in styleI.css too.
+                                 //  If you change this, change the 15 in flogicI.css too.
 
 let focusOn   = false;           //  FOCUS MODE on?  (the bars fold away,  the window fills the screen:  see "FOCUS MODE")
 let focusRows = WINDOW_SIZE;     //  ...and then how many rows fit on the screen
 let gridCell  = null;            //  focus mode's SELECTED cell,  like Excel's:  { row: the row in the FILE,  col }.   null = none yet
 const FOCUS_GAP = 8;             //  focus mode:  the gap under the window  (px).   Small:  the table gets the screen.
-                                 //  If you change this, change the 8px in styleI.css's FOCUS MODE too.
+                                 //  If you change this, change the 8px in flogicI.css's FOCUS MODE too.
 
 //  How many rows the window shows right now:  15,  or a whole screen of them in focus mode.
 function windowRows() {
@@ -153,7 +153,7 @@ const QUOTE_LIMIT = 65536;       //  a quote that's still open this many letters
 //
 //    STEP 0:  FIND THE PIECES ON THE PAGE
 //
-//    Every piece in testI.html has a name tag  (id="...").
+//    Every piece in flogic.html has a name tag  (id="...").
 //    Here we find each piece by its name tag,
 //    so the brain can talk to it later.
 //
@@ -3336,7 +3336,7 @@ function startLoading(words) {
 
 
 //  Fill the pie.  0.25 = a quarter of the way around.  1 = all the way.
-//  The clothes turn this number into degrees  (see "--done" in styleI.css).
+//  The clothes turn this number into degrees  (see "--done" in flogicI.css).
 function setProgress(amount) {
     loaderPie.style.setProperty('--done', amount);
 }
@@ -3379,12 +3379,12 @@ function finishLoading() {
 //    Click a theme      ->  the whole page changes colors.
 //    Click anywhere else, or press Escape  ->  the menu folds back down into the chip.
 //
-//    The colors live in styleI.css  (look for  [data-theme="..."]).
+//    The colors live in flogicI.css  (look for  [data-theme="..."]).
 //    This list just says which themes exist,
 //    and what color each one's name glows.
 //
 //    Want a new theme?  Add one line here,
-//    plus a color block in styleI.css with the same id.
+//    plus a color block in flogicI.css with the same id.
 //
 // ----------------------------------------------------------
 
@@ -3404,7 +3404,7 @@ let foldTimer    = null;                                    //  "hide it once it
 //  Put on a theme.
 function setTheme(theme) {
     currentTheme = theme;
-    document.documentElement.dataset.theme = theme.id;      //  <html data-theme="neo-neutral">  ->  styleI.css picks the colors
+    document.documentElement.dataset.theme = theme.id;      //  <html data-theme="neo-neutral">  ->  flogicI.css picks the colors
     themeChip.title = 'Theme: ' + theme.name;
     buildThemeList();                                       //  move the check mark
 }
@@ -3420,7 +3420,7 @@ function buildThemeList() {
         option.setAttribute('role', 'menuitemradio');
         option.setAttribute('aria-checked', theme === currentTheme);
 
-        //  Hand the colors to the clothes  (see ".theme-name" in styleI.css)
+        //  Hand the colors to the clothes  (see ".theme-name" in flogicI.css)
         option.style.setProperty('--c', theme.color);
         option.style.setProperty('--c-glow', theme.glow);
 
@@ -5149,8 +5149,8 @@ document.addEventListener('keydown', function (event) {
 //        /                search
 //        F  or  Esc       leave focus mode
 //
-//    (The pill,  the strip and the button are built HERE,  not in testI.html,  so pages that copy
-//     testI.html's skeleton keep working.)
+//    (The pill,  the strip and the button are built HERE,  not in flogic.html,  so pages that copy
+//     flogic.html's skeleton keep working.)
 //
 // ----------------------------------------------------------
 

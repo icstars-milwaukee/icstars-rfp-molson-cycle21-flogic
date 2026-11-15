@@ -1,7 +1,7 @@
 // Before Tauri packs the pages into the exe:  copy them into desktop/dist/,  and add the title bar.
 //
-//   staff:  dist/DIRECTORY/...                      (only the app)
-//   IT:     dist/DIRECTORY/...  +  dist/it-console/...   (the console uses the app's core files)
+//   staff:  dist/DataPage/...                      (only the app)
+//   IT:     dist/DataPage/...  +  dist/it-console/...   (the console uses the app's core files)
 //   both:   dist/titlebar/   (the window's own top bar:  titlebarI.css + titlebarI.js)
 //
 // The repo's pages are NOT changed.   Only the copies get two extra lines in <head>,  and the console's
@@ -17,7 +17,7 @@ fn main() {
     let dist = here.join("dist");
 
     let _ = fs::remove_dir_all(&dist);
-    copy_dir(&repo.join("DIRECTORY"), &dist.join("DIRECTORY"));
+    copy_dir(&repo.join("DataPage"), &dist.join("DataPage"));
     if it {
         copy_dir(&repo.join("it-console"), &dist.join("it-console"));
     }
@@ -25,7 +25,7 @@ fn main() {
     // The webview asks for /favicon.ico by itself:  without one,  every start logs a failed request
     fs::copy(here.join("icons/icon.ico"), dist.join("favicon.ico")).unwrap();
 
-    for page in ["DIRECTORY/testI.html", "it-console/it-console.html"] {
+    for page in ["DataPage/flogic.html", "it-console/it-console.html"] {
         let p = dist.join(page);
         if p.exists() {
             let html = fs::read_to_string(&p).unwrap();
@@ -33,12 +33,12 @@ fn main() {
         }
     }
 
-    let trust = fs::read_to_string(repo.join("DIRECTORY/it-signerI.js")).unwrap_or_default();
+    let trust = fs::read_to_string(repo.join("DataPage/it-signerI.js")).unwrap_or_default();
     if trust.contains("FLOGIC_IT_SIGNER = null") {
-        println!("cargo:warning=DIRECTORY/it-signerI.js is the blank trust file: key-file sign-in will be off in this build.");
+        println!("cargo:warning=DataPage/it-signerI.js is the blank trust file: key-file sign-in will be off in this build.");
     }
 
-    println!("cargo:rerun-if-changed=../DIRECTORY");
+    println!("cargo:rerun-if-changed=../DataPage");
     println!("cargo:rerun-if-changed=../it-console");
     println!("cargo:rerun-if-changed=titlebar");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_IT");

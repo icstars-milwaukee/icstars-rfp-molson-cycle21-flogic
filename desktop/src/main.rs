@@ -5,7 +5,7 @@
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, webview::PageLoadEvent};
 
 #[cfg(not(feature = "it"))]
-const PAGE: &str = "DIRECTORY/testI.html";
+const PAGE: &str = "DataPage/flogic.html";
 #[cfg(not(feature = "it"))]
 const TITLE: &str = "Flogic";
 #[cfg(not(feature = "it"))]

@@ -1,7 +1,7 @@
 /*
     ==========================================================
 
-        THE NANDO NOTES  -  styleI.css
+        THE NANDO NOTES  -  flogicI.css
 
         This file is the CLOTHES of the page.
         It says how everything LOOKS.
@@ -42,7 +42,7 @@
 
         Want a new theme later?  Copy this block,
         change  neo-neutral  to the new name, and pick new colors.
-        Then add it to THEMES in scriptI.js.
+        Then add it to THEMES in flogicI.js.
 
         Neo-Neutral  =  a stronger grey, so the glass pops more.
 
@@ -1498,7 +1498,7 @@ h1 {
                 the header + 15 rows = 16 rows = 480 tall
 
         If you change the 15 here,
-        change WINDOW_SIZE in scriptI.js too!
+        change WINDOW_SIZE in flogicI.js too!
 
     ==========================================================  */
 
@@ -1541,7 +1541,7 @@ h1 {
     /*  ---- SNAPPY SCROLLING ----  */
 
     /*  The window always stops on a whole row.  Never half a row.
-        The BRAIN does this now  (see "SNAPPY SCROLLING" in scriptI.js),
+        The BRAIN does this now  (see "SNAPPY SCROLLING" in flogicI.js),
         because the browser's own snapping gets confused
         when only some of the rows are built.  */
 
@@ -2691,7 +2691,7 @@ button:active {
         The floating glass panels  (the Details panel,  the theme menu)  are THICK glass:
         they bend what's behind them.  Open the Details panel:  the rows behind it ripple.
 
-        How:  an SVG "filter" in testI.html  (#glassWarp)  makes soft, wavy noise,
+        How:  an SVG "filter" in flogic.html  (#glassWarp)  makes soft, wavy noise,
         and uses it to push every pixel behind the glass a little sideways or up and down.
         Then a little blur,  like frosted glass.
 
@@ -2777,7 +2777,7 @@ button:active {
 
         FOCUS MODE   (just the sheet,  as big as the screen)
 
-        The brain puts  class="focus"  on the page  (see "FOCUS MODE" in scriptI.js).
+        The brain puts  class="focus"  on the page  (see "FOCUS MODE" in flogicI.js).
         Everything above the sheet folds away.  What's left:
 
             sales.csv  ·  Rows 1–31 of 2,000           <-  the INFO STRIP  (24px,  always there)
@@ -2789,7 +2789,7 @@ button:active {
         The window is glued 26px from the top  (under the strip),  edge to edge,  8px from the bottom
         (or a bit more:  only WHOLE rows fit).   It's always the GRID  (the spreadsheet look:  A B C on top).
         (The brain MEASURES where the window starts,  so it always counts the right number of rows.
-         If you change the 8px at the bottom,  change FOCUS_GAP in scriptI.js too.)
+         If you change the 8px at the bottom,  change FOCUS_GAP in flogicI.js too.)
 
     ==========================================================  */
 

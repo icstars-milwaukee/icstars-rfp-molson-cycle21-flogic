@@ -7,9 +7,9 @@
         a few cards and charts that answer "what's in here?"  at a glance.
         No SQL,  no scrolling.   Then the sheet is right below,  like always.
 
-            testI.html   =  what's there     (skeleton)
-            styleI.css   =  how it looks     (clothes)
-            scriptI.js   =  what it does     (brain)
+            flogic.html   =  what's there     (skeleton)
+            flogicI.css   =  how it looks     (clothes)
+            flogicI.js   =  what it does     (brain)
             queryI.js    =  answers SQL questions (the query engine)
             dashI.js     =  the dashboard         (this file)
             dashI.css    =  the dashboard's clothes
@@ -46,7 +46,7 @@
               "Suggested"  puts the dashboard back the way it started.
 
     CLICK A BAR  (or a count card with a "where")  ->  the rows behind it,  asked through the query
-    engine  (askSql in scriptI.js),  so they show up in the sheet with  "← Back to file".
+    engine  (askSql in flogicI.js),  so they show up in the sheet with  "← Back to file".
 
     EXPORT REPORT  ->  the dashboard as a page to print  (or "Save as PDF" in the print window),
               and the numbers behind every tile as a small CSV.   Both are stamped with who,  which group,
@@ -60,10 +60,10 @@
         -  A layout file is checked piece by piece:  an unknown kind or column is dropped,  not trusted.
 
     HOW IT PLUGS IN  (DJ's isolate-and-reuse method:  POINT,  don't copy):
-        It points at functions that already live in scriptI.js and queryI.js  (DASH_NEEDS,  below),
-        and adds ONE thing:  when a file finishes loading,  scriptI.js calls  queryFileChanged().
+        It points at functions that already live in flogicI.js and queryI.js  (DASH_NEEDS,  below),
+        and adds ONE thing:  when a file finishes loading,  flogicI.js calls  queryFileChanged().
         This file wraps it,  so the dashboard hears about every new file  (and every sheet tab).
-        It runs the original first,  then rebuilds the dashboard.   Nothing in scriptI.js is edited.
+        It runs the original first,  then rebuilds the dashboard.   Nothing in flogicI.js is edited.
         No file open any more  (Lock calls closeFile(),  which calls queryFileChanged())  ->  the dashboard empties.
 
         The vault  (vaultI.js,  loaded AFTER this file)  is only ever READ,  through one object:
@@ -101,7 +101,7 @@ const DASH_UNLOCKED_NOTE = 'This file isn\'t locked. Share it like any work docu
 //
 //    WHAT IT POINTS AT  (checked once,  at the start)
 //
-//    If someone renames one of these in scriptI.js or queryI.js,  the dashboard says so in the
+//    If someone renames one of these in flogicI.js or queryI.js,  the dashboard says so in the
 //    console and stays out of the way,  instead of breaking the page.
 //
 // ----------------------------------------------------------
@@ -134,7 +134,7 @@ let dashResults = new Map();//  tile id  ->  what it counted
 
 // ----------------------------------------------------------
 //
-//    STEP 0:  BUILD THE PIECES  (here,  not in testI.html,  like focus mode does)
+//    STEP 0:  BUILD THE PIECES  (here,  not in flogic.html,  like focus mode does)
 //
 //    It goes right ABOVE the controls  (Drag mode,  Go to row ...),  so the order on the page is:
 //    file bar  ->  "Rows 1–15 of ..."  ->  THE DASHBOARD  ->  the controls  ->  the sheet.
@@ -234,7 +234,7 @@ function dashButton(words, title, onClick) {
 //
 //    STEP 1:  A NEW FILE IS OPEN   (the one hook)
 //
-//    scriptI.js calls  queryFileChanged()  right after a file  (or a sheet tab)  finishes loading.
+//    flogicI.js calls  queryFileChanged()  right after a file  (or a sheet tab)  finishes loading.
 //    The dashboard runs the original,  THEN rebuilds itself.
 //    (A query's ANSWER doesn't call it:  the dashboard keeps showing the file,  not the answer.)
 //
@@ -736,7 +736,7 @@ function percent(part, whole) {
 //
 //    STEP 5:  CLICK THROUGH   (the rows behind a bar,  in the sheet)
 //
-//    It asks the query engine,  the same way a "Try:" button does  (askSql in scriptI.js):
+//    It asks the query engine,  the same way a "Try:" button does  (askSql in flogicI.js):
 //        SELECT * FROM incident WHERE State = 'Closed'
 //    so the rows show up in the sheet,  with  "← Back to file"  to go back.
 //    "(blank)"  ->   WHERE State IS NULL   (an empty cell in a CSV or Excel file is NULL to the engine).

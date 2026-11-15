@@ -11,8 +11,8 @@ Write your results in `handoff/desktop-sweep-report.md` (section 9).
 ## 0. What you may do, as DJ
 
 - **Commit and push to `phase-final-edit-path-rust` only.** Commit and push each tested milestone without asking. Never push to `main`, `phase-final` or `phase-final-edit`, and never force-push.
-- **Never commit:** keyrings, `.flogic-key`, `.flogic-signer`, `.flogic-id`, packs, a filled-in `DIRECTORY/it-signerI.js`, or anything under `desktop/target`, `desktop/dist` or `desktop/out`.
-- **DJ's own trust file is in the working tree.** `DIRECTORY/it-signerI.js` holds DJ's real key, uncommitted. Copy it somewhere safe before you put a test one in, and put it back when you're done. Don't `git checkout` it away without that copy.
+- **Never commit:** keyrings, `.flogic-key`, `.flogic-signer`, `.flogic-id`, packs, a filled-in `DataPage/it-signerI.js`, or anything under `desktop/target`, `desktop/dist` or `desktop/out`.
+- **DJ's own trust file is in the working tree.** `DataPage/it-signerI.js` holds DJ's real key, uncommitted. Copy it somewhere safe before you put a test one in, and put it back when you're done. Don't `git checkout` it away without that copy.
 - **Stop only what you started.** Stop only the Flogic processes you launched, by name or by process id: `flogic*.exe`, `Flogic*.exe`, and the `msedgewebview2.exe` processes whose command line has `webview-exe-name=flogic` or `webview-exe-name=Flogic`. Never kill Edge or WebView2 broadly, and never run `msedge --version`.
 - **Line endings:** the repo's files use CRLF. Edit with an editor tool or `perl -pi`, never `sed -i`. Before adding a function to a page script, check its name isn't already used: all the scripts share one scope.
 - **The C: drive is nearly full.** About 1–3 GB is free.
@@ -24,7 +24,7 @@ Write your results in `handoff/desktop-sweep-report.md` (section 9).
 
 - **Shell:** `desktop/` is Tauri 2 (Rust) around WebView2, the same engine as Edge.
 - **Two apps from one crate:**
-  - **Flogic** (staff): `DIRECTORY/testI.html`.
+  - **Flogic** (staff): `DataPage/flogic.html`.
   - **Flogic IT**: `it-console/it-console.html`. Build it with `--features it`.
 - **What the build adds:** `desktop/build.rs` copies the pages into `desktop/dist/` and adds the title bar (`desktop/titlebar/`). The repo's own pages are not changed.
 - **Release builds for people:** `powershell -File desktop/build.ps1` makes `desktop/out/Flogic.exe` and `desktop/out/Flogic IT.exe` (3.1 MB each).
@@ -41,7 +41,7 @@ Write your results in `handoff/desktop-sweep-report.md` (section 9).
 - **Measure release builds only.** The pages run the same in debug, but the shell, start-up and IPC are slower there.
 - **Connecting:** start the exe, then `chromium.connectOverCDP('http://127.0.0.1:9334')`.
   - The first page you get may still be `about:blank`. Wait for `/tauri\.localhost/` before anything else.
-  - The page's address is `http://tauri.localhost/DIRECTORY/testI.html`. A missing file answers 500, not 404.
+  - The page's address is `http://tauri.localhost/DataPage/flogic.html`. A missing file answers 500, not 404.
 - **Real input, as before:**
   - Mouse moves and clicks at the element's centre, after checking `elementFromPoint` (the title bar now covers the top 32 px).
   - Keyboard typing with a small delay.
@@ -55,7 +55,7 @@ Write your results in `handoff/desktop-sweep-report.md` (section 9).
 - **Trust file for sign-in tests:**
   1. Make a test keyring in the IT app.
   2. Download its trust file.
-  3. Copy DJ's `DIRECTORY/it-signerI.js` aside, then put the test one in.
+  3. Copy DJ's `DataPage/it-signerI.js` aside, then put the test one in.
   4. Rebuild the staff sweep build.
   5. Put DJ's file back at the end and check it with `git diff`.
 
@@ -184,7 +184,7 @@ Do this once, quickly, before measuring:
 
 - Close the apps between runs. Leftover WebView2 processes skew start-up times.
 - Don't run the sweep while other heavy apps run. Note anything else that was open.
-- Before each commit: `git diff DIRECTORY/it-signerI.js` must show only DJ's own file, or nothing.
+- Before each commit: `git diff DataPage/it-signerI.js` must show only DJ's own file, or nothing.
 
 ## 9. The report
 

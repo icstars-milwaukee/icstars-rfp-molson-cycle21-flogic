@@ -26,7 +26,7 @@
                                           (once with the passphrase,  once with the recovery code).
         Never data.   Never a PIN or a passphrase.   Never an unlocked key.   Nothing in localStorage.
 
-        It loads LAST  (after scriptI.js and dashI.js),  and changes nothing of theirs:
+        It loads LAST  (after flogicI.js and dashI.js),  and changes nothing of theirs:
         it only CALLS  loadFile,  closeFile,  queryFileChanged.   Renamed?  It says so in the console and stays off.
 
     ==========================================================
@@ -204,7 +204,7 @@
 
 
     // ------------------------------------------------------
-    //    THE CARD   (built here,  not in testI.html:  older test pages keep working)
+    //    THE CARD   (built here,  not in flogic.html:  older test pages keep working)
     // ------------------------------------------------------
 
     function el(tag, props, kids) {
