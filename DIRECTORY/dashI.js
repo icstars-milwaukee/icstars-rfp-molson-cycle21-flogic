@@ -1099,7 +1099,9 @@ function reportRows() {
 
 //  One CSV cell.   Quotes when it needs them,  and a cell that starts like a FORMULA  (= + - @)
 //  gets a ' in front,  so Excel shows it instead of running it  (a value from the file could be  =HYPERLINK(...) ).
-function csvCell(value) {
+//  (Named  reportCell,  NOT  csvCell:  every script shares one page,  and xlsxI.js has its own  csvCell  for reading
+//   Excel files.   Same name  ->  this one replaced it,  and Excel's  -5  opened as  '-5 .)
+function reportCell(value) {
     let text = String(value);
     if (typeof value !== 'number' && /^[=+\-@\t\r]/.test(text)) text = '\'' + text;
     return /[",\r\n]/.test(text) ? '"' + text.split('"').join('""') + '"' : text;
@@ -1109,7 +1111,7 @@ function downloadReportCsv() {
     if (!exportCheck().ok) { updateExport(); return; }          //  (checked again:  the rule may have changed)
     const lines = [['Tile', 'Column', 'Value', 'Rows', 'Share']].concat(reportRows());
     lines.push([], ['Report', reportStamp()], ['Note', DASH_UNLOCKED_NOTE]);
-    const text = lines.map(function (line) { return line.map(csvCell).join(','); }).join('\r\n') + '\r\n';
+    const text = lines.map(function (line) { return line.map(reportCell).join(','); }).join('\r\n') + '\r\n';
     const blob = new Blob(['﻿' + text], { type: 'text/csv' });          //  (the BOM tells Excel it's UTF-8:  é and — come out right)
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
