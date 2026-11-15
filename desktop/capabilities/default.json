@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "window-bar",
+  "description": "Only what the page's own top bar needs: move, minimize, maximize, close. Nothing else is open to the page.",
+  "windows": ["main"],
+  "permissions": [
+    "core:window:default",
+    "core:event:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-destroy"
+  ]
+}

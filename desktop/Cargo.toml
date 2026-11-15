@@ -1,0 +1,38 @@
+# Flogic as Windows apps (Tauri 2).   The pages are the same ones the browser opens:  DIRECTORY/ and it-console/.
+#
+#   Flogic       (staff)   cargo run                       ->  DIRECTORY/testI.html
+#   Flogic IT    (IT)      cargo run --features it         ->  it-console/it-console.html
+#
+#   Both release builds, named and side by side in desktop/out/:   powershell -File desktop/build.ps1
+#
+# The staff app holds ONLY the app's files:  the IT console isn't inside it.
+# Each app is built with the trust file that's in DIRECTORY/it-signerI.js AT BUILD TIME  (build.rs says so if it's blank).
+[package]
+name = "flogic-desktop"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "flogic"
+path = "src/main.rs"
+
+[features]
+it = []              # build the IT console instead of the staff app
+sweep = []           # TEST BUILDS ONLY:  DevTools port for the performance sweep  (see src/main.rs).   Never ship it.
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"      # small:  the work happens in the webview,  not here
+panic = "abort"
+strip = true
+
+[profile.dev.package."*"]
+debug = false

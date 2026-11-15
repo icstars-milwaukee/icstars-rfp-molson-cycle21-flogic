@@ -1,0 +1,60 @@
+/*  titlebarI.css   -   the desktop window's own top bar   (only on  html.flogic-desktop:  set by titlebarI.js)
+
+    32px,  in the page's colors  (both pages have  --page,  --header-bg,  --text,  --text-soft,  --line-soft).
+    Everything the pages pin to the TOP of the screen moves down 32px,  so nothing hides under the bar.   */
+
+#flogicTitlebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 32px;
+    z-index: 2147483000;            /*  over the sign-in card,  the loader,  focus mode:  you can always move or close  */
+    display: flex;
+    align-items: center;
+    background: var(--header-bg, var(--page, #f4f4f4));
+    color: var(--text, #222);
+    border-bottom: 1px solid var(--line-soft, rgba(0, 0, 0, 0.08));
+    font: 600 12px/32px system-ui, "Segoe UI", sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+    box-sizing: border-box;
+}
+
+.flogic-tb-name { padding: 0 14px; letter-spacing: 0.02em; white-space: nowrap; }
+.flogic-tb-note { flex: 1 1 auto; color: var(--text-soft, #666); font-weight: 400; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#flogicTitlebar.warn .flogic-tb-note { color: var(--bad, #c62828); font-weight: 600; }
+
+.flogic-tb-buttons { display: flex; height: 100%; }
+.flogic-tb-btn {
+    all: unset;
+    width: 46px;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    color: inherit;
+    cursor: default;
+}
+.flogic-tb-btn svg { stroke: currentColor; stroke-width: 1; fill: none; shape-rendering: crispEdges; }
+.flogic-tb-btn:hover { background: rgba(127, 127, 127, 0.18); }
+.flogic-tb-btn:active { background: rgba(127, 127, 127, 0.28); }
+#flogicClose:hover { background: #c42b1c; color: #fff; }
+#flogicClose:active { background: #a52617; color: #fff; }
+
+
+/*  ----  room for the bar  ----  */
+
+html.flogic-desktop { padding-top: 32px; }
+
+/*  The app  (DIRECTORY/)  */
+html.flogic-desktop #vaultCard,
+html.flogic-desktop #loader { top: 32px; }
+html.flogic-desktop #themeChip,
+html.flogic-desktop #themeMenu { top: 56px; }
+html.flogic-desktop #focusInfo { top: 32px; }
+html.flogic-desktop body.focus #output { top: 58px; }
+html.flogic-desktop body.focus #fileArea { top: 62px; }
+
+/*  The IT console  */
+html.flogic-desktop .bar { top: 40px; }
+html.flogic-desktop .card { scroll-margin-top: 96px; }
