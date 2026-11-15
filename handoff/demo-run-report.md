@@ -385,3 +385,29 @@ After the fix: "Someone new" showed the sign-in screen. Hank connected his own f
 5. **The friction a demo audience will see.** One-at-a-time packing, no button to save the signing key, every downloaded key file having the same name, and the page still being called "CSV Reader".
 
 Thanks, DJ. The pages held up well.
+
+---
+
+## Added 14 Nov: shared packs, packing many files, packs into IT's folder
+
+Commit `0afb9c8`. Tested: 27 core checks and 23 console checks in Node, 18 checks on writing packs into IT's folder (an in-memory folder), and 43 checks with real mouse and keyboard in headed Edge (console and app, four people). The older vault test pages give the same results as before.
+
+**What changed**
+
+- **One pack, one or more groups.** The file is locked with a fresh key, and that key is locked once for each group. Anyone in any of the pack's groups can open it.
+- **Every new pack is signed by IT's signing key.** The signature covers the groups, each group's export rule, the locked keys and a hash of the data. A pack made by someone else, or changed in any way, is refused. Older single-group packs still open.
+- **Export per group, strictest first.** A pack starts with nobody exporting if any of its groups can't export. IT can tick a group back on (only one whose own rule allows export). The page warns on that row, and Pack has to be clicked twice. In the app, export needs the pack, the person's group rule and their level to all say yes.
+- **Pack many files at once.** Pick several files. Each gets a row with group boxes and export boxes, and there's a "Same groups for every file" button. Rows start with no group. Empty files, wrong file types and two files that make the same pack name are stopped on their rows.
+- **Packs go into IT's folder** when it's connected: `packs/<group>/<name>.flogic`, one copy per group. Otherwise they download.
+- Auto-lock is unchanged: it still follows the person's strictest group, not the file.
+
+**Code, for the tutorial**
+
+- `vaultcoreI.js`: `makeSharedPack`, `checkPackSignature`, `PACK_VERSION` (new). `readPackHeader` reads v2. `openPack(bytes, key, groupId)` takes the group for v2.
+- `signincoreI.js`: `trustedKey` is exported. The session's `openPack` handles v2 (needs `pinned`).
+- `mailboxI.js`: `PACKS_DIR`, `putPack(groupId, fileName, bytes)`, with strict name checks.
+- `vaultI.js`: `noExport()` (new) behind `canExport` / `whyNoExport`. `openPackFile` handles v2 and checks the signature first. Save as CSV says "IT sets this for each file it packs." when the pack is the reason.
+- `itconsoleI.js`: `packGroups`, `strictExport`, `loosened` (new). `packFile(s, name, bytes, groupIds, exportIds, made)`. The pack list (`queue`, `drawQueue`, `onFilesPicked`, `onRowGroup`, `onRowExport`, `onSameGroups`, `deliverPack`). Pack log entries have `groups`, `export` and `by`.
+- `it-console.html` / `itconsoleI.css`: the pack form is now a file list.
+
+**Not tested:** the folder picker by hand (the code that writes into the folder was tested with an in-memory folder), and Chrome.
