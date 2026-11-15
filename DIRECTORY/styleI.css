@@ -494,9 +494,10 @@ h1 {
 }
 
 
-/*  ---- THE DETAILS  ("Details ▾") ----
+/*  ---- THE TICKET VIEWER:  THE DETAILS DRAWER  (click a cell,  or "Details ▾") ----
 
-    Drops down right under the bar.
+    Slides in from the RIGHT edge of the SCREEN,  top to bottom.   "fixed"  =  glued to the screen,  not the page:
+    scrolled down?  Focus mode?  It's still right there,  never cut off at the top.   The sheet stays in view on the left.
       1.  The FOCUS card:  the match's full text,  bigger,  dark words on a light square
           (the easiest way round to read a lot of words).  Long?  It scrolls on its own.
       2.  The whole row:  every column's name and value.  The target is a dark square,
@@ -517,14 +518,14 @@ h1 {
          └────────────┴───────────────────────────────┘
 */
 #aimRow {
-    position: absolute;
-    top: calc(100% + 6px);          /*  just under the bar  */
-    left: 0;
+    position: fixed;
+    top: 0;
     right: 0;
-    z-index: 9;                     /*  over the search bar and the sheet  */
+    bottom: 0;
+    width: min(420px, 100vw);       /*  a phone?  the whole width  */
+    z-index: 35;                    /*  over the sheet,  the menus and focus mode's strip  (the pill floats over it:  40)  */
     display: flex;
     flex-direction: column;
-    max-height: 440px;
     overflow: hidden;
     font-family: "Segoe UI", system-ui, Arial, sans-serif;
     font-size: 13px;
@@ -533,15 +534,16 @@ h1 {
     background: linear-gradient(135deg, var(--glass-top), var(--glass-bottom));
     backdrop-filter: blur(12px);
     border: 1px solid var(--glass-edge);
-    border-radius: 12px;
+    border-right: 0;                /*  it runs off the screen's edge  */
+    border-radius: 12px 0 0 12px;
     box-shadow:
-        0 12px 40px rgba(0, 0, 0, 0.18),
+        -12px 0 40px rgba(0, 0, 0, 0.18),
         inset 0 1px 0 var(--shine, rgba(255, 255, 255, 0.9));
-    animation: row-drop 0.22s ease-out;
+    animation: row-slide 0.22s ease-out;
 }
 
-@keyframes row-drop {
-    from { opacity: 0; transform: translateY(-6px); }
+@keyframes row-slide {
+    from { opacity: 0; transform: translateX(24px); }
 }
 
 /*  Its top line:   Row 151  ·  40 columns                ×   (a dark square, like the theme menu's title)  */
@@ -577,7 +579,7 @@ h1 {
     flex-shrink: 0;                 /*  never squeezed:  the row list below gives up room first  */
     display: flex;
     flex-direction: column;
-    max-height: 200px;
+    max-height: 40vh;               /*  a tall drawer:  more room for a long ticket's notes  */
     background: var(--square-light);
     box-shadow: inset 0 0 12px var(--inner-glow, rgba(255, 255, 255, 0.8));   /*  glowing white from inside  */
     border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.6));
@@ -626,6 +628,8 @@ h1 {
 /*  2.  The list:   [column name]  [its full value],  one line each  (or more, when it wraps).  It scrolls.  */
 #aimRowList {
     display: grid;
+    flex: 1 1 auto;                 /*  the rest of the drawer,  down to the screen's bottom  */
+    align-content: start;
     min-height: 90px;               /*  always room for a few rows  */
     grid-template-columns: minmax(80px, max-content) minmax(0, 1fr);
     overflow-y: auto;
@@ -1595,20 +1599,6 @@ h1 {
 
 
 
-/*  ----------------------------------------------------------
-
-        WHEN YOU CLICK "EXPAND"
-
-        No more 15-row limit.  Show everything.
-        Also:  stop floating.
-
-    ----------------------------------------------------------  */
-
-#output.expanded {
-    height: auto;
-    animation: none;
-}
-
 
 
 /*  ----------------------------------------------------------
@@ -1641,7 +1631,7 @@ h1 {
 
     "perspective"  =  how far away your eye is:  the near edge looks bigger,  so it reads as 3D.
     Only "transform" and "opacity" change:  the two cheapest things to animate.
-    (Written AFTER  "#output.expanded",  so the flip wins over its  "animation: none".)  */
+*/
 #output.flip-away {
     animation:
         float 6s steps(3) infinite,                                     /*  (the SAME float:  it just keeps going)  */
@@ -1654,9 +1644,6 @@ h1 {
         flip-back 0.25s cubic-bezier(0.5, 1, 0.89, 1);                  /*  slowing down as it lands  */
 }
 
-/*  (No float in Expand mode:  just the flip.)  */
-#output.expanded.flip-away { animation: flip-away 0.25s cubic-bezier(0.11, 0, 0.5, 0) forwards; }
-#output.expanded.flip-back { animation: flip-back 0.25s cubic-bezier(0.5, 1, 0.89, 1); }
 
 @keyframes flip-away {
     from { transform: perspective(3000px) rotateY(0deg);   opacity: 1; }
@@ -1996,19 +1983,11 @@ mark {
 
 /*  ----------------------------------------------------------
 
-        "GO TO LINE"  +  "EXPAND"  AREA
+        THE CONTROLS ROW   +   "GO TO ROW"  IN THE SHEET'S CORNER
 
     ----------------------------------------------------------  */
 
-/*  "flex" lines them up side by side, with NO gaps,
-    so  [Row #] [Go to row]  join into one bar:
-
-         ┌───────┬───────────┐        ┌───────────────────┐
-         │░Row # │▓ Go to row│        │▓ Expand (show all)│
-         └───────┴───────────┘        └───────────────────┘
-                                 ^^^^
-                    extra space:  Expand changes the WHOLE page,
-                    so it sits apart  (a natural "careful" signal)  */
+/*  [ Drag mode ]   [ Spreadsheet View ]   in the middle,  above the sheet  */
 #controls {
     display: flex;
     justify-content: center;        /*  in the middle  */
@@ -2017,24 +1996,58 @@ mark {
     margin: 0 0 15px;
 }
 
+/*  THE SHEET'S FRAME:  exactly as wide as the glass window,  so "Go to row" can line up with its left edge.  */
+#sheet {
+    width: fit-content;
+    max-width: 100%;
+    margin: 0 auto;
+}
+
+/*  "GO TO ROW":  small and quiet,  tucked under the sheet's bottom-left corner.
+    It's handy now and then,  so it stays out of the main controls  (and off the sheet itself).
+    "flex" with NO gaps  ->  [Row #] [Go to row]  join into one little bar:
+
+         ┌────────────────────────────────────────┐
+         │  the sheet ...                          │
+         └────────────────────────────────────────┘
+         ┌──────┬──────────┐
+         │░Row #│▓Go to row│
+         └──────┴──────────┘                                  */
+#jumpBar {
+    display: flex;
+    margin: 10px 0 0 6px;
+    opacity: 0.75;                  /*  quiet until you want it  */
+    transition: opacity 0.15s;
+}
+
+#jumpBar:hover,
+#jumpBar:focus-within {
+    opacity: 1;
+}
+
 /*  The LEFT half of the bar:  round corners on the left only  */
-#jumpInput {
-    width: 90px;
-    padding: 0 12px;
-    line-height: 34px;
-    border-radius: 12px 0 0 12px;
+#jumpBar #jumpInput {
+    width: 74px;
+    padding: 0 10px;
+    line-height: 28px;
+    font-size: 13px;
+    border-radius: 10px 0 0 10px;
     border-right: 1px solid var(--line, rgba(255, 255, 255, 0.6));  /*  the white line between the 2 squares  */
 }
 
 /*  The RIGHT half:  round corners on the right only, and no edge on the left  (the line above is the edge)  */
 #jumpBtn {
     margin: 0;
+    padding: 0 12px;
+    line-height: 28px;
+    font-size: 13px;
     border-left: none;
-    border-radius: 0 12px 12px 0;
+    border-radius: 0 10px 10px 0;
 }
 
-#expandBtn {
-    margin: 0 0 0 28px;             /*  the extra space  */
+/*  Focus mode:  the Row # box lives in the pill instead  (# button).  */
+body.focus #jumpBar {
+    display: none;
 }
 
 /*  "Drag mode".  First in the row,  so people see it right away.
@@ -2837,16 +2850,10 @@ body.focus .line-num.grid-head {
     box-shadow: inset -2px 0 0 var(--formula);
 }
 
-/*  The Details panel  (click a cell)  still works:  it drops down over the top of the sheet.  */
-body.focus #fileArea {
-    position: fixed;
-    top: 30px;
-    left: 16px;
-    right: 16px;
-    width: auto;
-    height: 0;
-    margin: 0;
-    z-index: 30;
+/*  The Details drawer  (click the selected cell)  works here as it does everywhere:  it's glued to the screen's right edge.
+    It starts under the info strip,  so the file's name and "Rows 1–31" stay readable.  */
+body.focus #aimRow {
+    top: 26px;
 }
 
 

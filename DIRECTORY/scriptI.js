@@ -181,12 +181,12 @@ const statusText  = document.getElementById('status');         //  the "Rows 1�
 const outputBox   = document.getElementById('output');         //  the glass window
 const headerBox   = document.getElementById('header');         //  the header row  (line 0)
 const rowsBox     = document.getElementById('rows');           //  the rows inside the window
-const controls    = document.getElementById('controls');       //  the Drag mode + Go-to-row + Expand area
+const controls    = document.getElementById('controls');       //  the Drag mode + Spreadsheet View area
 const dragBtn     = document.getElementById('dragBtn');        //  the "Drag mode" button  (on / off)
 const dragAnchor  = document.getElementById('dragAnchor');     //  drag mode's anchor dot
+const jumpBar     = document.getElementById('jumpBar');        //  "Go to row",  in the sheet's bottom-left corner
 const jumpInput   = document.getElementById('jumpInput');      //  the "Row #" box
 const jumpBtn     = document.getElementById('jumpBtn');        //  the "Go to row" button
-const expandBtn   = document.getElementById('expandBtn');      //  the "Expand" button
 const viewBtn     = document.getElementById('viewBtn');        //  "Spreadsheet View"  /  "CSV View"
 const topBtn      = document.getElementById('topBtn');         //  the "Top" button
 const loader      = document.getElementById('loader');         //  the cloudy loading screen
@@ -779,8 +779,7 @@ function closeFile() {
     loadId++;                               //  a file still loading?  It stops  (it checks loadId)
     searchId++;                             //  ...and so does a search still going
     if (focusOn) setFocus(false);
-    if (outputBox.classList.contains('expanded')) expandBtn.click();
-    showRow(false);                         //  the Details panel
+    showRow(false);                         //  the Details drawer
     closeQueryMenu();
     hideTag();
     finishLoading();
@@ -819,6 +818,7 @@ function closeFile() {
     readingName.textContent = '';
     readingFrom.hidden = true;
     controls.hidden    = true;
+    jumpBar.hidden     = true;
     applyLook();                            //  (no file:  the badge and the sheet tabs go away)
     fileBadge.hidden   = true;
     statusText.textContent = 'Pick a CSV file to get started.';
@@ -1367,7 +1367,7 @@ function columnAt(spot) {
 //    (Measured:  that was 6.6 of the 7.1 ms a sideways scroll cost.)
 //
 //    So the window's size is measured ONCE,  and remembered.  It only changes when:
-//    a new file or search,  a flip,  Expand,  the screen gets resized,  or sizeWindow runs.
+//    a new file or search,  a flip,  focus mode,  the screen gets resized,  or sizeWindow runs.
 //    Those call boxChanged(),  and the next one who asks measures it fresh.
 //
 // ----------------------------------------------------------
@@ -1623,21 +1623,11 @@ function jumpToLine() {
     if (index === matches.length) index = matches.length - 1;
 
 
-    if (outputBox.classList.contains('expanded')) {
-
-        //  Window is expanded?  Scroll the PAGE so the row lands in the middle of the screen.
-        const rowsTopOnPage = rowsBox.getBoundingClientRect().top + window.scrollY;
-        window.scrollTo(0, rowsTopOnPage + pageSpotFor(index * rowHeight - window.innerHeight / 2));
-        buildVisibleRows();
-
-    } else {
-
-        //  Window is small?  Scroll the WINDOW so the row sits right under the header.
-        //  (Build the rows there FIRST, so the window has something to land on.)
-        const top = index * rowHeight;
-        buildVisibleRows(top);
-        setViewY(top);
-    }
+    //  Scroll the WINDOW so the row sits right under the header.
+    //  (Build the rows there FIRST, so the window has something to land on.)
+    const top = index * rowHeight;
+    buildVisibleRows(top);
+    setViewY(top);
 
     updatePosition();                                   //  update the "Rows 1–15" words
 
@@ -1750,15 +1740,10 @@ function snapToTarget() {
     const col = aimHits[aimHit];
 
 
-    //  1.  Up and down:  the row in the middle of the window  (or of the screen, when it's expanded).
-    if (outputBox.classList.contains('expanded')) {
-        const rowsTopOnPage = rowsBox.getBoundingClientRect().top + window.scrollY;
-        window.scrollTo(0, rowsTopOnPage + pageSpotFor(aimAt * rowHeight - window.innerHeight / 2));
-    } else {
-        const top = Math.max(0, (aimAt - Math.floor(windowRows() / 2)) * rowHeight);
-        buildVisibleRows(top);
-        setViewY(top);
-    }
+    //  1.  Up and down:  the row in the middle of the window.
+    const top = Math.max(0, (aimAt - Math.floor(windowRows() / 2)) * rowHeight);
+    buildVisibleRows(top);
+    setViewY(top);
 
 
     //  2.  Sideways:  the column in the middle.
@@ -1898,7 +1883,7 @@ const FOCUS_LETTERS = 20000;
 
 function showRow(open) {
     if (open && detailsTarget() === null) return;       //  (nothing to show)
-    if (open) closeQueryMenu();                         //  (the query menu lives in the same spot)
+    if (open) closeQueryMenu();                         //  (one at a time:  an answer would swap the table under the Details)
     else picked = null;                                 //  (closed:  a clicked cell is forgotten)
     aimRow.hidden = !open;
     aimRowBtn.setAttribute('aria-expanded', open);
@@ -2093,7 +2078,7 @@ rowsBox.addEventListener('pointerdown', function (e) {
 });
 outputBox.addEventListener('scroll', hideTag, { passive: true });
 outputBox.addEventListener('wheel', hideTag, { passive: true });
-window.addEventListener('scroll', hideTag, { passive: true });         //  (Expand mode:  the page scrolls)
+window.addEventListener('scroll', hideTag, { passive: true });         //  (the page scrolls:  the tag would be left behind)
 
 rowsBox.addEventListener('click', function (e) {
     const cell = e.target.closest('.cell');
@@ -2126,33 +2111,6 @@ searchInput.addEventListener('keydown', function (e) {
 });
 
 drawAim();                          //  start out "Ready"
-
-
-
-// ----------------------------------------------------------
-//
-//    EXPAND  /  SHRINK
-//
-//    Click once   ->  show ALL the rows.
-//    Click again  ->  back to the 15-row window.
-//
-//    (Even "show all" only BUILDS the rows on your screen.
-//     The page just gets as tall as all of them.)
-//
-// ----------------------------------------------------------
-
-expandBtn.addEventListener('click', function () {
-
-    //  "toggle" = a light switch.  On -> Off.  Off -> On.
-    const expanded = outputBox.classList.toggle('expanded');
-
-    expandBtn.textContent = expanded ? 'Shrink to 15-row window' : 'Expand (show all)';
-
-    sizeWindow();
-    updateColumns();
-    buildVisibleRows();
-    updatePosition();
-});
 
 
 
@@ -2225,15 +2183,14 @@ function switchLook() {
 
     //  Remember where you are.  (The header gets taller or shorter,  and the browser "helpfully"
     //  nudges the scrollbar to make up for it:  you'd land a row off.  So put it back after.)
-    const expanded = outputBox.classList.contains('expanded');
-    const y = expanded ? 0 : readViewY();
+    const y = readViewY();
 
     excelLook = !excelLook;
     applyLook();
     layoutColumns();            //  the spreadsheet look:  empty columns fill the wider window  (or take them away)
     updateColumns(true);        //  new width,  the letters row,  Excel's row numbers:  rebuild the header and the rows
     sizeWindow();               //  the letters row makes the header 1 row taller
-    if (!expanded) setViewY(y);
+    setViewY(y);
     buildVisibleRows();
     updatePosition();
     drawAim();                  //  the snap menu:  Excel addresses  (or not)
@@ -2296,7 +2253,7 @@ function sizeWindow() {
     boxChanged();                                       //  the window's size is about to change:  measure it fresh next time
     outputBox.style.height = '';                        //  start fresh
 
-    if (outputBox.classList.contains('expanded') || matches.length === 0) return;
+    if (matches.length === 0) return;
 
 
     const style     = getComputedStyle(outputBox);
@@ -2351,9 +2308,7 @@ function updatePosition(y) {
     //  So:   how far we scrolled  ÷  one row's height  =  which row is at the top.
     const first = Math.min(Math.round((y === undefined ? readViewY() : y) / rowHeight), matches.length - 1);
 
-    const last = outputBox.classList.contains('expanded')
-        ? matches.length - 1                                    //  expanded?  You can see them all.
-        : Math.min(first + windowRows(), matches.length) - 1;   //  small?     The top row + 14 more  (focus mode:  a screenful).
+    const last = Math.min(first + windowRows(), matches.length) - 1;    //  the top row + 14 more  (focus mode:  a screenful)
 
 
     //  matches holds row numbers  (0, 1, 2...).  Row numbers start at 1  (the header is 0).  So:  +1.
@@ -2377,7 +2332,6 @@ function updatePosition(y) {
 //    SCROLLING
 //
 //    Window scrolls  ->  build the rows coming in, update the words.
-//    Page scrolls    ->  same thing, but only matters when expanded.
 //
 // ----------------------------------------------------------
 
@@ -2438,8 +2392,7 @@ outputBox.addEventListener('scroll', function () {
 
 outputBox.addEventListener('wheel', function (e) {
 
-    //  Expanded?  Scrolling sideways?  Holding Shift?  Let the browser handle it.
-    if (outputBox.classList.contains('expanded')) return;
+    //  Scrolling sideways?  Holding Shift?  Let the browser handle it.
     if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
 
 
@@ -2554,7 +2507,7 @@ function snapToRow() {
     wheelTarget = null;                     //  the glide is over
     wheelLeft = 0;
 
-    if (outputBox.classList.contains('expanded') || matches.length === 0) return;
+    if (matches.length === 0) return;
 
     //  Already on a whole row?  Nothing to do.
     //  (A hair off,  less than a pixel?  Drag mode moves in fractions of a pixel.  Just set it EXACTLY:  no glide needed.)
@@ -2621,7 +2574,6 @@ let dragX      = 0;         //  where we're looking:  sideways,  in exact SHEET 
 let dragY      = 0;         //  ...and up and down.   (Exact,  even between pixels:  slow speeds add up.)
 let dragWidth  = 0;         //  measured once when you press  (so the drag never has to stop and measure)
 let dragBottom = 0;         //  the lowest it can go
-let dragPage   = false;     //  Expand mode?  Then the PAGE scrolls up and down,  not the window.
 let dragLast   = 0;         //  the time of the last step  (0 = just starting)
 
 
@@ -2670,11 +2622,10 @@ outputBox.addEventListener('pointerdown', function (e) {
     clearTimeout(snapTimer);
 
     //  Where are we now?  (Measure everything ONCE,  here.)
-    dragPage   = outputBox.classList.contains('expanded');
     dragWidth  = Math.max(outputBox.clientWidth - NUM_WIDTH, 0);
     dragX      = sheetSpot(outputBox.scrollLeft, dragWidth);
-    dragY      = dragPage ? window.scrollY : readViewY();
-    dragBottom = dragPage ? document.documentElement.scrollHeight - window.innerHeight : lowestViewY();
+    dragY      = readViewY();
+    dragBottom = lowestViewY();
 
     dragAnchor.style.left = anchorX + 'px';
     dragAnchor.style.top  = anchorY + 'px';
@@ -2724,8 +2675,7 @@ function dragStep(t) {
     //  Up and down
     if (speedY !== 0) {
         dragY = Math.min(Math.max(dragY + speedY * seconds, 0), Math.max(dragBottom, 0));
-        if (dragPage) window.scrollTo(window.scrollX, dragY);
-        else setViewY(dragY);
+        setViewY(dragY);
     }
 
     //  (Moving the scrollbars sets off the "scroll" listener,  which builds the new rows and columns.)
@@ -2831,19 +2781,6 @@ function setViewY(y) {
     outputBox.scrollTop = expectedTop;
 }
 
-
-//  Expand mode  (the whole page scrolls instead of the window):  the same squeeze, using the screen's height.
-function pageSpotFor(y) {
-    return rowsScaled ? squeeze(y, rowsHeight - window.innerHeight, matches.length * rowHeight - window.innerHeight) : y;
-}
-
-function pageViewFor(spot) {
-    return rowsScaled ? stretch(spot, rowsHeight - window.innerHeight, matches.length * rowHeight - window.innerHeight) : spot;
-}
-
-window.addEventListener('scroll', function () {
-    if (outputBox.classList.contains('expanded')) buildVisibleRows();
-});
 
 window.addEventListener('resize', function () {
     boxChanged();                   //  the window may be a new size now
@@ -2999,7 +2936,8 @@ function showMatches(wanted, list) {
     }
 
 
-    controls.hidden = false;        //  show the Go-to-row + Expand buttons
+    controls.hidden = false;        //  show Drag mode + Spreadsheet View
+    jumpBar.hidden  = false;        //  ...and Go to row,  in the sheet's corner
     updateColumns(true);            //  pick the columns to build  (and draw the header with them)
 
     //  Too many rows to draw at full height?  Then the up-and-down scrollbar gets "scaled".
@@ -3124,11 +3062,7 @@ function buildVisibleRows(scrollSpot, scrolledTopNow) {
     //      (Normal files:  the same number.  Huge files:  see "THE SCALED UP-AND-DOWN SCROLLBAR".)
     let viewTop, viewHeight, scrolledTop;
 
-    if (outputBox.classList.contains('expanded')) {
-        scrolledTop = -rowsBox.getBoundingClientRect().top;     //  how far the rows' top has scrolled above the screen
-        viewTop     = pageViewFor(scrolledTop);
-        viewHeight  = window.innerHeight;                       //  the whole screen
-    } else if (scrollSpot !== undefined) {
+    if (scrollSpot !== undefined) {
         knowBox();
         viewTop     = scrollSpot;
         scrolledTop = scrolledTopNow !== undefined ? scrolledTopNow : scrollbarSpotFor(scrollSpot);
@@ -5126,7 +5060,7 @@ function measureQueryFold() {
 
 function openQueryMenu() {
     if (fileTable === null) return;
-    showRow(false);                                     //  (the Details panel lives in the same spot)
+    showRow(false);                                     //  (an answer can swap the table:  the Details would show a row that's gone)
     clearTimeout(queryFold);
     if (queryMenu.classList.contains('closed')) {
         measureQueryFold();
@@ -5460,10 +5394,9 @@ function setFocus(on) {
     if (on && headerCells.length === 0) return;                 //  no file open?  Nothing to focus on.
 
     if (on) {
-        //  Put away what would be hidden anyway,  and leave Expand  (focus mode IS the big window).
+        //  Put away what would be hidden anyway.   (The Details drawer stays:  it's glued to the screen,  so it works in here too.)
         if (themeMenuOpen()) closeThemeMenu();
         closeQueryMenu();
-        if (outputBox.classList.contains('expanded')) expandBtn.click();
     }
 
     focusOn = on;

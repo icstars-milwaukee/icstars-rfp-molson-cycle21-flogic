@@ -174,23 +174,6 @@
             <button id="queryBtn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="queryMenu" title="Ask the open file a question:  in your own words,  by picking,  or in SQL" disabled>Ask</button>
         </div>
 
-        <!--  The DETAILS, when you press "Details ▾".  It drops down right under the bar:
-                1.  The match's FULL text,  big and easy to read  (the "focus" card).
-                2.  Its whole row:  every column's name and value.
-              (The brain fills it in.)  -->
-        <div id="aimRow" role="region" aria-label="The match's details" hidden>
-            <div class="row-head">
-                <span id="aimRowTitle"></span>
-                <button id="aimRowClose" type="button" aria-label="Close the details">×</button>
-            </div>
-            <div id="aimFocus">
-                <div id="aimFocusName"></div>
-                <div id="aimFocusText"></div>
-            </div>
-            <p class="row-sub">Viewing row vertically<span class="dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
-            <div id="aimRowList"></div>
-        </div>
-
         <!--  THE QUERY MENU,  when you press "Ask".  It unfolds out of the button.   3 ways to ask,  always in step:
                 1.  TRY:  ready questions about THIS file   (one press:  the answer).
                 2.  THE SENTENCE   (the builder):   Show [every column]   where [Score] [contains] [90]  sorted by ...
@@ -271,7 +254,8 @@
 
 
     <!--
-        5.  "Drag mode"  +  "Go to row"  +  "Expand"  +  "Spreadsheet View" / "CSV View"
+        5.  "Drag mode"  +  "Spreadsheet View" / "CSV View"
+            ("Go to row" lives in the sheet's bottom-left corner:  see 6.)
 
             "hidden"  =  you can't see it yet.
             It shows up after you pick a file.
@@ -283,16 +267,11 @@
             SPREADSHEET VIEW  /  CSV VIEW:  flips the window between the CSV look
             and the spreadsheet look  (like Excel:  letters on top,  Excel's row numbers).
             The brain changes its words to say which look you'd flip TO.
-
-            type="number"  ->  the box only takes numbers
     -->
 
     <div id="controls" hidden>
         <button id="backBtn" type="button" title="Put the answer away,  and show the file again" hidden>← Back to file</button>
         <button id="dragBtn" type="button" aria-pressed="false" title="Drag mode: hold on the sheet and drag, any direction">Drag mode</button>
-        <input type="number" id="jumpInput" min="1" placeholder="Row #">
-        <button id="jumpBtn">Go to row</button>
-        <button id="expandBtn">Expand (show all)</button>
         <button id="viewBtn" type="button" title="Flip between the spreadsheet look (like Excel) and the CSV look">Spreadsheet View</button>
     </div>
 
@@ -309,11 +288,45 @@
 
             It's empty for now.
             The brain fills it in after you pick a file.
+
+            "sheet"  =  a frame around the window,  just so "Go to row" can sit
+            in its bottom-left corner  (a quiet,  sometimes-handy tool:  out of the way).
+            type="number"  ->  the box only takes numbers
     -->
 
-    <div id="output">
-        <div id="header"></div>
-        <div id="rows"></div>
+    <div id="sheet">
+        <div id="output">
+            <div id="header"></div>
+            <div id="rows"></div>
+        </div>
+        <div id="jumpBar" hidden>
+            <input type="number" id="jumpInput" min="1" placeholder="Row #" aria-label="Row number">
+            <button id="jumpBtn" type="button">Go to row</button>
+        </div>
+    </div>
+
+
+    <!--
+        THE TICKET VIEWER   (the "Details" drawer)
+
+            Click a cell  (or press "Details ▾" in the snap menu)  ->  it slides in from the RIGHT edge of the screen:
+                1.  The cell's FULL text,  big and easy to read  (the "focus" card).
+                2.  Its whole row:  every column's name and value.
+            It's glued to the screen,  not the page:  wherever you've scrolled,  and in focus mode,  it's right there.
+            (The brain fills it in.)
+    -->
+
+    <div id="aimRow" role="region" aria-label="The ticket's details" hidden>
+        <div class="row-head">
+            <span id="aimRowTitle"></span>
+            <button id="aimRowClose" type="button" aria-label="Close the details">×</button>
+        </div>
+        <div id="aimFocus">
+            <div id="aimFocusName"></div>
+            <div id="aimFocusText"></div>
+        </div>
+        <p class="row-sub">Viewing row vertically<span class="dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
+        <div id="aimRowList"></div>
     </div>
 
     <!--  Drag mode's ANCHOR:  a little glass dot where you pressed.  Drag away from it.  -->

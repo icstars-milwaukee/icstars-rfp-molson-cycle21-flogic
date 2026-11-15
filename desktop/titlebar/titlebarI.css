@@ -53,7 +53,8 @@ html.flogic-desktop #themeChip,
 html.flogic-desktop #themeMenu { top: 56px; }
 html.flogic-desktop #focusInfo { top: 32px; }
 html.flogic-desktop body.focus #output { top: 58px; }
-html.flogic-desktop body.focus #fileArea { top: 62px; }
+html.flogic-desktop #aimRow { top: 32px; }
+html.flogic-desktop body.focus #aimRow { top: 58px; }
 
 /*  The IT console  */
 html.flogic-desktop .bar { top: 40px; }
