@@ -39,12 +39,29 @@ fn main() {
         .setup(|app| {
             // Each app keeps its own browser storage  (the staff app and IT's console never share it)
             let data = app.path().app_local_data_dir()?.join(ROLE);
+
+            // The window starts 1280 x 860.   On a screen with less room than that  (a 1080p laptop at 150% has
+            // 1280 x 672 above the taskbar),  it used to hang off the bottom:  the Lock chip sat behind the taskbar.
+            // So:  never bigger than the screen's free area,  and when it doesn't fit,  start maximized.
+            let (mut width, mut height, mut fits) = (1280.0_f64, 860.0_f64, true);
+            if let Ok(Some(screen)) = app.primary_monitor() {
+                let scale = screen.scale_factor();
+                let free = screen.work_area().size;
+                let (free_w, free_h) = (free.width as f64 / scale, free.height as f64 / scale);
+                if width > free_w || height > free_h {
+                    fits = false;
+                    width = width.min(free_w - 48.0).max(720.0);
+                    height = height.min(free_h - 48.0).max(520.0);
+                }
+            }
+
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App(PAGE.into()))
                 .additional_browser_args(&webview_flags())
                 .title(TITLE)
-                .inner_size(1280.0, 860.0)
+                .inner_size(width, height)
                 .min_inner_size(720.0, 520.0)
                 .center()
+                .maximized(!fits)
                 .decorations(false)
                 .shadow(true)
                 .visible(false)
