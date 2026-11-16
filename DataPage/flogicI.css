@@ -527,7 +527,11 @@ h1 {
     top: 0;
     right: 0;
     bottom: 0;
-    width: min(420px, 100vw);       /*  a phone?  the whole width  */
+    /*  420 wide.   But the page's column is centred,  so in a narrower window  (1280 or less:  a 1080p laptop at 150%)
+        a 420 drawer covered the snap menu's ▶ and the middle of Checks.   So it never reaches further left than the
+        file bar's right edge  (half the page + 239px)  plus a gap:  it narrows,  down to 300.   A phone?  the whole width.
+        (50% of a fixed box = half the page,  without the scrollbar:  the same middle the column is centred on.)  */
+    width: min(100vw, clamp(300px, calc(50% - 250px), 420px));
     z-index: 35;                    /*  over the sheet,  the menus and focus mode's strip  (the pill floats over it:  40)  */
     display: flex;
     flex-direction: column;

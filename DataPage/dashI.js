@@ -747,7 +747,18 @@ function showRows(col, value) {
     const from = sqlName(fileTable.engine.name);
     const where = value === DASH_BLANK ? sqlName(col) + ' IS NULL' : sqlName(col) + ' = ' + sqlWordsOf(value);
     askSql('SELECT * FROM ' + from + ' WHERE ' + where);
-    document.getElementById('output').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    scrollUnderBar(document.getElementById('controls'));
+}
+
+//  Scroll so  el  (here:  the answer's top row,  with  "← Back to file")  sits just UNDER the sticky tab bar.
+//  It used to scroll the sheet itself to the very top:  the row above it,  and its Back button,  ended up behind the bar
+//  (on a 672-tall window,  and behind the desktop window's title bar too).   The bar's own height and stick point are read,
+//  so it's right in the browser,  in the desktop app  (the bar sticks at 32,  under the title bar),  and in every theme.
+function scrollUnderBar(el) {
+    const bar = document.getElementById('stationBar');
+    const look = bar ? getComputedStyle(bar) : null;
+    const covered = look && look.position === 'sticky' && look.display !== 'none' ? (parseFloat(look.top) || 0) + bar.offsetHeight : 0;
+    window.scrollTo({ top: Math.max(0, el.getBoundingClientRect().top + window.scrollY - covered - 8), behavior: 'smooth' });
 }
 
 

@@ -138,6 +138,20 @@ try {
     else results.push('INFO desktop window: ' + await ev(`location.href + '  ' + innerWidth + 'x' + innerHeight + '  title bar: ' + !!document.getElementById('flogicTitlebar')`));
     await waitFor(`document.readyState === 'complete'`);
     await sleep(500);
+    //  EXE_SIZE=1280x672:  the desktop window resized so the PAGE is that big  (a 1080p laptop at 150%,  on any screen).   Uses winctl.ps1 size.
+    if (EXE && process.env.EXE_SIZE) {
+        const [sw, sh] = process.env.EXE_SIZE.split('x');
+        const winctl = decodeURIComponent(new URL('../sweep-tools/sweep/winctl.ps1', import.meta.url).pathname).replace(/^.([A-Za-z]:)/, '$1');
+        let [tw, th] = [Number(sw), Number(sh)];
+        for (let i = 0; i < 3; i++) {                  //  (the frameless window has hidden borders:  measure the page,  and make up the difference)
+            execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${winctl}" -ProcId ${edge.pid} -Cmd size -W ${tw} -H ${th}`);
+            await sleep(800);
+            const [iw, ih] = await ev(`[innerWidth, innerHeight]`);
+            if (iw === Number(sw) && ih === Number(sh)) break;
+            tw += Number(sw) - iw; th += Number(sh) - ih;
+        }
+        results.push('INFO resized: ' + await ev(`innerWidth + 'x' + innerHeight`));
+    }
 
     // 0. The sign-in card:  "Open a plain file without signing in"
     const plain = await ev(`(() => { const b = [...document.querySelectorAll('button')].find(b => /plain file without signing in/.test(b.textContent) && b.offsetParent); if (!b) return null; b.id = b.id || 'plainBtnForTest'; return '#' + b.id; })()`);

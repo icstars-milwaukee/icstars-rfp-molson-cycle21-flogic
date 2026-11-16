@@ -32,6 +32,20 @@ try {
     if (!EXE) await send('Page.navigate', { url: 'file:///' + PAGE });
     else { await send('Page.reload'); }
     await waitFor(`document.readyState === 'complete' && !!document.getElementById('stationTabs')`); await sleep(600);
+    //  EXE_SIZE=1280x672:  the desktop window resized so the PAGE is that big  (a 1080p laptop at 150%,  on any screen).   Uses winctl.ps1 size.
+    if (EXE && process.env.EXE_SIZE) {
+        const [sw, sh] = process.env.EXE_SIZE.split('x');
+        const winctl = decodeURIComponent(new URL('../sweep-tools/sweep/winctl.ps1', import.meta.url).pathname).replace(/^.([A-Za-z]:)/, '$1');
+        let [tw, th] = [Number(sw), Number(sh)];
+        for (let i = 0; i < 3; i++) {                  //  (the frameless window has hidden borders:  measure the page,  and make up the difference)
+            execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${winctl}" -ProcId ${proc.pid} -Cmd size -W ${tw} -H ${th}`);
+            await sleep(800);
+            const [iw, ih] = await ev(`[innerWidth, innerHeight]`);
+            if (iw === Number(sw) && ih === Number(sh)) break;
+            tw += Number(sw) - iw; th += Number(sh) - ih;
+        }
+        out.push('INFO resized: ' + await ev(`innerWidth + 'x' + innerHeight`));
+    }
     out.push('INFO ' + await ev(`location.href + '  ' + innerWidth + 'x' + innerHeight`));
     await click(`[...document.querySelectorAll('button')].find(b => /plain file without signing in/.test(b.textContent) && b.offsetParent)`, 'plain file');
     await waitFor(`(() => { const c = document.getElementById('vaultCard'); return !c || c.hidden || getComputedStyle(c).display === 'none' || getComputedStyle(c).visibility === 'hidden' || Number(getComputedStyle(c).opacity) === 0; })()`, 5000); await sleep(400);

@@ -1,8 +1,9 @@
-param([int]$ProcId, [string]$Cmd = 'rect', [int]$Steps = 60, [int]$Gap = 16)
+param([int]$ProcId, [string]$Cmd = 'rect', [int]$Steps = 60, [int]$Gap = 16, [int]$W = 1280, [int]$H = 672)
 # The app's own top window, from outside the page (found by process id: the real titled window, shown or minimized).
 #   rect     its place and state           restore   bring it back from minimized (what clicking its taskbar button does)
 #   close    the system close message (what Alt+F4 and the taskbar's Close send)
 #   sweep    resize it in many small steps and back (what dragging an edge does to the page), without taking the mouse
+#   size     make the PAGE -W x -H CSS pixels (e.g. 1280 x 672: a 1080p laptop at 150%), restored first, at its own DPI
 Add-Type @'
 using System; using System.Text; using System.Runtime.InteropServices; using System.Threading;
 public static class WC {
@@ -19,6 +20,7 @@ public static class WC {
     [DllImport("user32.dll")] static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int w, int hh, uint f);
     [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
+    [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr h);
     [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint a, uint b, out RECT r, uint c);
     public struct RECT { public int L, T, R, B; }
     public static IntPtr Find(uint pid) {
@@ -26,13 +28,14 @@ public static class WC {
         EnumWindows((h, l) => { uint p; GetWindowThreadProcessId(h, out p); if (p != pid) return true; if (GetWindow(h, 4) != IntPtr.Zero) return true; var s = new StringBuilder(200); GetWindowText(h, s, 200); if (s.ToString().StartsWith("Flogic") && IsWindowVisible(h)) { found = h; return false; } return true; }, IntPtr.Zero);
         return found;
     }
-    public static string Run(uint pid, string cmd, int steps, int gap) {
+    public static string Run(uint pid, string cmd, int steps, int gap, int w0, int h0) {
         SetProcessDPIAware();
         IntPtr h = Find(pid);
         if (h == IntPtr.Zero) return "NO-WINDOW";
         RECT r; GetWindowRect(h, out r);
         if (cmd == "restore") { ShowWindow(h, 9); return "RESTORED"; }
         if (cmd == "close") { PostMessage(h, 0x0112, (IntPtr)0xF060, IntPtr.Zero); return "SENT"; }
+        if (cmd == "size") { ShowWindow(h, 9); Thread.Sleep(150); GetWindowRect(h, out r); double k = GetDpiForWindow(h) / 96.0; SetWindowPos(h, IntPtr.Zero, r.L, Math.Max(0, r.T), (int)Math.Round(w0 * k), (int)Math.Round(h0 * k), 0x0014); return "SIZED " + w0 + "x" + h0 + " at " + k; }
         if (cmd == "sweep") {
             int w = r.R - r.L, hh = r.B - r.T;
             for (int i = 1; i <= steps; i++) { int d = (int)(Math.Sin(i * Math.PI / steps) * 500); SetWindowPos(h, IntPtr.Zero, r.L, r.T, w - d, hh - d / 2, 0x0014); Thread.Sleep(gap); }
@@ -44,4 +47,4 @@ public static class WC {
     }
 }
 '@
-[WC]::Run([uint32]$ProcId, $Cmd, $Steps, $Gap)
+[WC]::Run([uint32]$ProcId, $Cmd, $Steps, $Gap, $W, $H)
