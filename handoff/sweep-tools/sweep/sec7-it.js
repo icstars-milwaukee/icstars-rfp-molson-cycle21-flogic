@@ -57,6 +57,7 @@ const { click, type, sleep, path, note, fs, expect, C } = D;
     const ring = await D.download(page, () => click(page, '#save-btn'));
     fs.copyFileSync(ring, path.join(D.WORLD, 'sweep.flogic-keyring'));
     m = await page.locator('#keyring-msg').innerText();
+    for (let i = 0; i < 50 && /^Working/.test(m); i++) { await sleep(100); m = await page.locator('#keyring-msg').innerText(); }     // (the download can land before the message changes)
     expect('4. keyring saved (a download)', /^Saved it\.flogic-keyring/.test(m) && fs.statSync(ring).size > 1000, m);
     expect('   the stamp is in the folder', fs.existsSync(path.join(itDir, 'flogic-keyring.stamp')));
 
