@@ -271,6 +271,9 @@ function drawChecks() {
             }));
         }
         const remove = checksButton('✕', 'Remove this check', function () {
+            checksRun++;                                    //  (a run still going would put its answers on the wrong lines:  stop it)
+            checksRunning = false;
+            checksRanOn = '';
             checkList.splice(i, 1);
             checkResults.splice(i, 1);
             drawChecks();
@@ -282,7 +285,7 @@ function drawChecks() {
         checksList.appendChild(row);
     });
 
-    checksRunBtn.disabled = checkList.length === 0 || fileTable === null;
+    checksRunBtn.disabled = checkList.length === 0 || fileTable === null || checksRunning;
     if (checksRanOn !== '') {
         const n = { pass: 0, fail: 0, error: 0 };
         checkResults.forEach(function (r) { if (r !== null && r !== undefined) n[r.state]++; });
@@ -304,6 +307,13 @@ function drawChecks() {
 
 async function runChecks() {
     if (fileTable === null || checkList.length === 0) return;
+    checksRunning = true;
+    try { await runChecksNow(); } finally { checksRunning = false; if (!checksMenu.hidden) drawChecks(); }
+}
+
+let checksRunning = false;      //  Run all is going  (its button stays off till it ends)
+
+async function runChecksNow() {
     const myRun = ++checksRun;
     const table = fileTable.engine;
     function isCurrent() { return myRun === checksRun && fileTable !== null && fileTable.engine === table; }
