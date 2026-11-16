@@ -764,82 +764,157 @@ const ITConsole = (function () {
         for (const l of lines) list.appendChild(el('li', l[1], l[0]));
     }
 
-    function drawPeople() {
-        const body = $('person-list');
-        body.replaceChildren();
-        for (const p of session.people) {
-            const st = personState(session, p), k = keyState(p, null, signedBy()), l = P.level(p.level);
-            const tr = el('tr');
-            tr.id = 'person-' + p.id;
-            if (st.code === 'ended' || st.code === 'past') tr.className = 'gone';
+    //  DRAW ONLY WHAT CHANGED.   Every change  (add a person,  edit one,  edit a group,  make a key file)  calls refresh(),
+    //  and refresh() used to build every table again from nothing.   With 100 people that's about 2,500 nodes and 500 buttons:
+    //  a 60–110 ms freeze on every click.   Now:
+    //    - the people table keeps each row whose words didn't change,  and builds only the rows that did;
+    //    - the smaller tables  (the data list,  the packs)  are skipped when nothing in them changed.
+    //  What a row or table SHOWS is written down as one string  (its "look").   Same look:  leave it alone.
+    let drawnFor = null;            //  the keyring the tables below were drawn for   (a new keyring draws everything again)
+    let drawnLook = {};             //  table  ->  the look it was last drawn with
+    let personRows = new Map();     //  person id  ->  { tr,  look,  make }   the row on screen,  and its "Make key file" button
 
-            const who = el('td');
-            who.appendChild(el('strong', p.name));
-            who.appendChild(el('span', p.id, 'mono sub-id'));
-            tr.appendChild(who);
+    function forThisKeyring() {
+        if (drawnFor === session) return;
+        drawnFor = session;
+        drawnLook = {};
+        personRows = new Map();
+        $('person-list').replaceChildren();
+    }
 
-            const lv = el('td');
-            lv.appendChild(el('span', l ? l.label : p.level, 'chip level-' + (l ? l.id : 'none')));
-            tr.appendChild(lv);
+    //  Has this table's look changed since it was drawn?   (Remembers the new look.)
+    function tableChanged(table, look) {
+        forThisKeyring();
+        if (drawnLook[table] === look) return false;
+        drawnLook[table] = look;
+        return true;
+    }
 
-            tr.appendChild(el('td', groupLabels(p.groups).join(', ') || 'none'));
+    //  Everything one person's row shows,  as plain values.
+    function personView(p) {
+        const st = personState(session, p), k = keyState(p, null, signedBy()), l = P.level(p.level);
+        const off = st.code === 'ended' || st.code === 'past';
+        return {
+            off: off, name: p.name, id: p.id,
+            level: l ? l.label : p.level, levelId: l ? l.id : 'none',
+            groups: groupLabels(p.groups).join(', ') || 'none',
+            key: k.words.replace(/^K/, 'k').replace(/^N/, 'n'),
+            keyCode: off ? 'off' : k.code === 'replaced' ? 'ended' : k.code,
+            where: folder ? inFolder.get(p.id) || '' : '',
+            review: st.words, reviewCode: st.code,
+            expires: p.expires || '—',
+            make: k.code === 'none' ? 'Make key file' : 'Renew key file',
+            makeOff: !st.canIssue || !session.signing,
+            makeTitle: !session.signing ? 'Make a signing key first.' : st.canIssue ? 'Lasts ' + P.describe(p.level).grant + ' (' + l.label + ').' : st.why,
+            still: st.code === 'ended' ? 'Give access back' : 'Still needed',
+            canEnd: st.code !== 'ended',
+        };
+    }
 
-            const key = el('td');
-            key.id = 'status-' + p.id;
-            const where = inFolder.get(p.id);
-            key.appendChild(el('span', k.words.replace(/^K/, 'k').replace(/^N/, 'n'), 'state ' + (st.code === 'ended' || st.code === 'past' ? 'off' : k.code === 'replaced' ? 'ended' : k.code)));
-            if (folder && where) key.appendChild(el('span', where === 'yes' ? 'in their folder' : where === 'no' ? 'not in their folder' : 'folder copy unreadable', 'where ' + where));
-            tr.appendChild(key);
+    function personRow(v) {
+        const tr = el('tr');
+        tr.id = 'person-' + v.id;
+        if (v.off) tr.className = 'gone';
 
-            const rv = el('td');
-            rv.appendChild(el('span', st.words, 'state ' + st.code));
-            tr.appendChild(rv);
+        const who = el('td');
+        who.appendChild(el('strong', v.name));
+        who.appendChild(el('span', v.id, 'mono sub-id'));
+        tr.appendChild(who);
 
-            tr.appendChild(el('td', p.expires || '—'));
+        const lv = el('td');
+        lv.appendChild(el('span', v.level, 'chip level-' + v.levelId));
+        tr.appendChild(lv);
 
-            const act = el('td', null, 'actions');
-            const make = rowButton(k.code === 'none' ? 'Make key file' : 'Renew key file', 'make-' + p.id, function () { onMakeKey(p.id, make); }, 'primary');
-            make.disabled = !st.canIssue || !session.signing;
-            make.title = !session.signing ? 'Make a signing key first.' : st.canIssue ? 'Lasts ' + P.describe(p.level).grant + ' (' + l.label + ').' : st.why;
-            act.appendChild(make);
-            const still = rowButton(st.code === 'ended' ? 'Give access back' : 'Still needed', 'review-' + p.id, function () { onReview(p.id); });
-            still.title = 'Confirms today that ' + p.name + ' still needs access. Good for ' + P.REVIEW_EVERY_DAYS + ' days.';
-            act.appendChild(still);
-            act.appendChild(rowButton('Edit', 'edit-' + p.id, function () { startPersonEdit(p.id); }));
-            if (st.code !== 'ended') act.appendChild(rowButton('End access', 'end-' + p.id, function () { onEnd(p.id); }, 'danger'));
-            if (P.ALLOW_LEGACY_CREDENTIALS && st.code !== 'ended') {
-                act.appendChild(rowButton('Credential file', 'cred-' + p.id, function () { onMakeCredential(p.id); }, 'quiet'));
-            }
-            tr.appendChild(act);
-            body.appendChild(tr);
+        tr.appendChild(el('td', v.groups));
+
+        const key = el('td');
+        key.id = 'status-' + v.id;
+        key.appendChild(el('span', v.key, 'state ' + v.keyCode));
+        if (v.where) key.appendChild(el('span', v.where === 'yes' ? 'in their folder' : v.where === 'no' ? 'not in their folder' : 'folder copy unreadable', 'where ' + v.where));
+        tr.appendChild(key);
+
+        const rv = el('td');
+        rv.appendChild(el('span', v.review, 'state ' + v.reviewCode));
+        tr.appendChild(rv);
+
+        tr.appendChild(el('td', v.expires));
+
+        const id = v.id;
+        const act = el('td', null, 'actions');
+        const make = rowButton(v.make, 'make-' + id, function () { onMakeKey(id, make); }, 'primary');
+        make.disabled = v.makeOff;
+        make.title = v.makeTitle;
+        act.appendChild(make);
+        const still = rowButton(v.still, 'review-' + id, function () { onReview(id); });
+        still.title = 'Confirms today that ' + v.name + ' still needs access. Good for ' + P.REVIEW_EVERY_DAYS + ' days.';
+        act.appendChild(still);
+        act.appendChild(rowButton('Edit', 'edit-' + id, function () { startPersonEdit(id); }));
+        if (v.canEnd) act.appendChild(rowButton('End access', 'end-' + id, function () { onEnd(id); }, 'danger'));
+        if (P.ALLOW_LEGACY_CREDENTIALS && v.canEnd) {
+            act.appendChild(rowButton('Credential file', 'cred-' + id, function () { onMakeCredential(id); }, 'quiet'));
         }
+        tr.appendChild(act);
+        return { tr: tr, make: make };
+    }
+
+    function drawPeople() {
+        forThisKeyring();
+        const body = $('person-list');
+        let at = body.firstElementChild;                 //  walks down the rows on screen,  in the keyring's order
+        const seen = new Set();
+        for (const p of session.people) {
+            const v = personView(p), look = JSON.stringify(v);
+            let row = personRows.get(p.id);
+            if (!row || row.look !== look) {
+                const made = personRow(v);
+                if (row && row.tr.parentNode === body) {            //  the old row:  swap the new one into its place
+                    if (at === row.tr) at = made.tr;
+                    row.tr.replaceWith(made.tr);
+                }
+                row = { tr: made.tr, look: look, make: made.make };
+                personRows.set(p.id, row);
+            }
+            //  busy() turns the button back on when it's done:  a row that was kept gets its own on/off back
+            if (row.make.disabled !== v.makeOff) row.make.disabled = v.makeOff;
+            seen.add(p.id);
+            if (row.tr === at) at = at.nextElementSibling;
+            else body.insertBefore(row.tr, at);
+        }
+        while (at) { const next = at.nextElementSibling; at.remove(); at = next; }       //  rows of people no longer in the keyring
+        for (const id of Array.from(personRows.keys())) if (!seen.has(id)) personRows.delete(id);
         $('person-none').hidden = session.people.length > 0;
         $('renew-all').disabled = !session.signing || session.people.length === 0;
     }
 
     //  Each group:  its key,  its rules,  who's in it,  and what was packed for it.
     function drawGroupData() {
-        const body = $('data-list');
-        body.replaceChildren();
-        for (const g of session.groups) {
+        const rows = session.groups.map(function (g) {
             const people = session.people.filter(function (p) { return !p.ended && p.groups.indexOf(g.group) >= 0; });
             const packs = (session.packs || []).filter(function (k) { return (k.groups || [k.group]).indexOf(g.group) >= 0; });
             const names = Array.from(new Set(packs.map(function (k) { return k.pack; })));
+            return [g.label, g.group, 'v' + g.keyVersion, g.rules.export ? 'Yes' : 'No', g.rules.autoLockMin + ' min',
+                    people.length ? people.map(function (p) { return p.name + ' (' + (P.level(p.level) || { label: '?' }).label + ')'; }).join(', ') : 'nobody yet',
+                    names.length ? names.join(', ') : 'nothing packed yet'];
+        });
+        $('data-none').hidden = session.groups.length > 0;
+        if (!tableChanged('data', JSON.stringify(rows))) return;
+        const body = $('data-list');
+        body.replaceChildren();
+        for (const r of rows) {
             const tr = el('tr');
             const name = el('td');
-            name.appendChild(el('strong', g.label));
-            name.appendChild(el('span', g.group, 'mono sub-id'));
+            name.appendChild(el('strong', r[0]));
+            name.appendChild(el('span', r[1], 'mono sub-id'));
             tr.appendChild(name);
-            tr.appendChild(el('td', 'v' + g.keyVersion));
+            tr.appendChild(el('td', r[2]));
             const ex = el('td');
-            ex.appendChild(el('span', g.rules.export ? 'Yes' : 'No', g.rules.export ? 'yes' : 'no'));
+            ex.appendChild(el('span', r[3], r[3] === 'Yes' ? 'yes' : 'no'));
             tr.appendChild(ex);
-            tr.appendChild(el('td', g.rules.autoLockMin + ' min'));
-            tr.appendChild(el('td', people.length ? people.map(function (p) { return p.name + ' (' + (P.level(p.level) || { label: '?' }).label + ')'; }).join(', ') : 'nobody yet'));
-            tr.appendChild(el('td', names.length ? names.join(', ') : 'nothing packed yet'));
+            tr.appendChild(el('td', r[4]));
+            tr.appendChild(el('td', r[5]));
+            tr.appendChild(el('td', r[6]));
             body.appendChild(tr);
         }
-        $('data-none').hidden = session.groups.length > 0;
     }
 
     //  The built-in levels and rules.   Drawn once:  they can't change while the page is open.
@@ -1471,21 +1546,22 @@ const ITConsole = (function () {
     }
 
     function drawPacks() {
+        const packs = (session.packs || []).slice().reverse();
+        $('pack-none').hidden = packs.length > 0;
+        const rows = packs.slice(0, 50).map(function (k) {
+            return [k.pack, k.fileName, groupLabels(k.groups || [k.group]).join(' + '),
+                    k.export === null || k.export === undefined ? 'the group\'s rule' : k.export.length ? groupLabels(k.export).join(', ') : 'nobody',
+                    size(k.bytes), k.made];
+        });
+        if (!tableChanged('packs', JSON.stringify(rows))) return;
         const body = $('pack-list');
         body.replaceChildren();
-        const packs = (session.packs || []).slice().reverse();
-        for (const k of packs.slice(0, 50)) {
+        for (const r of rows) {
             const tr = el('tr');
-            tr.appendChild(el('td', k.pack, 'mono'));
-            tr.appendChild(el('td', k.fileName));
-            tr.appendChild(el('td', groupLabels(k.groups || [k.group]).join(' + ')));
-            tr.appendChild(el('td', k.export === null || k.export === undefined ? 'the group\'s rule'
-                                  : k.export.length ? groupLabels(k.export).join(', ') : 'nobody'));
-            tr.appendChild(el('td', size(k.bytes)));
-            tr.appendChild(el('td', k.made));
+            tr.appendChild(el('td', r[0], 'mono'));
+            for (let i = 1; i < r.length; i++) tr.appendChild(el('td', r[i]));
             body.appendChild(tr);
         }
-        $('pack-none').hidden = packs.length > 0;
     }
 
 
