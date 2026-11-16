@@ -1061,7 +1061,11 @@ const ITConsole = (function () {
         let renewed = 0;
         const left = plan.skip.map(function (x) { return x.why; });
         await busy($('renew-all'), 'issue-msg', async function () {
+            //  Each key file is a write into the drive folder  (about 0.1 s):  90 people is 8 seconds.
+            //  So it counts along,  like packing does,  instead of only saying "Working…".
+            let at = 0;
             for (const p of plan.renew) {
+                say('issue-msg', 'Renewing ' + (++at) + ' of ' + plan.renew.length + ': ' + p.name + '…');
                 const other = await folderHoldsAnother(p);
                 if (other) { left.push(p.name + ': their folder (' + p.id + ') holds a key file for "' + other + '". Renew them by name, to check.'); continue; }
                 try { await deliver(await makeKeyFile(session, p.id)); renewed++; }
