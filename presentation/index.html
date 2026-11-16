@@ -6,112 +6,24 @@
     <title>Flogic: Demo Day</title>
     <link rel="stylesheet" href="vendor/reveal/reset.css">
     <link rel="stylesheet" href="vendor/reveal/reveal.css">
-    <link rel="stylesheet" href="vendor/reveal/theme/black.css">
     <link rel="stylesheet" href="deck.css">
 </head>
 <body>
-    <!-- The moving backdrop (background.js).  It sits behind everything. -->
+    <!-- The bubbles (background.js).  They sit behind everything. -->
     <canvas id="bg" aria-hidden="true"></canvas>
-    <div id="scrim" aria-hidden="true"></div>
 
     <div class="reveal">
         <div class="slides">
 
-            <!-- 1.  THE BRIDGE.  The tags spray on while this slide is up. -->
-            <section data-beer="0">
-                <h1>Flogic</h1>
-                <h3>Open a ticket export. See it. Check it. Ask it questions.<br>Nothing leaves your machine.</h3>
-                <p class="kicker">Molson · Cycle 21 RFP</p>
-                <aside class="notes">
-                    Let the tags finish spraying (about 20 seconds for all six) while you introduce yourselves.
-                    Press V any time to hide the slides and show only the art.
-                </aside>
-            </section>
-
-            <section data-beer="0">
-                <h2>The problem</h2>
-                <div class="card">
-                    <ul>
-                        <li>Ticket exports are big spreadsheets, and the answers are buried in them.</li>
-                        <li>The real rows are sensitive, so they can't go into a cloud tool.</li>
-                        <li>Staff need quick answers. IT needs control over who sees what.</li>
-                    </ul>
-                </div>
-                <aside class="notes">Edit this to match the RFP's own wording. Keep it to three lines.</aside>
-            </section>
-
-            <section data-beer="0">
-                <h2>What Flogic does</h2>
-                <div class="cols">
-                    <div class="card"><h4>Opens your file</h4><p>Excel (.xlsx) and SQL dumps (.sql), read right in the page.</p></div>
-                    <div class="card"><h4>Shows it at a glance</h4><p>A dashboard is the first thing you see after a file opens.</p></div>
-                    <div class="card"><h4>Checks it</h4><p>Questions about the file, each with a rule for passing.</p></div>
-                    <div class="card"><h4>Answers questions</h4><p>A small database of its own, inside the page, for queries.</p></div>
-                </div>
-            </section>
-
-            <!-- A third of a glass:  the bridge above,  the first beer rising below. -->
-            <section data-beer="0.32">
-                <h2>One page, three stations</h2>
-                <h3>Sheet &nbsp;·&nbsp; Dashboard &nbsp;·&nbsp; Ticket</h3>
-                <p>One view at a time, on a carousel. Open a row and the Details drawer has the whole ticket.</p>
-            </section>
-
-            <!-- The turn:  the pint fills up over the bridge. -->
-            <section data-beer="1">
-                <h2>Keep it on tap</h2>
-                <h3>Local-first, by design</h3>
-                <div class="card">
-                    <ul>
-                        <li>The app is just files. It runs in your browser or as a small desktop app.</li>
-                        <li>The server holds no data, no keys, no passwords.</li>
-                        <li>Sign in with a key file from IT, kept in your own OneDrive or Google Drive.</li>
-                        <li>The rules are built in. Nobody can change them from a screen.</li>
-                    </ul>
-                </div>
-                <aside class="notes">This is where the bridge fills with beer. Say it's "on tap": available when you need it, never poured out.</aside>
-            </section>
-
-            <!-- The live app.  It loads only when this slide is reached.  It starts "inert" under a click shield,
-                 so the deck keeps the keyboard;  one click on the frame hands the keyboard to the app (deck.js). -->
-            <section data-beer="1" class="demo">
-                <div class="frame-wrap">
-                    <iframe data-src="../DataPage/flogic.html" title="Flogic, live" inert></iframe>
-                    <button type="button" class="shield"><span>Click to use the live app</span></button>
-                </div>
-                <p class="demo-note">
-                    <a href="../DataPage/flogic.html" target="_blank" rel="noopener">Open the app in its own window ↗</a>
-                    <button type="button" class="release">◀ Back to slides</button>
-                </p>
-                <aside class="notes">
-                    Use made-up data only, never a real export.
-                    The app loads only when you reach this slide, so it doesn't slow the backdrop before then.
-                    Click the frame to drive the app. While you do, the arrow KEYS belong to the app:
-                    press "Back to slides" (under the frame) or the on-screen arrows (bottom right) to return to the deck.
-                    If the app is blank in this frame, open it in its own window with the link and switch windows.
-                </aside>
-            </section>
-
-            <section data-beer="1">
-                <h2>Two apps, one idea</h2>
-                <div class="cols">
-                    <div class="card"><h4>Flogic</h4><p>For staff. Opens files, shows, checks, queries.</p></div>
-                    <div class="card"><h4>Flogic IT</h4><p>For IT. Makes and signs each person's key file.</p></div>
-                    <div class="card"><h4>Anywhere</h4><p>Windows apps, a web page, or a Docker image on any host.</p></div>
-                </div>
-            </section>
-
-            <section data-beer="1">
-                <h2>Cheers</h2>
-                <h3>Questions?</h3>
-                <p class="kicker">Flogic · Molson Cycle 21</p>
+            <!-- The live app, on the bubbles.  No words of our own.  (Add more <section>s for more slides.) -->
+            <section>
+                <iframe src="../DataPage/flogic.html" title="Flogic"></iframe>
             </section>
 
         </div>
     </div>
 
     <script src="vendor/reveal/reveal.js"></script>
-    <script src="vendor/reveal/plugin/notes/notes.js"></script>
     <script src="background.js"></script>
     <script src="deck.js"></script>
 </body>
