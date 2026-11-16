@@ -2451,6 +2451,21 @@ outputBox.addEventListener('scroll', function () {
 });
 
 
+//  WHILE THE SHEET MOVES,  NOTHING IN IT IS HOVERED.
+//  The box under the mouse glows  (.cell:hover in flogicI.css).   Scroll with the mouse resting on the sheet,  and a NEW box
+//  slides under it on every step:  the hover jumped along,  and the browser painted the whole sheet again,  every step.
+//  So while it scrolls  (until 0.15 s after the last step)  the rows don't take the mouse  (#output.moving in flogicI.css);
+//  the glow comes back,  on the box under the mouse,  when the sheet stops.
+//  Measured on a 300-column file,  60 sideways steps:  95 paints of the sheet  ->  22  (about when new columns are built),
+//  760 ms of painting  ->  200 ms.
+let sheetMoving = 0;                    //  the "it's been still for 0.15 s" timer
+outputBox.addEventListener('scroll', function () {
+    if (!sheetMoving) outputBox.classList.add('moving');
+    clearTimeout(sheetMoving);
+    sheetMoving = setTimeout(function () { sheetMoving = 0; outputBox.classList.remove('moving'); }, 150);
+}, { passive: true });
+
+
 
 // ----------------------------------------------------------
 //

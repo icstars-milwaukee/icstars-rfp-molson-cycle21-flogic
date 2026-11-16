@@ -1883,6 +1883,17 @@ h1 {
     z-index: 1;                 /*  "stack me on top," so the glow isn't hidden under the boxes next to it  */
 }
 
+/*  ...but not while the sheet is SCROLLING  (the brain adds "moving" until it's been still for 0.15 s).
+    A new box slides under the resting mouse on every step:  the hover jumping along made the browser paint the whole sheet
+    again,  every step.   While it moves,  the rows don't take the mouse at all,  so nothing is hovered;  the glow comes back,
+    on the box under the mouse,  when the sheet stops.   (Turning off only the glow wasn't enough:  the hover itself costs.)
+    60 sideways steps on a 300-column file:  95 paints of the sheet  ->  22,  760 ms of painting  ->  200.
+    The cost:  a click within 0.15 s of the last scroll step lands on the sheet,  not on a box.  */
+#output.moving #rows,
+#output.moving #header {
+    pointer-events: none;
+}
+
 
 
 /*  ----------------------------------------------------------
