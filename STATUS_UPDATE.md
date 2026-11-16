@@ -20,7 +20,7 @@ Pick one: **Green** (on track) · **Yellow** (at risk, we have a plan) · **Red*
 
 ## Next, before the presentation
 
-- **Next:** Fix demo step 9 (D-31). Take the missing screenshots (D-30). Run the gate with every teammate. Inject one failure mid-run. Do two timed rehearsal rounds with issues filed. Code freeze 11/18, then rehearse only.
+- **Next:** Set up the demo keyring for the fixed step 9 (D-31: Morgan without HR, plus an HR-only pack). Take the missing screenshots (D-30). Run the gate with every teammate. Inject one failure mid-run. Do two timed rehearsal rounds with issues filed. Code freeze 11/18, then rehearse only.
 
 ## Top risks
 
