@@ -60,6 +60,8 @@
     let me     = null;          //  the signed-in person:   { id, name, groups, expires, prefs,  level, endsAt, byKey  (key-file sign-in) }
     let keys   = null;          //  their unlocked group keys:   Map  group -> { keyVersion, key }   (not readable:  extractable false)
     let pack   = null;          //  the open data pack's label  (V4)
+    let presets = [];           //  the data packs that came IN the key file  (still locked;  in memory only;  Lock forgets them)
+    let presetBar = null;       //  where they show,  under "Reading from..."   (made further down:  see PRESET DATA)
     const listeners = [];
 
     function changed() {
@@ -509,6 +511,7 @@
                     const copy = await S.claim(keyFile, a.input.value, TRUSTED);
                     const o = await S.unlock(copy, a.input.value, TRUSTED);
                     await saveCopy(o.copy);
+                    o.presets = await presetsOf(keyFile);           //  the data IT put in the key file  (never saved on the laptop)
                     return o;
                 });
                 a.input.value = '';
@@ -546,7 +549,10 @@
                     //  RENEWAL:  a newer key file in the drive folder replaces this one,  under the same PIN.
                     //  (Ending soon?  Then it's worth asking for the folder again.   Otherwise:  only if it's still allowed.)
                     const endingSoon = new Date(o.claims.expires) - Date.now() < P.RENEW_WHEN_DAYS_LEFT * 86400000;
-                    const theirs = await reconnect(endingSoon, copy.id);
+                    //  PRESET DATA rides in the key file,  and the laptop copy never keeps data:  so when this person's key file
+                    //  carries some  (the signed claims say so),  it's worth asking for the folder again,  to read it from there.
+                    const carriesData = typeof o.claims.packs === 'string';
+                    const theirs = await reconnect(endingSoon || carriesData, copy.id);
                     if (theirs) {
                         try {
                             const k = await keyFromFolder(theirs);
@@ -559,6 +565,8 @@
                                 copy = o.copy;
                                 o.renewed = true;
                             }
+                            //  The folder's key file is the very one this laptop holds  (same serial)?   Then its data is this person's.
+                            if (k && JSON.parse(k.claims).serial === o.claims.serial) o.presets = await presetsOf(k);
                         } catch (e) { console.warn('Vault: the folder\'s key file wasn\'t used:', e); }
                     }
                     S.notEnded(o.claims);
@@ -611,6 +619,7 @@
         signIn({ id: c.sub, name: c.name, groups: c.groups, expires: null, prefs: copy.prefs || {},
                  level: c.level, endsAt: new Date(c.expires).getTime(), byKey: true }, opened.keys);
         if (opened.renewed) say('IT renewed your access. Good until ' + S.niceDate(new Date(c.expires)) + '.');
+        offerPresets(opened.presets);
     }
 
 
@@ -796,6 +805,7 @@
         keys = null;
         me = null;
         pack = null;
+        offerPresets([]);                       //  the key file's data leaves with the keys
         say('');
         closeFile();
         if (!fromOtherTab) tell('lock');
@@ -808,6 +818,7 @@
         me = null;
         pack = null;
         state = 'off';
+        offerPresets([]);
         lockReason = '';
         stopIdle();
         hideCard();
@@ -910,6 +921,55 @@
                  groups: shared ? onPack.map(function (g) { return { group: g.group, label: g.label, export: g.export === true }; }) : undefined };
         changed();
         loadFile(new File([plain], pack.fileName), null);
+    }
+
+
+    // ---- PRESET DATA:   the small packs that ride IN the key file ----
+    //
+    //    IT can put a small data pack inside a person's key file   (IT's console:  "Also put in key files").
+    //    The app takes it only when IT's signature covers it  (SignInCore.presets:  the signed claims hold the list's hash),
+    //    holds it LOCKED,  in memory only   (the laptop copy never keeps data;  Lock forgets it),
+    //    and opens the newest one BY ITSELF right after sign-in:   the person's data is the first thing on screen.
+    //    Any others wait as buttons under "Reading from...".     Each one opens like any  .flogic  file  (openPackFile:
+    //    the group's key,  IT's signature on the pack,  the export rule).
+    //    It arrives with the key file:  at the first sign-in,  and at a later one whenever the folder can be read.
+
+    async function presetsOf(keyFile) {
+        if (!keyFile || S === null || TRUSTED === null || typeof S.presets !== 'function') return [];
+        try { return await S.presets(keyFile, TRUSTED); }
+        catch (e) { console.warn('Vault: the data in the key file wasn\'t used:', e); return []; }
+    }
+
+    presetBar = el('p', { id: 'vaultPresets' });
+    presetBar.hidden = true;
+    note.after(presetBar);
+
+    function drawPresets() {
+        if (presetBar === null) return;             //  (the page is still loading)
+        presetBar.textContent = '';
+        presetBar.hidden = presets.length === 0 || state !== 'unlocked';
+        if (presetBar.hidden) return;
+        presetBar.appendChild(el('span', { text: 'From IT, for you:' }));
+        presets.forEach(function (p, i) {
+            const b = button(p.fileName, function () { openPreset(i); }, 'vault-preset');
+            b.id = 'vaultPreset' + i;
+            b.title = 'Data IT put in your key file.  It opens here,  and stays locked on disk.';
+            presetBar.appendChild(b);
+        });
+    }
+
+    function openPreset(i, bySignIn) {
+        const p = presets[i];
+        if (!p || state !== 'unlocked') return;
+        if (!bySignIn) say('');                     //  (at sign-in the note may be saying "IT renewed your access":  it stays)
+        openPackFile(new File([p.bytes], p.pack));
+    }
+
+    //  At sign-in:  keep them,  show them,  and  (nothing open yet?)  open the newest by itself.     []  =  forget them.
+    function offerPresets(list) {
+        presets = Array.isArray(list) ? list : [];
+        drawPresets();
+        if (presets.length > 0 && state === 'unlocked' && (typeof fileTable === 'undefined' || fileTable === null)) openPreset(0, true);
     }
 
 

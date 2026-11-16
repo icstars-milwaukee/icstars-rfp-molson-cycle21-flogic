@@ -61,7 +61,11 @@ node tb.js staff base ; node tb.js it base ; node turns.js
 | `sweep/idle.js`, `idle-mem.js` | Idle CPU of our processes; memory through a session; start-up coverage |
 | `sweep/tb.js`, `tb-inert.js` | The title bar: maximize, double-click, minimize, resize and its round trips, the bar under the sign-in card |
 | `sweep/turns.js` | 6b: which side each station comes in from, read mid-turn |
-| `sweep/sec7-it.js`, `sec7-staff.js` | Plan section 7 |
+| `sweep/sec7-it.js`, `sec7-staff.js` | Plan section 7. Both start from a fresh app profile unless given `--keep` |
+| `sweep/preset-check.js` | Preset data in the real windows: IT packs a small file "for key files", the key file carries it, the staff app opens it by itself at sign-in; an edited key file's data is refused. Run after the two `sec7` scripts |
+| `sweep/web-check.js` | The app as a web page under the Docker image's headers (`deploy/stand-in.mjs`): the security policy blocks nothing the app needs, a key file opened by hand brings its preset up, and a `fetch` from the page is blocked |
+| `sweep/it-rows-check.js`, `edit-cost.js` | IT console: each change shows on the right rows only; what one edit costs the main thread |
+| `sweep/paint-probe.js` | What repaints while the sheet scrolls (a paint-invalidation trace in headless Edge) |
 | `sweep/profile.js`, `prof-it.js`, `proflib.js` | A CPU profile and timeline trace around one interaction |
 | `sweep/exp-it.js`, `exp-idle.js` | Experiments only: turn CSS off through the stylesheet (the pages forbid inline styles) and measure |
 | `sweep/build.ps1`, `gate.ps1` | Build the sweep builds; run DJ's test gate |
@@ -69,6 +73,8 @@ node tb.js staff base ; node tb.js it base ; node turns.js
 
 ## Quirks
 
+- **WebView2's "from the last time you visited this site" prompt** (Allow this time / Allow on every visit) replaces the plain folder prompt after a few grants of the same folder, and UI Automation can't see or press it. Start from a fresh app profile (the `sec7` scripts do) to get the plain one.
+- **`build.ps1 -Trust`** puts back whatever trust file was there before (on DJ's machine that is DJ's real one), not git's blank one.
 - **Headless Edge** in DJ's tests sometimes opens at 500 × 320, whatever size it is asked for. `gate.ps1` runs a test again when its `INFO` line says 500 × 320.
 - **A file over 50 MB** can't go through `fileChooser.setFiles` to a CDP-connected browser. Open it through the real Open window (`openTimed` does).
 - **The vault catches the file input's change event** for a `.flogic` file. Listen on `window`, capturing, to time it.

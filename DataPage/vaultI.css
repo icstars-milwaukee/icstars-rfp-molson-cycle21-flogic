@@ -215,3 +215,30 @@ body.focus #vaultBar { display: none; }
 }
 
 #vaultNote[hidden] { display: none; }
+
+/*  The data IT put in the key file  (vaultI.js:  PRESET DATA):      From IT, for you:   [ tickets.csv ]  [ roster.xlsx ]
+    The newest one opens by itself at sign-in;  the buttons open any of them again.  */
+#vaultPresets {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin: 6px 0;
+    font-size: 14px;
+    color: var(--text-soft, #555);
+}
+
+#vaultPresets[hidden] { display: none; }
+
+#vaultPresets button.vault-preset {
+    margin: 0;
+    padding: 2px 12px;
+    line-height: 24px;              /*  30 tall with its edge:  easy to hit  */
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text, #222);
+    background: transparent;
+    border: 1px solid var(--formula, #217346);
+    border-radius: 999px;
+}

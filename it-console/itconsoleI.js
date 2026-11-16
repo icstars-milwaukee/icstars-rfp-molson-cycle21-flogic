@@ -39,6 +39,8 @@ const ITConsole = (function () {
     const KEYRING_VERSION = 2;                     //  2:  people have a level and a review day;  the signing key and the pack list are inside
     const KEYRING_MAX_BYTES = 1024 * 1024;         //  a keyring is small.   A huge file isn't one.
     const PACK_LOG_MAX = 500;                      //  the list of packs made:  the newest 500
+    const PRESET_MAX_BYTES = 180 * 1024;           //  a pack that rides IN a key file:  the whole key file must stay under 256 KB
+    const PRESET_KEYRING_MAX = 600 * 1024;         //  all the presets a keyring holds  (base64 letters):  the keyring must stay openable
 
     //  One extra locked key,  always there,  that belongs to no group.   Without it,  a keyring with NO groups
     //  has nothing to unlock,  so ANY passphrase would "open" it.   ('~' can't be in a group id,  so it can't clash.)
@@ -71,6 +73,7 @@ const ITConsole = (function () {
     //          groups: [ { group, label, keyVersion, rules: { export, autoLockMin } } ],
     //          people: [ { id, name, groups: [group ids], level, expires, made, reviewed, ended, key: { until, made } } ],
     //          packs:  [ { pack, fileName, group, bytes, made } ],          what was packed,  for whom   (no data,  no key)
+    //          presets: [ { pack, fileName, groups, data, bytes, made, by } ],   the SMALL packs that ride in key files  (data = the locked pack, base64)
     //          signer: { ...a .flogic-signer file... }  or  null,           IT's signing key,  locked with the same passphrase
     //          locked: VaultCore.lockKeys('it-keyring', [every group key  +  the check key], IT passphrase) }
     //
@@ -91,7 +94,7 @@ const ITConsole = (function () {
     async function newKeyring(passphrase) {
         const problem = VaultCore.passphraseProblem(passphrase);
         if (problem) throw fail('weak-passphrase', problem);
-        return { groups: [], people: [], packs: [], keys: {}, check: await VaultCore.newGroupKey(),
+        return { groups: [], people: [], packs: [], presets: [], keys: {}, check: await VaultCore.newGroupKey(),
                  signer: null, signing: null, passphrase: passphrase, unsaved: true, rev: 0, ring: newRingId() };
     }
 
@@ -125,6 +128,7 @@ const ITConsole = (function () {
             }
         }
         if (k.packs !== undefined && !Array.isArray(k.packs)) throw fail('not-a-keyring', 'This keyring file is damaged (its pack list isn\'t right).');
+        if (k.presets !== undefined && !Array.isArray(k.presets)) throw fail('not-a-keyring', 'This keyring file is damaged (its key-file data isn\'t right).');
         return k;
     }
 
@@ -156,6 +160,14 @@ const ITConsole = (function () {
     }
 
 
+    //  A preset from the file,  checked:  anything that isn't a whole,  small,  named pack is dropped  (never trusted as is).
+    function cleanPreset(e) {
+        if (!e || typeof e.pack !== 'string' || !e.pack.toLowerCase().endsWith('.flogic') || typeof e.fileName !== 'string' || typeof e.data !== 'string' ||
+            e.data.length === 0 || e.data.length > Math.ceil(PRESET_MAX_BYTES / 3) * 4 + 4 || !Array.isArray(e.groups) || e.groups.length === 0) return null;
+        return { pack: e.pack, fileName: e.fileName, groups: e.groups.map(String), data: e.data,
+                 bytes: Number(e.bytes) || 0, made: isDay(e.made) ? e.made : '', by: typeof e.by === 'string' ? e.by : '' };
+    }
+
     async function openKeyring(text, passphrase) {
         if (typeof text === 'string' && text.length > KEYRING_MAX_BYTES) throw fail('not-a-keyring', 'That file is too big to be a keyring.');
         const k = readKeyring(text);
@@ -178,6 +190,7 @@ const ITConsole = (function () {
             }),
             people: k.people.map(cleanPerson),
             packs: (k.packs || []).filter(Boolean).slice(-PACK_LOG_MAX).map(cleanPackEntry),
+            presets: (k.presets || []).map(cleanPreset).filter(Boolean),
             keys: keys,
             check: check,
             signer: signer,
@@ -196,8 +209,16 @@ const ITConsole = (function () {
         const keys = s.groups.map(function (g) { return { group: g.group, keyVersion: g.keyVersion, key: s.keys[g.group].key }; });
         keys.push({ group: CHECK_ID, keyVersion: 1, key: s.check });
         const locked = await VaultCore.lockKeys(KEYRING_PERSON, keys, s.passphrase);
-        return JSON.stringify({ flogic: 'keyring', v: KEYRING_VERSION, rev: s.rev || 0, ring: s.ring || '', groups: s.groups, people: s.people,
-                                packs: s.packs || [], signer: s.signer || null, locked: locked }, null, 2);
+        const out = { flogic: 'keyring', v: KEYRING_VERSION, rev: s.rev || 0, ring: s.ring || '', groups: s.groups, people: s.people,
+                      packs: s.packs || [], signer: s.signer || null, locked: locked };
+        if (s.presets && s.presets.length) out.presets = s.presets;         //  (none:  the file looks as it always did)
+        const text = JSON.stringify(out, null, 2);
+        //  A keyring over the limit could be SAVED but never OPENED again.   So it isn't saved.
+        if (text.length > KEYRING_MAX_BYTES) {
+            throw fail('too-big', 'This keyring has grown too big to open again (' + size(text.length) + ', and ' + size(KEYRING_MAX_BYTES) +
+                                  ' is the most). Take some data out of the key files (under "Data packs"), then save.');
+        }
+        return text;
     }
 
 
@@ -354,6 +375,65 @@ const ITConsole = (function () {
         if (s.packs.length > PACK_LOG_MAX) s.packs.splice(0, s.packs.length - PACK_LOG_MAX);
         s.unsaved = true;
         return { bytes: pack, name: packName(fileName), groups: groupList, export: ex.slice() };
+    }
+
+
+    // ------------------------------------------------------
+    //    3b.  PRESET DATA:   A SMALL PACK THAT RIDES IN THE KEY FILES
+    //
+    //    A pack made "for key files" is ALSO kept in the keyring  (still locked:  the keyring holds the pack,  not the data in the clear).
+    //    Every key file made after that,  for a person in one of its groups,  carries it.   The app opens it by itself
+    //    when that person signs in:  their data is the first thing on screen,  with no file to hunt for.
+    //
+    //    It has to be small:   a key file is 256 KB at most,  so a preset is PRESET_MAX_BYTES at most.
+    //    A bigger file is packed as always  (into packs/<group>/),  just not into key files.
+    // ------------------------------------------------------
+
+    function presetProblem(packBytes) {
+        const n = packBytes.byteLength !== undefined ? packBytes.byteLength : packBytes.length;
+        return n > PRESET_MAX_BYTES ? 'too big for key files (' + size(n) + ' packed; ' + size(PRESET_MAX_BYTES) + ' is the most)' : '';
+    }
+
+    //  packed:  what packFile returned  { bytes, name, groups }.     Replaces a preset of the same pack name.
+    function addPreset(s, packed, fileName, made) {
+        const problem = presetProblem(packed.bytes);
+        if (problem) throw fail('too-big', '"' + fileName + '" is ' + problem + '.');
+        const entry = { pack: packed.name, fileName: String(fileName), groups: packed.groups.slice(),
+                        data: VaultCore.toB64(packed.bytes instanceof Uint8Array ? packed.bytes : new Uint8Array(packed.bytes)),
+                        bytes: packed.bytes.byteLength !== undefined ? packed.bytes.byteLength : packed.bytes.length,
+                        made: made || today(), by: s.signing ? s.signing.fingerprint : '' };
+        const others = (s.presets || []).filter(function (x) { return x.pack.toLowerCase() !== entry.pack.toLowerCase(); });
+        const held = others.reduce(function (n, x) { return n + x.data.length; }, 0);
+        if (held + entry.data.length > PRESET_KEYRING_MAX) {
+            throw fail('too-big', 'The keyring already holds ' + size(Math.round(held * 3 / 4)) + ' of key-file data, and "' + fileName +
+                                  '" would take it past ' + size(Math.round(PRESET_KEYRING_MAX * 3 / 4)) + '. Take one out first.');
+        }
+        others.push(entry);
+        s.presets = others;
+        s.unsaved = true;
+        return entry;
+    }
+
+    function removePreset(s, pack) {
+        const before = (s.presets || []).length;
+        s.presets = (s.presets || []).filter(function (x) { return x.pack !== pack; });
+        if (s.presets.length !== before) s.unsaved = true;
+        return s.presets.length !== before;
+    }
+
+    //  The presets a person's next key file carries:  for a group they're in,  signed by TODAY's signing key,  newest first,
+    //  as many as fit.     ->  { riding: [...],  left: [pack names that didn't fit] }
+    function presetsFor(s, p, room) {
+        const mine = (s.presets || []).filter(function (x) {
+            return (!s.signing || x.by === s.signing.fingerprint) && x.groups.some(function (g) { return p.groups.indexOf(g) >= 0; });
+        }).slice().reverse();
+        const riding = [], left = [];
+        let used = 0;
+        for (const x of mine) {
+            if (riding.length < S.MAX_PACKS && used + x.data.length <= room) { riding.push(x); used += x.data.length; }
+            else left.push(x.pack);
+        }
+        return { riding: riding, left: left };
     }
 
     //  1627725  ->  '1.6 MB'
@@ -522,6 +602,7 @@ const ITConsole = (function () {
         const made = await S.newSigner(s.passphrase);
         s.signing = await S.openSigner(made, s.passphrase);
         s.signer = made;
+        s.presets = [];                 //  (signed by the OLD key:  the app would refuse them.   Pack them again.)
         s.unsaved = true;
         return s.signing.fingerprint;
     }
@@ -535,6 +616,7 @@ const ITConsole = (function () {
             if (e.code === 'wrong-secret') throw fail('wrong-secret', 'That signing key is locked with a different passphrase than this keyring.');
             throw e;
         }
+        if (!s.signing || s.signing.fingerprint !== opened.fingerprint) s.presets = [];       //  (signed by another key:  the app would refuse them)
         s.signer = file;
         s.signing = opened;
         s.unsaved = true;
@@ -571,11 +653,25 @@ const ITConsole = (function () {
         const groups = s.groups.filter(function (g) { return p.groups.indexOf(g.group) >= 0; }).map(function (g) {
             return { group: g.group, label: g.label, keyVersion: g.keyVersion, rules: g.rules, key: s.keys[g.group].key };
         });
-        const file = await S.issueKey(s.signing, p, groups);
+        //  PRESET DATA rides along:  what fits.   (The core refuses a key file that would come out too big:  then one preset fewer.)
+        const want = presetsFor(s, p, Math.ceil(PRESET_MAX_BYTES / 3) * 4 + 4);
+        let file = null;
+        for (;;) {
+            try {
+                file = await S.issueKey(s.signing, p, groups, undefined, want.riding.map(function (x) {
+                    return { pack: x.pack, fileName: x.fileName, groups: x.groups, data: x.data };
+                }));
+                break;
+            } catch (e) {
+                if (e.code !== 'too-big' || want.riding.length === 0) throw e;
+                want.left.unshift(want.riding.pop().pack);
+            }
+        }
         const until = new Date(JSON.parse(file.claims).expires);
         p.key = { until: until.toISOString(), made: today(), by: s.signing.fingerprint };
         s.unsaved = true;
-        return { person: p, file: file, text: JSON.stringify(file, null, 2), until: until };
+        return { person: p, file: file, text: JSON.stringify(file, null, 2), until: until,
+                 presets: want.riding.map(function (x) { return x.pack; }), presetsLeft: want.left };
     }
 
     //  "Renew everyone":   who gets a fresh key file,  and who's left out  (and why)
@@ -729,6 +825,7 @@ const ITConsole = (function () {
         drawGroupChoices();
         drawPersonGroups();
         drawPacks();
+        drawPresets();
         drawSigner();
     }
 
@@ -1125,7 +1222,10 @@ const ITConsole = (function () {
             const made = await makeKeyFile(session, id);
             const words = await deliver(made);
             markUnsaved();
-            say('issue-msg', words + ' Save the keyring to remember it.', 'good');
+            //  What rides in it  (and what didn't fit):  IT sees it here,  not at the person's desk
+            const riding = made.presets.length ? ' It carries ' + made.presets.join(', ') + ': that opens by itself when they sign in.' : '';
+            const left = made.presetsLeft.length ? ' Didn\'t fit in the key file: ' + made.presetsLeft.join(', ') + '.' : '';
+            say('issue-msg', words + riding + left + ' Save the keyring to remember it.', left ? 'warn' : 'good');
         });
         if (session) refresh();
     }
@@ -1265,7 +1365,7 @@ const ITConsole = (function () {
             const p = addPerson(session, who);
             resetPersonForm();
             markUnsaved();
-            say('person-msg', 'Added ' + p.name + ' (' + p.id + ') as ' + P.level(p.level).label + '. Next: "Make key file" in the list above.', 'good');
+            say('person-msg', 'Added ' + p.name + ' (' + p.id + ') as ' + P.level(p.level).label + '. Next: "Make key file", under "5 · Key files".', 'good');
         } catch (e) { say('person-msg', e.message, 'bad'); }
     }
 
@@ -1335,7 +1435,7 @@ const ITConsole = (function () {
         $('p-btn').textContent = queue.length > 1 ? 'Pack ' + queue.length + ' files' : 'Pack';
         $('p-where').textContent = none ? 'Make a group first.'
             : folder ? 'Packs go into IT\'s folder: packs/<group>/ (a pack for two groups goes into both). Share each group\'s packs folder with that group.'
-                     : 'IT\'s folder isn\'t connected, so each pack downloads. Connect it (under "Access") to put packs in a folder per group.';
+                     : 'IT\'s folder isn\'t connected, so each pack downloads. Connect it (under "3 · IT\'s Flogic folder") to put packs in a folder per group.';
     }
 
     function groupAllowsExport(id) {
@@ -1517,6 +1617,8 @@ const ITConsole = (function () {
         }
         packArmed = false;
         const done = [], failed = [];
+        const inKeys = [], notInKeys = [];          //  "Also put in key files":  which made it,  and which were too big  (said why)
+        const asPreset = $('p-preset').checked;
         let toFolder = 0, downloaded = 0, replaced = 0;
         await busy($('p-btn'), 'pack-msg', async function () {
             const total = queue.length;
@@ -1527,6 +1629,11 @@ const ITConsole = (function () {
                     const d = await deliverPack(p);
                     if (d.where === 'folder') toFolder++; else downloaded++;
                     replaced += d.replaced;
+                    if (asPreset) {
+                        //  (The pack itself is made and delivered either way:  a file too big for key files is still packed.)
+                        try { addPreset(session, p, r.file.name); inKeys.push(p.name); }
+                        catch (e) { notInKeys.push(e.message); }
+                    }
                     done.push(r.file.name + ' → ' + p.name + ' (' + groupLabels(p.groups).join(' + ') + ')');
                     queue = queue.filter(function (x) { return x !== r; });
                 } catch (e) {
@@ -1539,10 +1646,47 @@ const ITConsole = (function () {
         if (done.length) markUnsaved(); else drawGroupChoices();
         const where = toFolder ? ' Put in IT\'s folder under packs/<group>/' + (replaced ? ' (' + plural(replaced, 'older pack', 'older packs') + ' of the same name replaced)' : '') + '.'
                     : downloaded ? ' They downloaded: give each one to its groups.' : '';
-        say('pack-msg', (done.length ? 'Packed ' + plural(done.length, 'file', 'files') + ': ' + done.join('; ') + '.' + where + ' Save the keyring to remember them.' : '') +
+        const keyWords = (inKeys.length ? ' In key files now: ' + inKeys.join(', ') + '. Make key files again (step 5) so it reaches people.' : '') +
+                         (notInKeys.length ? ' Not in key files: ' + notInKeys.join(' ') : '');
+        say('pack-msg', (done.length ? 'Packed ' + plural(done.length, 'file', 'files') + ': ' + done.join('; ') + '.' + where + keyWords + ' Save the keyring to remember them.' : '') +
             (failed.length ? (done.length ? ' ' : '') + plural(failed.length, 'file wasn\'t', 'files weren\'t') + ' packed: ' + failed.join(', ') + ' (why is on ' + (failed.length === 1 ? 'its row' : 'their rows') + ').' : ''),
-            failed.length ? (done.length ? 'warn' : 'bad') : 'good');
-        if (queue.length === 0) $('p-file').value = '';
+            failed.length ? (done.length ? 'warn' : 'bad') : notInKeys.length ? 'warn' : 'good');
+        if (queue.length === 0) { $('p-file').value = ''; $('p-preset').checked = false; }
+    }
+
+    //  THE PRESETS:   the small packs that ride in key files.   "Take out" stops it riding in the NEXT key files
+    //  (a key file already handed out keeps its copy until it ends:  a week at most).
+    function drawPresets() {
+        const list = (session.presets || []).slice().reverse();
+        $('preset-none').hidden = list.length > 0;
+        $('p-preset-max').textContent = size(PRESET_MAX_BYTES);
+        const stale = function (x) { return !!session.signing && x.by !== session.signing.fingerprint; };
+        const rows = list.map(function (x) { return [x.pack, x.fileName, groupLabels(x.groups).join(' + '), size(x.bytes), x.made, stale(x) ? 'old' : '']; });
+        if (!tableChanged('presets', JSON.stringify(rows))) return;
+        const body = $('preset-list');
+        body.replaceChildren();
+        for (const x of list) {
+            const tr = el('tr');
+            tr.appendChild(el('td', x.pack, 'mono'));
+            tr.appendChild(el('td', x.fileName));
+            tr.appendChild(el('td', groupLabels(x.groups).join(' + ')));
+            tr.appendChild(el('td', size(x.bytes)));
+            const made = el('td', x.made);
+            if (stale(x)) made.appendChild(el('span', 'signed with an older signing key: pack it again', 'row-note warn'));
+            tr.appendChild(made);
+            const act = el('td', null, 'actions');
+            const pack = x.pack;
+            act.appendChild(rowButton('Take out', 'preset-out-' + list.indexOf(x), function () { onPresetOut(pack); }, 'quiet'));
+            tr.appendChild(act);
+            body.appendChild(tr);
+        }
+    }
+
+    function onPresetOut(pack) {
+        if (!removePreset(session, pack)) return;
+        markUnsaved();
+        say('preset-msg', pack + ' no longer rides in key files. Key files already handed out keep their copy until they end; ' +
+                          'make key files again (step 5) to take it out sooner. Save the keyring to keep this.', 'good');
     }
 
     function drawPacks() {
@@ -1757,7 +1901,9 @@ const ITConsole = (function () {
         queue = [];
         packArmed = false;
         $('p-file').value = '';
+        $('p-preset').checked = false;
         say('pack-msg', '');
+        say('preset-msg', '');
         $('c-groups').replaceChildren();
         resetPersonForm();
         $('cred-expires').value = defaultExpiry();
@@ -1950,6 +2096,7 @@ const ITConsole = (function () {
         newKeyring: newKeyring, readKeyring: readKeyring, openKeyring: openKeyring, keyringText: keyringText,
         slugify: slugify, groupIdProblem: groupIdProblem, rulesProblem: rulesProblem, addGroup: addGroup, editGroup: editGroup,
         packProblem: packProblem, packName: packName, packFile: packFile, strictExport: strictExport, loosened: loosened,
+        PRESET_MAX_BYTES: PRESET_MAX_BYTES, presetProblem: presetProblem, addPreset: addPreset, removePreset: removePreset, presetsFor: presetsFor,
         nextPersonId: nextPersonId, defaultExpiry: defaultExpiry, expiryProblem: expiryProblem,
         personProblem: personProblem, addPerson: addPerson, editPerson: editPerson, reviewPerson: reviewPerson, endAccess: endAccess,
         personState: personState, keyState: keyState,

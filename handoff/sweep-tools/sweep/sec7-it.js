@@ -6,6 +6,9 @@ const { click, type, sleep, path, note, fs, expect, C } = D;
     note('==== section 7: Flogic IT (desktop) ====');
     const itDir = path.join(D.DRIVE, 'sweep-it');
     fs.rmSync(itDir, { recursive: true, force: true }); fs.mkdirSync(itDir, { recursive: true });
+    // A first run: no storage yet.   (After a few grants of the same folder, WebView2 shows a "from the last time you visited" prompt
+    // that UI Automation cannot see or press.   A fresh profile gets the plain first-time prompt.)
+    if (!process.argv.includes("--keep")) fs.rmSync(path.join(process.env.LOCALAPPDATA, "org.icstars.flogic", "it"), { recursive: true, force: true });
     const app = await D.startApp('it');
     const page = app.page;
     note('window: ' + D.win(app, 'rect') + ' | viewport ' + JSON.stringify(await page.evaluate(() => ({ w: innerWidth, h: innerHeight, dpr: devicePixelRatio, sw: screen.width, sh: screen.height, availH: screen.availHeight }))));

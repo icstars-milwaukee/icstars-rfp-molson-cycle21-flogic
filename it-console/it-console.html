@@ -55,121 +55,29 @@
         </section>
         <p id="keyring-msg" class="msg" role="status"></p>
 
+        <!--  In MAKE ORDER,  first to last:  a group,  then a person in it,  then the folder,  the data,  and last the key files  (they carry the data).  -->
         <nav class="jump" aria-label="Sections">
-            <a href="#access">Access</a>
+            <a href="#groups">1 · Groups</a>
+            <a href="#people">2 · People</a>
+            <a href="#folder">3 · IT's folder</a>
+            <a href="#pack">4 · Data packs</a>
+            <a href="#access">5 · Key files</a>
+            <a href="#data">Who has which data</a>
             <a href="#levels">Levels and rules</a>
-            <a href="#people">People</a>
-            <a href="#groups">Groups</a>
-            <a href="#pack">Data packs</a>
             <a href="#signer">Signing key</a>
         </nav>
 
 
-        <!-- ======================  ACCESS:  THE WHOLE PICTURE,  FIRST  ====================== -->
-        <section class="card" id="access">
-            <h2>Access</h2>
+        <!-- ======================  TODAY:  WHAT NEEDS IT'S HAND  ====================== -->
+        <section class="card" id="today">
+            <h2>Today</h2>
             <ul id="todo" class="todo"></ul>
-
-            <h3>Who has what</h3>
-            <div class="table-wrap">
-                <table>
-                    <thead><tr><th>Person</th><th>Level</th><th>Groups</th><th>Key file</th><th>Review</th><th>Last day</th><th></th></tr></thead>
-                    <tbody id="person-list"></tbody>
-                </table>
-            </div>
-            <p id="person-none" class="hint">No one yet. Add a person under "People".</p>
-
-            <div class="row">
-                <button type="button" id="renew-all" class="primary">Renew everyone</button>
-                <span class="hint">A fresh key file for everyone whose review is in date. Guests are renewed by name.</span>
-            </div>
-            <p id="issue-msg" class="msg" role="status"></p>
-
-            <h3>IT's Flogic folder</h3>
-            <p class="hint">One folder in OneDrive, Google Drive or a share, with a subfolder per person (named by their id, like
-               <span class="mono">u-0001</span>). Share each subfolder with that person only. Their drive sign-in is what guards their key file.</p>
-            <div class="row">
-                <button type="button" id="connect-folder">Connect IT's Flogic folder</button>
-                <button type="button" id="forget-folder" class="quiet" hidden>Forget this folder</button>
-            </div>
-            <div class="drop" id="folder-drop">Or drag the folder here, from File Explorer or Finder</div>
-            <p id="folder-status" class="msg" role="status"></p>
-
-            <h3>Which data is for whom</h3>
-            <div class="table-wrap">
-                <table>
-                    <thead><tr><th>Group</th><th>Key</th><th>Can export</th><th>Auto-lock (most)</th><th>People</th><th>Data packed for it</th></tr></thead>
-                    <tbody id="data-list"></tbody>
-                </table>
-            </div>
-            <p id="data-none" class="hint">No groups yet.</p>
-        </section>
-
-
-        <!-- ======================  ACCESS LEVELS  AND  THE BUILT-IN RULES  ====================== -->
-        <section class="card" id="levels">
-            <h2>Levels and rules</h2>
-            <p class="hint">A <strong>group</strong> says which data a person can open. A <strong>level</strong> says what they may do with it.
-               When the two disagree, the stricter one wins. These are built into the app: they can't be changed from this screen.</p>
-            <div class="table-wrap">
-                <table>
-                    <thead><tr><th>Level</th><th>For</th><th>Export</th><th>Auto-lock</th><th>Key file lasts</th><th>Renewed</th><th>Groups</th><th>The app opens with</th></tr></thead>
-                    <tbody id="level-list"></tbody>
-                </table>
-            </div>
-            <ul class="rules">
-                <li id="rule-grant"></li>
-                <li id="rule-review"></li>
-                <li>The app checks these itself at every sign-in. A key file that breaks one is refused, even if this console signed it.</li>
-            </ul>
-        </section>
-
-
-        <!-- ======================  PEOPLE  ====================== -->
-        <section class="card" id="people">
-            <h2>People</h2>
-            <h3 id="person-form-title">Add a person</h3>
-            <div class="form-row">
-                <label>Name <input type="text" id="c-name" maxlength="80" placeholder="e.g. Fernando G"></label>
-                <label>Access level <select id="pp-level"></select>
-                    <span class="hint" id="pp-level-hint"></span></label>
-            </div>
-            <fieldset id="c-groups-box">
-                <legend>Groups (at least one)</legend>
-                <div id="c-groups"></div>
-            </fieldset>
-            <div class="form-row">
-                <label>Last day (optional) <input type="date" id="c-expires">
-                    <span class="hint">For someone leaving on a known date. Their key files never run past it.</span></label>
-            </div>
-            <button type="button" id="c-btn" class="primary">Add person</button>
-            <button type="button" id="pp-cancel" hidden>Cancel</button>
-            <p id="person-msg" class="msg" role="status"></p>
-
-            <!--  The older way in:  only shown while the built-in rules still allow it  -->
-            <div id="legacy-note" class="legacy" hidden>
-                <h3>The older way: a credential file</h3>
-                <p class="hint">"Credential file" in the list above makes a <span class="mono">.flogic-id</span> file and a setup code. It keeps
-                   whatever end date is typed here, so it does <strong>not</strong> follow the short-access and review rules. Prefer key files.</p>
-                <label>Credential good until <input type="date" id="cred-expires"></label>
-            </div>
-
-            <!--  The setup code:  shown once  -->
-            <div id="code-panel" class="code-panel" hidden>
-                <p class="code-for">Setup code for <strong id="code-for"></strong></p>
-                <p id="setup-code" class="setup-code mono"></p>
-                <p class="code-note"><strong>Give this to the person in person or over Teams, never in the same email as the file.
-                   Treat it as one-time.</strong> It isn't saved anywhere, not even in the keyring. If it's lost, make a new credential.</p>
-                <button type="button" id="copy-btn">Copy</button>
-                <button type="button" id="code-done">I've handed it over. Hide it.</button>
-                <span id="copy-msg" class="hint"></span>
-            </div>
         </section>
 
 
         <!-- ======================  GROUPS  ====================== -->
         <section class="card" id="groups">
-            <h2>Groups</h2>
+            <h2>1 · Groups</h2>
             <p class="hint">Each group has its own key. A data pack made for a group opens only for the people in it.</p>
 
             <div class="table-wrap">
@@ -198,9 +106,65 @@
         </section>
 
 
+        <!-- ======================  PEOPLE  ====================== -->
+        <section class="card" id="people">
+            <h2>2 · People</h2>
+            <h3 id="person-form-title">Add a person</h3>
+            <div class="form-row">
+                <label>Name <input type="text" id="c-name" maxlength="80" placeholder="e.g. Fernando G"></label>
+                <label>Access level <select id="pp-level"></select>
+                    <span class="hint" id="pp-level-hint"></span></label>
+            </div>
+            <fieldset id="c-groups-box">
+                <legend>Groups (at least one)</legend>
+                <div id="c-groups"></div>
+            </fieldset>
+            <div class="form-row">
+                <label>Last day (optional) <input type="date" id="c-expires">
+                    <span class="hint">For someone leaving on a known date. Their key files never run past it.</span></label>
+            </div>
+            <button type="button" id="c-btn" class="primary">Add person</button>
+            <button type="button" id="pp-cancel" hidden>Cancel</button>
+            <p id="person-msg" class="msg" role="status"></p>
+
+            <!--  The older way in:  only shown while the built-in rules still allow it  -->
+            <div id="legacy-note" class="legacy" hidden>
+                <h3>The older way: a credential file</h3>
+                <p class="hint">"Credential file" in the list under "5 · Key files" makes a <span class="mono">.flogic-id</span> file and a setup code. It keeps
+                   whatever end date is typed here, so it does <strong>not</strong> follow the short-access and review rules. Prefer key files.</p>
+                <label>Credential good until <input type="date" id="cred-expires"></label>
+            </div>
+
+            <!--  The setup code:  shown once  -->
+            <div id="code-panel" class="code-panel" hidden>
+                <p class="code-for">Setup code for <strong id="code-for"></strong></p>
+                <p id="setup-code" class="setup-code mono"></p>
+                <p class="code-note"><strong>Give this to the person in person or over Teams, never in the same email as the file.
+                   Treat it as one-time.</strong> It isn't saved anywhere, not even in the keyring. If it's lost, make a new credential.</p>
+                <button type="button" id="copy-btn">Copy</button>
+                <button type="button" id="code-done">I've handed it over. Hide it.</button>
+                <span id="copy-msg" class="hint"></span>
+            </div>
+        </section>
+
+
+        <!-- ======================  3.  IT'S FOLDER  ====================== -->
+        <section class="card" id="folder">
+            <h2>3 · IT's Flogic folder</h2>
+            <p class="hint">One folder in OneDrive, Google Drive or a share, with a subfolder per person (named by their id, like
+               <span class="mono">u-0001</span>). Share each subfolder with that person only. Their drive sign-in is what guards their key file.</p>
+            <div class="row">
+                <button type="button" id="connect-folder">Connect IT's Flogic folder</button>
+                <button type="button" id="forget-folder" class="quiet" hidden>Forget this folder</button>
+            </div>
+            <div class="drop" id="folder-drop">Or drag the folder here, from File Explorer or Finder</div>
+            <p id="folder-status" class="msg" role="status"></p>
+        </section>
+
+
         <!-- ======================  DATA PACKS  ====================== -->
         <section class="card" id="pack">
-            <h2>Data packs</h2>
+            <h2>4 · Data packs</h2>
             <p class="hint">Locks data files for one or more groups. Only people in those groups can open the <code>.flogic</code> file it makes.
                Anyone can still see which groups it's for, and the file's name. Every pack is signed with IT's signing key, so nobody else can make or change one.</p>
             <p class="hint">Export starts as the strictest rule of the file's groups: if one group can't export, nobody exports that file.
@@ -219,6 +183,8 @@
                 <button type="button" id="p-same" hidden>Same groups for every file</button>
                 <button type="button" id="p-clear" class="quiet" hidden>Clear the list</button>
             </div>
+            <label class="inline check"><input type="checkbox" id="p-preset"> Also put in key files: it opens by itself when the person signs in.
+                Small files only (<span id="p-preset-max"></span> packed, at most).</label>
             <p id="p-where" class="hint"></p>
             <p id="pack-msg" class="msg" role="status"></p>
 
@@ -230,6 +196,72 @@
                 </table>
             </div>
             <p id="pack-none" class="hint">Nothing packed with this keyring yet. (The list holds names and sizes only, never data.)</p>
+
+            <h3>In key files</h3>
+            <p class="hint">These small packs ride in every key file made for their groups, and open by themselves at sign-in: the person's
+               data is the first thing on screen. They are kept in the keyring, still locked. A change here reaches a person with their
+               <strong>next</strong> key file, so make key files again afterwards (step 5).</p>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Pack</th><th>From</th><th>For</th><th>Size</th><th>Made</th><th></th></tr></thead>
+                    <tbody id="preset-list"></tbody>
+                </table>
+            </div>
+            <p id="preset-none" class="hint">Nothing rides in key files yet. Tick "Also put in key files" when you pack a small file.</p>
+            <p id="preset-msg" class="msg" role="status"></p>
+        </section>
+
+
+        <!-- ======================  5.  KEY FILES:  WHO HAS WHAT  ====================== -->
+        <section class="card" id="access">
+            <h2>5 · Key files</h2>
+            <p class="hint">Last, because a key file carries what was made before it: the person's groups, their level, and the data packed "in key files".</p>
+            <h3>Who has what</h3>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Person</th><th>Level</th><th>Groups</th><th>Key file</th><th>Review</th><th>Last day</th><th></th></tr></thead>
+                    <tbody id="person-list"></tbody>
+                </table>
+            </div>
+            <p id="person-none" class="hint">No one yet. Add a person under "2 · People".</p>
+
+            <div class="row">
+                <button type="button" id="renew-all" class="primary">Renew everyone</button>
+                <span class="hint">A fresh key file for everyone whose review is in date. Guests are renewed by name.</span>
+            </div>
+            <p id="issue-msg" class="msg" role="status"></p>
+        </section>
+
+
+        <!-- ======================  THE WHOLE PICTURE:  WHICH DATA IS FOR WHOM  ====================== -->
+        <section class="card" id="data">
+            <h2>Who has which data</h2>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Group</th><th>Key</th><th>Can export</th><th>Auto-lock (most)</th><th>People</th><th>Data packed for it</th></tr></thead>
+                    <tbody id="data-list"></tbody>
+                </table>
+            </div>
+            <p id="data-none" class="hint">No groups yet.</p>
+        </section>
+
+
+        <!-- ======================  ACCESS LEVELS  AND  THE BUILT-IN RULES  ====================== -->
+        <section class="card" id="levels">
+            <h2>Levels and rules</h2>
+            <p class="hint">A <strong>group</strong> says which data a person can open. A <strong>level</strong> says what they may do with it.
+               When the two disagree, the stricter one wins. These are built into the app: they can't be changed from this screen.</p>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Level</th><th>For</th><th>Export</th><th>Auto-lock</th><th>Key file lasts</th><th>Renewed</th><th>Groups</th><th>The app opens with</th></tr></thead>
+                    <tbody id="level-list"></tbody>
+                </table>
+            </div>
+            <ul class="rules">
+                <li id="rule-grant"></li>
+                <li id="rule-review"></li>
+                <li>The app checks these itself at every sign-in. A key file that breaks one is refused, even if this console signed it.</li>
+            </ul>
         </section>
 
 

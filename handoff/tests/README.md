@@ -17,6 +17,7 @@ py -3.12 -I make-negatives.py C:\temp\fake\negatives.xlsx
 | `drawer-test.mjs` | The Details drawer opens on screen (scrolled, in focus mode, under the title bar); Go to row's corner; Expand is gone | `node drawer-test.mjs <page> C:\temp\fake\incident.csv <out> 1366 640` |
 | `checks-test.mjs` | Checks: the suggested list, Run all against `expected.json`, Show ▸, typed checks, a broken check, Save/Load, a hostile file, one panel at a time | `node checks-test.mjs <page> C:\temp\fake\incident.csv <out>` |
 | `excel-test.mjs` | Excel cells like `-5` and `=SUM(…)` show as they are (the `csvCell` clash) | `node excel-test.mjs <page> C:\temp\fake\negatives.xlsx <profile dir>` |
+| `preset-core-test.mjs` | Preset data in key files, in plain Node (no browser, no files): a small pack rides in a member's key file, the app takes it only if IT's signature covers it, every edit to the file is refused, the size limits hold. CI runs it on every push | `node preset-core-test.mjs` |
 | `usability-audit.mjs` | Prints click-target sizes, text contrast (both themes), keyboard focus, whether the drawer covers the clicked cell. A report to read, not pass/fail | `node usability-audit.mjs <page> C:\temp\fake\incident.csv <out>` |
 
 - **`<page>`** is `C:/…/DataPage/flogic.html` for Edge. For the desktop sweep build, the stations test and the drawer test take `exe:C:/…/desktop/target/shared/sweep-staff.exe` instead.

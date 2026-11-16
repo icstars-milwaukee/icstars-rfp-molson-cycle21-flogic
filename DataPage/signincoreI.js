@@ -145,8 +145,29 @@ const SignInCore = (function (VaultCore, FlogicPolicy) {
     //             expires)        a Date,  or nothing:  then it lasts as long as the level allows  (FlogicPolicy.grantEnd)
     // ------------------------------------------------------
 
-    async function issueKey(signer, person, groups, expires) {
+    //  PRESET DATA   (optional):   small data packs that RIDE IN the key file,  so they open by themselves at sign-in.
+    //      packs:  [{ pack: 'tickets.flogic',  fileName: 'tickets.csv',  groups: ['finance'],  data: <b64 of the pack's bytes> }]
+    //  The claims carry their hash  (claims.packs),  so nobody can add,  swap or drop one without breaking IT's signature.
+    //  Each pack is still a normal locked,  signed pack:  the app opens it the way it opens any  .flogic  file.
+    //  The whole key file stays under MAX_FILE:  that's what keeps a preset small  (about 180 KB of pack).
+    const MAX_PACKS = 8;
+
+    function cleanPacks(packs) {
+        if (packs === undefined || packs === null) return [];
+        if (!Array.isArray(packs) || packs.length > MAX_PACKS) throw fail('damaged', 'A key file can carry ' + MAX_PACKS + ' data packs at most.');
+        return packs.map(function (p) {
+            if (!p || typeof p.pack !== 'string' || !/\.flogic$/i.test(p.pack) || p.pack.length > 200 || typeof p.fileName !== 'string' || p.fileName.length > 200 ||
+                !Array.isArray(p.groups) || p.groups.length === 0 || !p.groups.every(function (g) { return typeof g === 'string'; }) ||
+                typeof p.data !== 'string' || p.data.length === 0) {
+                throw fail('damaged', 'A data pack for the key file isn\'t right.');
+            }
+            return { pack: p.pack, fileName: p.fileName, groups: p.groups.slice(), data: p.data };
+        });
+    }
+
+    async function issueKey(signer, person, groups, expires, packs) {
         if (!groups.length) throw fail('damaged', 'Pick at least one group.');
+        const riding = cleanPacks(packs);
         if (expires === undefined || expires === null) {
             try { expires = FlogicPolicy.grantEnd(person.level, { accessEnds: person.expires, reviewed: person.reviewed }); }
             catch (e) { throw fail('policy', e.message); }
@@ -155,7 +176,7 @@ const SignInCore = (function (VaultCore, FlogicPolicy) {
         const entries = [];
         for (const g of groups) entries.push({ group: g.group, keyVersion: g.keyVersion, raw: toB64(new Uint8Array(await subtle.exportKey('raw', g.key))) });
         const keys = { entries: entries };
-        const claims = JSON.stringify({
+        const said = {
             iss: signer.fingerprint, sub: person.id, name: person.name,
             level: person.level, reviewed: person.reviewed,
             groups: groups.map(function (g) {
@@ -163,19 +184,40 @@ const SignInCore = (function (VaultCore, FlogicPolicy) {
             }),
             issued: new Date().toISOString(), expires: expires.toISOString(),
             serial: toB64(randomBytes(9)), keys: await hashText(JSON.stringify(keys)),
-        });
+        };
+        if (riding.length) said.packs = await hashText(JSON.stringify(riding));        //  (no preset data:  the claims look as they always did)
+        const claims = JSON.stringify(said);
         //  IT's own page refuses to make what the app would refuse to take.
         const broken = FlogicPolicy.claimsProblem(JSON.parse(claims));
         if (broken) throw fail('policy', broken);
         const sig = await signer.sign(utf8.encode(KEY_MAGIC + claims));
-        return { flogic: 'key', v: VERSION, claims: claims, sig: toB64(sig), keys: keys };
+        const file = { flogic: 'key', v: VERSION, claims: claims, sig: toB64(sig), keys: keys };
+        if (riding.length) file.packs = riding;
+        //  The app reads the file as it is saved  (JSON, 2 spaces):  it must fit,  or the app would refuse it as "too big".
+        if (JSON.stringify(file, null, 2).length > MAX_FILE - 4096) throw fail('too-big', 'That\'s too much data to ride in one key file.');
+        return file;
     }
 
     function readKey(t) {
         const k = parse(t, 'key', 'a Flogic key file');
         if (k.v < VERSION) throw fail('bad-version', 'This key file is from an older version of the app. Ask IT for a new one.');
         if (typeof k.claims !== 'string' || typeof k.sig !== 'string' || !k.keys || !Array.isArray(k.keys.entries)) throw fail('not-a-file', 'This key file is damaged.');
+        if (k.packs !== undefined && !Array.isArray(k.packs)) throw fail('not-a-file', 'This key file is damaged.');
         return k;
+    }
+
+    //  The preset data riding in a key file.   ->  [{ pack, fileName, groups, bytes }]     ([]  when IT signed none)
+    //  Only what IT SIGNED counts:  the claims hold the hash of the list.   A list the claims don't mention is ignored;
+    //  a list that doesn't match its hash is refused  (someone edited the file in the drive folder).
+    async function presets(keyFile, pinned) {
+        const c = await verify(keyFile.claims, keyFile.sig, keyFile.keys, pinned);
+        if (typeof c.packs !== 'string') return [];
+        let list;
+        try { list = cleanPacks(keyFile.packs); } catch (e) { list = null; }
+        if (!list || list.length === 0 || await hashText(JSON.stringify(list)) !== c.packs) {
+            throw fail('damaged', 'The data in this key file has been changed since IT made it.');
+        }
+        return list.map(function (p) { return { pack: p.pack, fileName: p.fileName, groups: p.groups, bytes: fromB64(p.data) }; });
     }
 
     //  Said when the key file was signed by another key than the one this app trusts.   (The usual cause:  IT replaced
@@ -396,7 +438,8 @@ const SignInCore = (function (VaultCore, FlogicPolicy) {
         ROUNDS: ROUNDS, VERSION: VERSION, MAX_TRIES: MAX_TRIES,
         fingerprint: fingerprint,
         newSigner: newSigner, readSigner: readSigner, openSigner: openSigner, pin: pin, trustedKey: trustedKey,
-        issueKey: issueKey, readKey: readKey, check: check,
+        KEY_FILE_MAX: MAX_FILE, MAX_PACKS: MAX_PACKS,
+        issueKey: issueKey, readKey: readKey, check: check, presets: presets,
         pinProblem: pinProblem, claim: claim, unlock: unlock, isNewer: isNewer, notEnded: notEnded,
         keyringGroups: keyringGroups, startSession: startSession, niceDate: niceDate,
     });
