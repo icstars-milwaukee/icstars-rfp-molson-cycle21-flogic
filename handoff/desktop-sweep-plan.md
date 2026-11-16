@@ -180,6 +180,27 @@ These are guesses from reading the code. Prove or rule out each one.
 - Changing what the title bar looks like.
 - Anything that changes what a person sees or does.
 
+## 6b. A change DJ asked for: center the carousel on the Dashboard
+
+Do this after the measurements, then measure the turns again.
+
+- **The new order:** Ticket (left) · **Dashboard (center)** · Sheet (right).
+  - Turning to the **Sheet** brings it in **from the right**.
+  - Turning to the **Ticket** brings it in **from the left**.
+  - Sheet ↔ Ticket follows the same ring: going to the Ticket, it comes from the left; going to the Sheet, from the right.
+- **The tabs follow the same order:** `Ticket | Dashboard | Sheet`. Then the tab you click sits on the side its station comes in from. ← → on the tabs and Alt+1/2/3 follow the tab order.
+- **What doesn't change:**
+  - The app still starts on the Sheet until a file is open.
+  - A new file still lands on the simplified Dashboard.
+  - An answer (Ask, a check's Show ▸, a dashboard tile) still turns to the Sheet.
+- **Where:** `DataPage/stationsI.js`. The `STATIONS` array's order sets both the tab order and which way a station turns (`stationIndex` decides left or right). Reordering it to ticket, dashboard, sheet should do most of it. Update the diagrams in the header comments of `stationsI.js` and `stationsI.css` to match.
+- **Check with real input:**
+  - Each of the four turns (Dashboard→Sheet, Dashboard→Ticket, Sheet→Ticket, Ticket→Sheet) comes in from the right side. Read the incoming station's `turn-in-*` class, and take a screenshot mid-turn.
+  - ← → on the tabs, Alt+1/2/3 and Back/Forward.
+  - Nothing stays turned at rest.
+  - Focus mode and the Details drawer still sit on the screen right after a turn.
+  - Turns stay at 60 fps.
+
 ## 7. Also check that the desktop apps work at all
 
 Do this once, quickly, before measuring:
