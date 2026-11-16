@@ -93,7 +93,14 @@
         document.documentElement.classList.toggle('flogic-maximized', big);
     }
     showMax();
-    win.onResized(function () { showMax(); }).catch(function () {});
+    //  While an edge is being dragged,  "resized" fires for every size on the way:  dozens a second.
+    //  Asking Rust "are you maximized?" for each one was one round trip per size  (118 for 120 sizes,  measured).
+    //  Only the END matters  (maximized or not),  so ask once,  when the sizes stop coming.
+    let resizeDone = null;
+    win.onResized(function () {
+        clearTimeout(resizeDone);
+        resizeDone = setTimeout(showMax, 120);
+    }).catch(function () {});
 
     //  CLOSE:  the page's own "unsaved changes?" check  (its beforeunload),  then close for real
     let armed = false, disarm = null;
