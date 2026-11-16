@@ -12,9 +12,10 @@
 
 /*  ----  THE TAB ROW:  "Flogic"  +  the folder tabs.   It stays at the top as you scroll.  ----
 
-         Flogic   ┌─────────┐┌───────────┐┌──────────┐
-                  │  Sheet  ││ Dashboard ││  Ticket  │
-         ─────────┘         └┴───────────┴┴──────────┴──────────   <-  the front tab opens into the page  */
+         Flogic   ┌──────────┐┌───────────┐┌─────────┐
+                  │  Ticket  ││ Dashboard ││  Sheet  │
+         ─────────┘          └┴───────────┴┴─────────┴──────────   <-  the front tab opens into the page
+                                                                       (the Dashboard is the center:  see STATIONS in stationsI.js)  */
 
 body.stations #stationBar {
     position: sticky;
@@ -138,6 +139,8 @@ body.stations #stations {
 
 /*  THE TURN:  the "Spreadsheet View" flip's own curve and depth,  sideways like a carousel.
     Going right?  The old station turns away to the LEFT,  the new one comes in from the RIGHT.
+    ("turn-in-left"  =  it turns leftward INTO place:  it comes in from the right.   The tabs are  Ticket | Dashboard | Sheet,
+     so the Sheet always wears  turn-in-left  and the Ticket  turn-in-right.)
     (Only while it moves:  at rest NO transform,  or focus mode's full-screen grid would stick to the station.)  */
 .station.turn-away-left  { animation: station-away-left 0.25s cubic-bezier(0.11, 0, 0.5, 0) forwards; }
 .station.turn-away-right { animation: station-away-right 0.25s cubic-bezier(0.11, 0, 0.5, 0) forwards; }

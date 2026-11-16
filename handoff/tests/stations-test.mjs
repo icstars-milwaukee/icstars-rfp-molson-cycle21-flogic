@@ -68,13 +68,31 @@ try {
     check('Sheet tab turns to the Sheet', await st() === 'sheet' && await ev(`!document.getElementById('station-sheet').hidden && document.getElementById('station-dashboard').hidden`));
     check('the sheet measured itself (rows built, inside the window)', await ev(`document.querySelectorAll('#rows > [data-index]').length > 5 && document.getElementById('output').clientWidth > 300`));
     check('Ask and Checks on the Sheet too', (await spot(`document.getElementById('checksBtn')`)).hit);
+    //  The tabs' order is  Ticket | Dashboard | Sheet  (the Dashboard is the carousel's center).
+    check('the tabs read Ticket | Dashboard | Sheet', await ev(`[...document.querySelectorAll('#stationTabs [role=tab]')].map(t => t.textContent).join(' | ')`) === 'Ticket | Dashboard | Sheet', await ev(`[...document.querySelectorAll('#stationTabs [role=tab]')].map(t => t.textContent).join(' | ')`));
     await key('ArrowRight', 'ArrowRight', 39);
     await settled();
-    check('→ on the tabs: Dashboard', await st() === 'dashboard' && await ev(`document.activeElement.id === 'tab-dashboard'`));
+    check('→ on the tabs, from the Sheet (the last tab): wraps to the Ticket', await st() === 'ticket' && await ev(`document.activeElement.id === 'tab-ticket'`), await st());
     await key('ArrowRight', 'ArrowRight', 39); await settled();
-    check('→ again: Ticket', await st() === 'ticket');
+    check('→ again: Dashboard', await st() === 'dashboard');
     await key('ArrowRight', 'ArrowRight', 39); await settled();
-    check('→ at the end wraps to Sheet', await st() === 'sheet');
+    check('→ again: Sheet', await st() === 'sheet');
+    await key('ArrowLeft', 'ArrowLeft', 37); await settled();
+    check('← from the Sheet: Dashboard', await st() === 'dashboard');
+    await key('1', 'Digit1', 49, 1); await settled();
+    check('Alt+1: Ticket (the first tab)', await st() === 'ticket');
+    await key('3', 'Digit3', 51, 1); await settled();
+    check('Alt+3: Sheet (the last tab)', await st() === 'sheet');
+
+    //  WHICH SIDE each station comes in from.   "turn-in-left" = it turns leftward into place = it comes in from the RIGHT.
+    //  The Sheet always comes in from the right,  the Ticket from the left  (Sheet <-> Ticket too).
+    await ev(`(() => { window.__turns = []; new MutationObserver(ms => ms.forEach(m => { const c = [...m.target.classList].find(x => x.startsWith('turn-in-')); const k = m.target.id + ':' + c; if (c && window.__turns[window.__turns.length - 1] !== k) window.__turns.push(k); })).observe(document.getElementById('stations'), { subtree: true, attributes: true, attributeFilter: ['class'] }); })()`);
+    for (const to of ['dashboard', 'sheet', 'dashboard', 'ticket', 'sheet', 'ticket', 'dashboard', 'sheet']) { await click(`document.getElementById('tab-${to}')`, to + ' tab (side check)'); await settled(); await sleep(60); }
+    const sides = await ev(`window.__turns.join(' ')`);
+    check('Dashboard -> Sheet: the Sheet comes in from the right', sides.includes('station-dashboard:turn-in-right station-sheet:turn-in-left'), sides);
+    check('every turn to the Sheet comes from the right, every turn to the Ticket from the left', !/station-sheet:turn-in-right|station-ticket:turn-in-left/.test(sides) && /station-ticket:turn-in-right/.test(sides), sides);
+    check('the Dashboard comes in from the left after the Sheet, from the right after the Ticket', sides.startsWith('station-dashboard:turn-in-right') && /station-ticket:turn-in-right station-dashboard:turn-in-left/.test(sides), sides);
+
     await key('2', 'Digit2', 50, 1); await settled();
     check('Alt+2: Dashboard', await st() === 'dashboard');
     await send('Page.navigateToHistoryEntry', { entryId: (await send('Page.getNavigationHistory')).entries.slice(-2)[0].id }).catch(() => {});

@@ -5,9 +5,9 @@
 
         THE STATIONS:   one page,  one view at a time,  on a carousel.
 
-            ┌─────────┐┌───────────┐┌──────────┐
-            │  Sheet  ││ Dashboard ││  Ticket  │          <-  folder tabs:  every station one click away
-           ─┘         └┘▔▔▔▔▔▔▔▔▔▔▔└┘          └──────────
+            ┌──────────┐┌───────────┐┌─────────┐
+            │  Ticket  ││ Dashboard ││  Sheet  │          <-  folder tabs:  every station one click away
+           ─┘          └┘▔▔▔▔▔▔▔▔▔▔▔└┘         └──────────          (the Dashboard is the CENTER:  Ticket on its left,  Sheet on its right)
             [          Ask          ] [        Checks        ]     <-  on Sheet AND Dashboard  (long buttons)
                     (the station in front)
 
@@ -22,10 +22,11 @@
 
         THE MOTION:   the station in front turns away,  and the next one turns in,  with the SAME turn as the
         "Spreadsheet View" flip  (perspective 3000px,  rotateY,  ease-in / ease-out).   Going right?  It turns left.
+        So the SHEET always comes in from the right,  and the TICKET from the left  (Sheet <-> Ticket too:  the same ring).
         AT REST nothing is turned:  a turned box would trap focus mode's full-screen grid and the drawer
         (anything "fixed" inside a transformed box sticks to the box,  not the screen).
 
-        KEYS:   on the tabs  ← →  (and Home / End).   Anywhere:  Alt + 1 / 2 / 3.
+        KEYS:   on the tabs  ← →  (and Home / End).   Anywhere:  Alt + 1 / 2 / 3   (the tabs' order:  Ticket,  Dashboard,  Sheet).
                 On the Ticket station:  ↑ ↓  (and PageUp / PageDown)  the previous / next ticket,  Home / End  the first / last.
         The address follows the station  (#sheet  #dashboard  #ticket),  so Back works.
 
@@ -53,10 +54,13 @@ const stationsReady = STATION_NEEDS.every(function (name) {
         return ok;
     });
 
+//  THE ORDER IS THE CAROUSEL:   Ticket  (left)   ·   Dashboard  (center)   ·   Sheet  (right).
+//  It sets the tabs' order,  Alt + 1 / 2 / 3,  and which way each turn goes  (stationIndex,  in goStation):
+//  the Sheet always comes in from the RIGHT,  the Ticket from the LEFT.   (The app still STARTS on the Sheet.)
 const STATIONS = [
-    { id: 'sheet',     label: 'Sheet' },
-    { id: 'dashboard', label: 'Dashboard' },
     { id: 'ticket',    label: 'Ticket' },
+    { id: 'dashboard', label: 'Dashboard' },
+    { id: 'sheet',     label: 'Sheet' },
 ];
 const STATION_TURN_MS  = 260;       //  (a safety net:  the turn's animation ends by itself,  this only cleans up if it doesn't)
 const DASH_SIMPLE_TILES = 4;        //  the simplified dashboard:  this many tiles  (the big numbers first)
