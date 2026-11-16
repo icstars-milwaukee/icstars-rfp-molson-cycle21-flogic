@@ -77,8 +77,11 @@
     buttons.append(minBtn, maxBtn, closeBtn);
     bar.append(name, note, buttons);
 
-    function mount() { document.body.prepend(bar); }
-    if (document.body) mount(); else document.addEventListener('DOMContentLoaded', mount);
+    //  The bar goes NEXT TO <body>,  not inside it.
+    //  The sign-in card makes everything in <body> untouchable while it's up  (vaultI.js:  pageInert).   Inside <body>,
+    //  the bar went dead with the rest after every Lock:  no minimize,  no maximize,  no ✕,  no moving the window.
+    //  (Found in the desktop sweep.   At first start it worked only because the bar was added after the card came up.)
+    document.documentElement.appendChild(bar);
 
     //  Maximize  <->  Restore
     async function showMax() {
