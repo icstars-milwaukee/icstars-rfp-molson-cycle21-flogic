@@ -195,7 +195,7 @@ Do this after the measurements, then measure the turns again.
   - An answer (Ask, a check's Show ▸, a dashboard tile) still turns to the Sheet.
 - **Where:** `DataPage/stationsI.js`. The `STATIONS` array's order sets both the tab order and which way a station turns (`stationIndex` decides left or right). Reordering it to ticket, dashboard, sheet should do most of it. Update the diagrams in the header comments of `stationsI.js` and `stationsI.css` to match.
 - **Check with real input:**
-  - Each of the four turns (Dashboard→Sheet, Dashboard→Ticket, Sheet→Ticket, Ticket→Sheet) comes in from the right side. Read the incoming station's `turn-in-*` class, and take a screenshot mid-turn.
+  - Each of the four turns (Dashboard→Sheet, Dashboard→Ticket, Sheet→Ticket, Ticket→Sheet) comes in from the side listed above: the Sheet from the right, the Ticket from the left. Read the incoming station's `turn-in-*` class, and take a screenshot mid-turn.
   - ← → on the tabs, Alt+1/2/3 and Back/Forward.
   - Nothing stays turned at rest.
   - Focus mode and the Details drawer still sit on the screen right after a turn.
