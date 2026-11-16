@@ -10,7 +10,7 @@ Write your results in `handoff/desktop-sweep-report.md` (section 9).
 
 ## 0. What you may do, as DJ
 
-- **Commit and push to `phase-final-edit-path-rust` only.** Commit and push each tested milestone without asking. Never push to `main`, `phase-final` or `phase-final-edit`, and never force-push.
+- **Commit and push to `phase1-grid-menus` only** (it has everything from `phase-final-edit-path-rust`, plus the Nov 15 changes: the Details drawer, Go to row's corner, no Expand, the Excel numbers fix, and the `DataPage/` rename). Commit and push each tested milestone without asking. Never push to `main`, `phase-final`, `phase-final-edit` or `phase-final-edit-path-rust`, and never force-push.
 - **Never commit:** keyrings, `.flogic-key`, `.flogic-signer`, `.flogic-id`, packs, a filled-in `DataPage/it-signerI.js`, or anything under `desktop/target`, `desktop/dist` or `desktop/out`.
 - **DJ's own trust file is in the working tree.** `DataPage/it-signerI.js` holds DJ's real key, uncommitted. Copy it somewhere safe before you put a test one in, and put it back when you're done. Don't `git checkout` it away without that copy.
 - **Stop only what you started.** Stop only the Flogic processes you launched, by name or by process id: `flogic*.exe`, `Flogic*.exe`, and the `msedgewebview2.exe` processes whose command line has `webview-exe-name=flogic` or `webview-exe-name=Flogic`. Never kill Edge or WebView2 broadly, and never run `msedge --version`.
@@ -98,6 +98,7 @@ Note the screen's refresh rate first. **A 60 fps frame is 16.7 ms.** On a 120/14
   - open each data file and each pack size
   - the first dashboard draw
   - running a query (simple, `GROUP BY`, `ORDER BY` on 535k rows)
+  - Checks → Run all (the suggested list) on 535k rows
   - Save as CSV, Export report
   - switching theme
   - Lock
@@ -115,10 +116,17 @@ Note the screen's refresh rate first. **A 60 fps frame is 16.7 ms.** On a 120/14
 2. Scroll sideways in the 300-column file.
 3. Search, then step through matches with the snap menu ("aimbot"), including wrap-around.
 4. Resize a column. Drag a column if the page allows it.
-5. Hover cells (the "expand?" tag), open and close the Details panel.
+5. Hover cells (the "expand?" tag). Then the **Details drawer** (the ticket viewer, on the right edge since Nov 15):
+   - open it by clicking a cell, and by **Details ▾** in the snap menu; close it with × and Escape
+   - click a cell in the right part of the sheet: the sheet slides so that cell stays visible left of the drawer
+   - "Show the N empty fields" / "Hide the empty fields" on a ServiceNow row (half its fields are empty)
+   - keep it open while stepping ▶ through 50+ matches: it redraws each time
+   - in focus mode too (it starts under the info strip)
 6. Turn focus mode on and off. Scroll in focus mode.
-7. The dashboard: first draw, Edit mode, dragging and resizing tiles, adding a tile, Hide/Show.
+6b. **Go to row** is a small bar under the sheet's bottom-left corner now (not in the controls row). Type a row and press Enter, and use its button. **Expand (show all) is gone:** don't look for it.
+7. The dashboard: first draw, Edit mode, moving and resizing tiles (with the ◀ ▶ and S M L buttons: there's no dragging), adding a tile, Hide/Show.
 8. The Query menu: open it, type a query, show the answer, scroll the answer.
+8b. **Checks** (the square right after Ask, since Nov 15): open it (an empty list fills with suggested checks), **Run all** on the 535k-row file and on `incident.csv`, **Show ▸** on a failed check, **+ Add a check** (type one), **Save** (a download) and **Load** it back. Opening Ask closes Checks and the other way round. The page must keep breathing while the checks run: time "Run all" as a load (section 3) and watch for long tasks.
 9. The theme chip and menu. Switch each theme.
 10. Lock and unlock. Watch the card's appearance and the auto-lock countdown (the timer select).
 11. **The title bar:**

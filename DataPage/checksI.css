@@ -1,0 +1,302 @@
+/*  ==========================================================
+
+        THE NANDO NOTES  -  checksI.css
+
+        The CHECKS' clothes:  the [Checks] square next to Ask,  and the panel that drops down under the bar.
+        Its colors come from flogicI.css  (--glass-top,  --text,  --square-dark ...),  so it matches every theme.
+        Pass / fail / couldn't run get their own colors here  (both themes):  a mark AND a word,  never color alone.
+
+    ==========================================================  */
+
+:root,
+[data-theme="neo-neutral"] {
+    --check-pass:  #1b6e3c;         /*  green:  passed       (readable on the light glass)  */
+    --check-fail:  #a8261d;         /*  red:    failed  */
+    --check-error: #8a4b00;         /*  amber:  couldn't run  (the check itself is wrong:  not a pass,  not a fail)  */
+}
+
+[data-theme="neo-dark"] {
+    --check-pass:  #73d69f;
+    --check-fail:  #ff8f86;
+    --check-error: #f0b85a;
+}
+
+
+/*  [ Checks ]:  the bar's 4th square,  right after Ask.   A dark square  (Ask is SQL blue).  */
+#checksBtn {
+    margin: 0;
+    padding: 0 16px;
+    color: #fff;
+    background: var(--square-dark);
+    border: none;
+    border-left: 1px solid var(--line, rgba(255, 255, 255, 0.6));     /*  the white line between the squares  */
+    border-radius: 0;
+    text-shadow: 0 0 8px var(--theme-glow);
+}
+
+#checksBtn:disabled {
+    opacity: 0.45;
+    filter: none;
+    cursor: default;
+}
+
+#checksBtn[aria-expanded="true"] {
+    filter: brightness(1.15);
+}
+
+
+/*  THE PANEL:  right under the bar,  lined up with its right side  (like Ask's menu)  */
+#checksMenu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 9;
+    width: max(100%, 620px);
+    max-width: calc(100vw - 32px);
+    max-height: min(70vh, 640px);
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    overflow: clip;
+    font-family: "Segoe UI", system-ui, Arial, sans-serif;
+    font-size: 13px;
+    color: var(--text);
+    background: linear-gradient(135deg, var(--glass-top), var(--glass-bottom));
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--glass-edge);
+    border-radius: 12px;
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.18),
+        inset 0 1px 0 var(--shine, rgba(255, 255, 255, 0.9));
+    animation: checks-drop 0.2s ease-out;
+}
+
+@keyframes checks-drop {
+    from { opacity: 0; transform: translateY(-6px); }
+}
+
+/*  Its top line:   Checks  ·  incident  ·  5 checks            ×   */
+.checks-head {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 6px 0 12px;
+    line-height: 34px;
+    font-weight: 600;
+    color: #fff;
+    text-shadow: 0 0 8px var(--theme-glow);
+    background: var(--square-dark);
+}
+
+#checksTitle {
+    flex-grow: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#checksClose {
+    margin: 0;
+    min-width: 32px;
+    padding: 0 10px;
+    line-height: 26px;
+    border-radius: 7px;
+}
+
+
+/*  THE LIST:  one line per check.   It scrolls on its own.
+        [✓]  Row count is at least 23,334                       23,334   [Show ▸] [✕]
+             passes when the number is ≥ 23,334                                          */
+#checksList {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+
+.checks-empty {
+    margin: 0;
+    padding: 14px;
+    color: var(--text-soft);
+    line-height: 20px;
+}
+
+.check-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line-soft, rgba(255, 255, 255, 0.45));
+}
+
+.check-mark {
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--text-soft);
+    border: 1.5px solid currentColor;
+}
+
+.check-pass  .check-mark { color: var(--check-pass); }
+.check-fail  .check-mark { color: var(--check-fail); }
+.check-error .check-mark { color: var(--check-error); }
+
+.check-words {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.check-name {
+    font-weight: 600;
+    line-height: 20px;
+    overflow-wrap: anywhere;
+}
+
+.check-how {
+    font-size: 12px;
+    line-height: 18px;
+    color: var(--text-soft);
+    overflow-wrap: anywhere;
+}
+
+.check-fail  .check-how { color: var(--check-fail); }
+.check-error .check-how { color: var(--check-error); }
+
+/*  The answer,  big enough to read at a glance:   23,334   /   2 rows   /   none  */
+.check-shown {
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.check-row button {
+    flex-shrink: 0;
+    margin: 0;
+    padding: 0 10px;
+    line-height: 26px;
+    font-size: 12px;
+}
+
+.check-remove {
+    min-width: 30px;
+    padding: 0 8px;
+}
+
+
+/*  + ADD A CHECK:  a small form under the list  */
+#checksAdd {
+    flex-shrink: 0;
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+    border-top: 1px solid var(--line-soft, rgba(255, 255, 255, 0.45));
+    background: var(--header-bg);
+}
+
+.check-add-line {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.check-add-label {
+    width: 86px;
+    flex-shrink: 0;
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--text-soft);
+}
+
+#checksAdd input,
+#checksAdd textarea,
+#checksAdd select {
+    box-sizing: border-box;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--text);
+    background: var(--square-light);
+    border: 1px solid var(--glass-edge);
+    border-radius: 8px;
+    padding: 5px 8px;
+}
+
+#checkName,
+#checkSql {
+    flex: 1 1 280px;
+    min-width: 0;
+}
+
+#checkSql {
+    font-family: Consolas, "Cascadia Mono", monospace;
+    resize: vertical;
+}
+
+#checkTo {
+    width: 110px;
+}
+
+#checksAdd button {
+    margin: 0;
+    line-height: 28px;
+}
+
+.check-add-note {
+    color: var(--check-fail);
+    font-weight: 600;
+}
+
+
+/*  THE FOOT:   [Run all]  [+ Add a check]  [Suggested]  [Save]  [Load]   +   "Ran 3:52 PM on incident.csv · 3 passed · 1 failed"  */
+.checks-foot {
+    flex-shrink: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 10px 4px;
+    border-top: 1px solid var(--line-soft, rgba(255, 255, 255, 0.45));
+}
+
+.checks-foot button {
+    margin: 0;
+    line-height: 30px;
+}
+
+#checksRun {
+    color: #fff;
+    background: var(--square-dark);
+    text-shadow: 0 0 8px var(--theme-glow);
+}
+
+#checksRun:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+#checksNote {
+    flex-shrink: 0;
+    margin: 0;
+    padding: 2px 12px 10px;
+    font-size: 12px;
+    line-height: 18px;
+    color: var(--text-soft);
+}
+
+[data-theme="neo-dark"] #checksMenu {
+    backdrop-filter: url(#glassWarp) blur(3px);
+}
+
+body.focus #checksMenu {
+    display: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #checksMenu { animation: none; }
+}

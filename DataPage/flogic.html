@@ -52,6 +52,9 @@
     <!--  The dashboard's clothes  (dashI.css)  -->
     <link rel="stylesheet" href="dashI.css">
 
+    <!--  The checks' clothes:  the [Checks] square and its panel  (checksI.css)  -->
+    <link rel="stylesheet" href="checksI.css">
+
     <!--  The vault's clothes:  the unlock card and the Lock chip  (vaultI.css)  -->
     <link rel="stylesheet" href="vaultI.css">
 
@@ -316,7 +319,7 @@
             (The brain fills it in.)
     -->
 
-    <div id="aimRow" role="region" aria-label="The ticket's details" hidden>
+    <div id="aimRow" role="region" aria-label="The ticket's details" tabindex="-1" hidden>
         <div class="row-head">
             <span id="aimRowTitle"></span>
             <button id="aimRowClose" type="button" aria-label="Close the details">×</button>
@@ -383,6 +386,7 @@
     <script src="queryI.js"></script>
     <script src="flogicI.js"></script>
     <script src="dashI.js"></script>      <!--  the dashboard:  it needs the brain above it,  so it goes LAST  -->
+    <script src="checksI.js"></script>    <!--  CHECKS:  a saved list of questions that pass or fail  (needs the brain and Ask)  -->
     <script src="vaultcoreI.js"></script> <!--  the vault's locks and keys  (no page,  no saving)  -->
     <script src="policyI.js"></script>    <!--  the built-in rules:  short access,  the 30-day review,  the access levels  -->
     <script src="signincoreI.js"></script><!--  key files:  IT signs them,  a PIN locks your copy on this laptop  -->
