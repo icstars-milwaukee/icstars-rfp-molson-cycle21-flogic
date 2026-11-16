@@ -167,6 +167,8 @@ Note the screen's refresh rate first. **A 60 fps frame is 16.7 ms.** On a 120/14
 
 ## 5. Places to look first
 
+**Since the sweep (Nov 16, DJ's agent, `SCANME/returns/SWEEP-CONTINUE-v0.1.0-2026-11-16.md`):** `refresh()` now redraws only the rows that changed. While the sheet scrolls its rows take no mouse (`#output.moving`). The Details drawer narrows below about 1,340 px wide so it never covers ▶. A dashboard tile scrolls the answer row to just under the tab bar. New harness pieces: `edit-cost.js`, `it-rows-check.js`, `paint-probe.js`, `winctl.ps1 size`, and `EXE_SIZE=1280x672` for `stations-test` / `drawer-test` in the desktop build. Frame numbers need a machine with a GPU: DJ's paints in software.
+
 These are guesses from reading the code. Prove or rule out each one.
 
 - **`it-console/itconsoleI.js` `refresh()`** redraws every table (people, groups, data, packs, the to-do list) after any change. With 100 people and 500 packs, that may cost a frame or more per click.

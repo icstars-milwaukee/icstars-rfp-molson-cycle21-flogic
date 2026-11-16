@@ -30,7 +30,7 @@ async function one(i) {
     const settle = fr.find((f) => Math.abs(f[1] - last[1]) + Math.abs(f[2] - last[2]) + Math.abs(f[3] - last[3]) < 12);
     const out = { run: i, visible: L.visibleMs, navStart: Math.round(off), fcp: Math.round(off + t.fcp), dcl: Math.round(off + t.dcl), load: Math.round(off + t.load),
                   clickable: Math.round(Math.max(L.visibleMs, off + t.load)), firstControl: t.firstControl, whiteFrames: white.length,
-                  firstFrames: fr.slice(0, 5).map((f) => f[0] + 'ms rgb(' + f[1] + ',' + f[2] + ',' + f[3] + ')'), settledAt: settle ? settle[0] : null, final: 'rgb(' + last[1] + ',' + last[2] + ',' + last[3] + ')',
+                  behind: 'rgb(' + L.before.join(',') + ')', firstFrames: fr.slice(0, 5).map((f) => f[0] + 'ms rgb(' + f[1] + ',' + f[2] + ',' + f[3] + ')'), settledAt: settle ? settle[0] : null, final: 'rgb(' + last[1] + ',' + last[2] + ',' + last[3] + ')',
                   rect: L.rect, screen: L.screen, failed: t.bad, scripts: t.res.filter((r) => /\.js$/.test(r.n)).length };
     if (i === 1) fs.writeFileSync(path.join(S.ROOT, 'out', 'startup-' + which + TAG + '-resources.json'), JSON.stringify(t.res, null, 1));
     try { await browser.close(); } catch (e) {}

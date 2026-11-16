@@ -4,6 +4,7 @@
 //     - how many paints, and how much area they cover (in screens' worth)
 //     - which elements were invalidated, and why (the top reasons)
 //     - the compositor layers, and why each exists
+//   Env:  FILE=<csv>   DX=300 DY=0 (each wheel step)   STEPS=60   FOCUS=1 (focus mode first)
 //   --css adds a stylesheet first (an experiment: does this change stop the repaint?).   The page's own files are not changed.
 const { chromium } = require('../demo/node_modules/playwright-core');
 const path = require('path'); const fs = require('fs');
@@ -16,9 +17,10 @@ const CSS = (process.argv.find((a) => a.startsWith('--css=')) || '').slice(6);
     await p.goto('file:///' + R.split(path.sep).join('/') + '/DataPage/flogic.html'); await p.waitForTimeout(500);
     if (CSS) await p.addStyleTag({ content: CSS });
     const plain = p.locator('button', { hasText: 'plain file without signing in' }).first(); if (await plain.count()) await plain.click();
-    await p.setInputFiles('#csvFileInput', path.join(__dirname, 'data', 'wide_300col.csv'));
+    await p.setInputFiles('#csvFileInput', process.env.FILE || path.join(__dirname, 'data', 'wide_300col.csv'));
     await p.waitForFunction(() => document.getElementById('loader').hidden && /Rows/.test(document.getElementById('status').textContent), null, { timeout: 60000 });
     if (await p.locator('#tab-sheet').count()) { await p.click('#tab-sheet'); await p.waitForTimeout(800); }
+    if (process.env.FOCUS) { await p.mouse.click(30, 400); await p.keyboard.press('f'); await p.waitForTimeout(600); }      // FOCUS=1:  focus mode (the sheet fills the window)
     const box = await p.locator('#output').boundingBox();
     await p.evaluate(() => { document.getElementById('output').scrollIntoView({ block: 'center' }); });
     await p.waitForTimeout(400);
@@ -34,7 +36,7 @@ const CSS = (process.argv.find((a) => a.startsWith('--css=')) || '').slice(6);
     cdp.on('Tracing.dataCollected', (d) => { for (const e of d.value) ev.push(e); });
     await cdp.send('Tracing.start', { categories: 'devtools.timeline,disabled-by-default-devtools.timeline,disabled-by-default-devtools.timeline.invalidationTracking,__metadata', transferMode: 'ReportEvents' });
     const t0 = Date.now();
-    for (let i = 0; i < Number(process.env.STEPS || 60); i++) { await p.mouse.wheel(300, 0); await p.waitForTimeout(20); }
+    for (let i = 0; i < Number(process.env.STEPS || 60); i++) { await p.mouse.wheel(Number(process.env.DX === undefined ? 300 : process.env.DX), Number(process.env.DY || 0)); await p.waitForTimeout(20); }
     await p.waitForTimeout(300);
     const ms = Date.now() - t0;
     const done = new Promise((r) => cdp.once('Tracing.tracingComplete', r)); await cdp.send('Tracing.end'); await done;
