@@ -258,7 +258,7 @@ h1 {
 #searchInput::placeholder,
 #jumpInput::placeholder {
     color: var(--text-soft);
-    opacity: 0.8;
+    opacity: 1;                     /*  (at 0.8 the hint was too faint to read:  3.9-4.2 contrast,  4.5 is the bar)  */
 }
 
 
@@ -526,7 +526,7 @@ h1 {
     z-index: 35;                    /*  over the sheet,  the menus and focus mode's strip  (the pill floats over it:  40)  */
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow: clip;                 /*  (not "hidden":  that can still be scrolled by Tab / scrollIntoView,  which cut off the title)  */
     font-family: "Segoe UI", system-ui, Arial, sans-serif;
     font-size: 13px;
 
@@ -567,11 +567,18 @@ h1 {
     white-space: nowrap;
 }
 
+/*  The ×:  32 x 28,  easy to hit  (it was 28 x 22:  under the 24px a finger or a shaky hand needs)  */
 #aimRowClose {
     margin: 0;
-    padding: 0 8px;
-    line-height: 20px;
-    border-radius: 6px;
+    min-width: 32px;
+    padding: 0 10px;
+    line-height: 26px;
+    border-radius: 7px;
+}
+
+/*  The keyboard lands on the drawer itself when it opens  (Tab -> the ×).   No ring around the whole drawer for that.  */
+#aimRow:focus {
+    outline: none;
 }
 
 /*  1.  THE FOCUS CARD:  a light square,  for reading.  */
@@ -634,6 +641,20 @@ h1 {
     grid-template-columns: minmax(80px, max-content) minmax(0, 1fr);
     overflow-y: auto;
     scrollbar-width: thin;
+}
+
+/*  EMPTY fields fold away  (the list reads in one go).   "Show the 21 empty fields"  brings them back.  */
+#aimRowList:not(.show-empty) .row-empty {
+    display: none;
+}
+
+.row-empties {
+    grid-column: 1 / -1;
+    justify-self: start;
+    margin: 8px 10px 12px;
+    padding: 0 12px;
+    line-height: 28px;
+    font-size: 13px;
 }
 
 .row-name,
@@ -797,11 +818,12 @@ h1 {
     white-space: nowrap;
 }
 
-#queryClose {
+#queryClose {                       /*  32 x 28:  easy to hit  (like the Details drawer's ×)  */
     margin: 0;
-    padding: 0 8px;
-    line-height: 20px;
-    border-radius: 6px;
+    min-width: 32px;
+    padding: 0 10px;
+    line-height: 26px;
+    border-radius: 7px;
 }
 
 
@@ -2015,14 +2037,7 @@ mark {
          └──────┴──────────┘                                  */
 #jumpBar {
     display: flex;
-    margin: 10px 0 0 6px;
-    opacity: 0.75;                  /*  quiet until you want it  */
-    transition: opacity 0.15s;
-}
-
-#jumpBar:hover,
-#jumpBar:focus-within {
-    opacity: 1;
+    margin: 10px 0 0 6px;           /*  (quiet by its SIZE and its place,  not by fading it:  faded,  its words were too hard to read)  */
 }
 
 /*  The LEFT half of the bar:  round corners on the left only  */

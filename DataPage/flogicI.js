@@ -1755,6 +1755,7 @@ function snapToTarget() {
     updateColumns();
     buildVisibleRows();
     updatePosition();
+    keepClearOfDrawer(col);                                 //  (the Details drawer is open?  Not UNDER it.)
 
 
     //  3.  LOCK ON:  the cell pulses.
@@ -1881,13 +1882,35 @@ function tellMore(target, full, which) {
 const ROW_LIMIT     = 200;
 const FOCUS_LETTERS = 20000;
 
+let drawerReturn = null;    //  what had the keyboard before the drawer opened  (it gets it back when the drawer closes)
+
 function showRow(open) {
     if (open && detailsTarget() === null) return;       //  (nothing to show)
     if (open) closeQueryMenu();                         //  (one at a time:  an answer would swap the table under the Details)
     else picked = null;                                 //  (closed:  a clicked cell is forgotten)
+    const opening = open && aimRow.hidden;
     aimRow.hidden = !open;
     aimRowBtn.setAttribute('aria-expanded', open);
     if (open) drawRow();
+
+    //  The KEYBOARD goes into the drawer when it opens  (Tab -> its ×,  then its text),  without moving the page.
+    //  (A mouse click on a cell shows no focus ring for this:  the ring is only for keyboard users.)
+    if (opening) {
+        const had = document.activeElement;
+        drawerReturn = had && had !== document.body && !aimRow.contains(had) ? had : null;
+        aimRow.focus({ preventScroll: true });
+    }
+}
+
+//  Close the drawer  (× or Escape),  and give the keyboard back to what had it  (WITHOUT scrolling the page there:
+//  you may have scrolled far from it).   Nothing had it?  Just let go of the drawer.
+function closeDrawer() {
+    const inside = aimRow.contains(document.activeElement);
+    showRow(false);
+    const back = drawerReturn;
+    drawerReturn = null;
+    if (back !== null && back.isConnected && back.offsetParent !== null) back.focus({ preventScroll: true });
+    else if (inside) document.activeElement.blur();
 }
 
 //  Which cell the Details are about:  one you CLICKED,  or the snap menu's target.   (null  =  neither)
@@ -1896,6 +1919,19 @@ function detailsTarget() {
     return aimAt === -1 ? null : { row: matches[aimAt], col: aimHits[aimHit] };
 }
 
+
+let showEmptyFields = false;    //  the drawer's empty fields:  folded away  (false)  or listed  (true).   Your pick stays.
+
+//  The row's RECORD ID,  the way people name a ticket:  INC0012345,  CHG0034567,  RITM0001234 ...
+//  The first field that looks like one  (letters,  then 4+ digits).   None?  null.   (Only the first 60 fields are checked.)
+const RECORD_ID = /^[A-Za-z]{2,8}[-_]?\d{4,}$/;
+function recordIdOf(row, count) {
+    for (let c = 0; c < Math.min(count, 60); c++) {
+        const text = cellAt(row, c).trim();
+        if (RECORD_ID.test(text)) return text;
+    }
+    return null;
+}
 
 function drawRow() {
 
@@ -1910,7 +1946,14 @@ function drawRow() {
     const from = Math.max(0, Math.min(col - ROW_LIMIT / 2, count - ROW_LIMIT));
     const to   = Math.min(count, from + ROW_LIMIT);
 
-    aimRowTitle.textContent = 'Row ' + (row + 1 + rowShift()) + '  ·  ' + count + ' column' + (count === 1 ? '' : 's');
+    //  The title NAMES the ticket  (its record id,  like  INC0012345,  when the row has one),  then where it is
+    //  and how much of it is filled in:     INC1814464  ·  Row 2  ·  23 of 44 filled
+    let filled = 0;
+    for (let c = from; c < to; c++) if (cellAt(row, c) !== '') filled++;
+    const id = recordIdOf(row, count);
+    aimRowTitle.textContent = (id !== null ? id + '  ·  ' : '') + 'Row ' + (row + 1 + rowShift()) + '  ·  ' +
+        (filled === to - from ? count + ' column' + (count === 1 ? '' : 's') : filled + ' of ' + (to - from) + ' filled');
+    aimRowTitle.title = aimRowTitle.textContent;
 
     //  1.  The FOCUS card:   the column's name  ("NOTES")   and the full text,  your word in yellow.
     const full = cellAt(row, col);
@@ -1938,6 +1981,7 @@ function drawRow() {
     }
 
     let target = null;
+    let empties = 0;
 
     for (let c = from; c < to; c++) {
 
@@ -1962,8 +2006,33 @@ function drawRow() {
 
         if (sqlInfo !== null && sqlIsNull(sqlInfo, row + 1, c)) value.classList.add('null');   //  a SQL NULL:  the clothes show a faint NULL
 
+        //  An EMPTY field  (half of a ServiceNow ticket can be):  folded away,  so the filled ones read in one go.
+        //  (The cell you clicked always shows,  even when it's empty.)
+        if (text === '' && c !== col) {
+            name.classList.add('row-empty');
+            value.classList.add('row-empty');
+            empties++;
+        }
+
         list.append(name, value);
     }
+
+    //  [ Show the 21 empty fields ]   /   [ Hide the empty fields ]
+    if (empties > 0) {
+        const more = document.createElement('button');
+        more.type = 'button';
+        more.className = 'row-empties';
+        more.textContent = showEmptyFields ? 'Hide the empty fields' : 'Show the ' + empties + ' empty field' + (empties === 1 ? '' : 's');
+        more.setAttribute('aria-expanded', String(showEmptyFields));
+        more.addEventListener('click', function () {
+            showEmptyFields = !showEmptyFields;
+            aimRowList.classList.toggle('show-empty', showEmptyFields);
+            more.textContent = showEmptyFields ? 'Hide the empty fields' : 'Show the ' + empties + ' empty field' + (empties === 1 ? '' : 's');
+            more.setAttribute('aria-expanded', String(showEmptyFields));
+        });
+        list.appendChild(more);
+    }
+    aimRowList.classList.toggle('show-empty', showEmptyFields);
 
     aimRowList.appendChild(list);
 
@@ -1973,15 +2042,12 @@ function drawRow() {
 }
 
 
-aimRowBtn.addEventListener('click', function () { showRow(aimRow.hidden); });
-aimRowClose.addEventListener('click', function () { showRow(false); aimRowBtn.focus(); });
+aimRowBtn.addEventListener('click', function () { if (aimRow.hidden) showRow(true); else closeDrawer(); });
+aimRowClose.addEventListener('click', closeDrawer);
 
 //  Escape closes the details  (if they're open).
 document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && !aimRow.hidden) {
-        showRow(false);
-        aimRowBtn.focus();
-    }
+    if (e.key === 'Escape' && !aimRow.hidden) closeDrawer();
 });
 
 
@@ -2050,10 +2116,40 @@ function showTag() {
     cellTag.classList.add('on');
 }
 
+//  The drawer slid in OVER the cell you clicked?   Slide the sheet sideways,  so that cell sits just LEFT of the drawer:
+//  you keep seeing what you picked.   (It can't when the sheet is already as far right as it goes,  or the drawer
+//  covers nearly the whole sheet,  like on a phone.)   ->  true  if the sheet moved.
+function keepClearOfDrawer(col) {
+    if (aimRow.hidden || columnStarts === null || col >= columnStarts.length) return false;
+    knowBox();
+    const box       = outputBox.getBoundingClientRect();
+    const viewLeft  = box.left + outputBox.clientLeft + NUM_WIDTH;                     //  where the columns start on screen
+    const viewWidth = Math.max(boxWidth - NUM_WIDTH, 0);
+    const clear     = document.documentElement.clientWidth - aimRow.offsetWidth - 12;  //  the drawer's left edge,  a little before
+    const now       = sheetSpot(outputBox.scrollLeft, viewWidth);                       //  the sheet's pixel at the window's left edge
+    const right     = viewLeft + columnStarts[col] + columnWidths[col] - now;
+    if (right <= clear) return false;                                                  //  already in view
+    const room = clear - viewLeft;
+    if (room < 80) return false;                                                       //  hardly any sheet left of the drawer
+    const want = columnStarts[col] + Math.min(columnWidths[col], room) - room;         //  the cell's right edge  ->  just left of the drawer
+    const before = outputBox.scrollLeft;
+    outputBox.scrollLeft = scrollSpotFor(Math.max(0, want), viewWidth);
+    if (outputBox.scrollLeft === before) return false;
+    updateColumns();
+    buildVisibleRows();
+    updatePosition();
+    return true;
+}
+
 //  Open the Details for a cell.   (It pulses,  like a snapped-to target,  so you see which one.)
 function pickCell(spot, cell) {
     picked = spot;
     showRow(true);
+    const moved = keepClearOfDrawer(spot.col);
+    if (moved) {                                            //  (the sheet slid:  the cell was rebuilt.   Find it again,  to pulse it.)
+        const line = rowsBox.querySelector('[data-index="' + matches.indexOf(spot.row) + '"]');
+        if (line !== null && spot.col >= builtColStart && spot.col < builtColEnd) cell = line.children[2 + spot.col - builtColStart];
+    }
     cell.classList.remove('locked');
     void cell.offsetWidth;
     cell.classList.add('locked');
