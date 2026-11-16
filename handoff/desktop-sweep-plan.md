@@ -102,6 +102,7 @@ Note the screen's refresh rate first. **A 60 fps frame is 16.7 ms.** On a 120/14
   - Save as CSV, Export report
   - switching theme
   - Lock
+  - turning between stations (Sheet / Dashboard / Ticket) with a 535k-row file open: the Sheet re-measures itself on every turn
 - **IT app:**
   - open and save the keyring (100 people)
   - make a key file
@@ -112,6 +113,14 @@ Note the screen's refresh rate first. **A 60 fps frame is 16.7 ms.** On a 120/14
 ## 4. The interactions to sweep at 60 fps
 
 **Staff app**
+
+**The app is on STATIONS now** (since Nov 15): folder tabs at the top for **Sheet**, **Dashboard** and **Ticket**, one in front at a time. It starts on the Sheet (open a file there). A newly opened file lands on a **simplified Dashboard** (4 tiles, "Show the full dashboard"). **Ask** and **Checks** are two long buttons above the Sheet and the Dashboard. Switching turns the stations like a carousel (0.25 s, the same curve as the "Spreadsheet View" flip). Most items below happen on the Sheet: click its tab first.
+
+0. **The stations themselves:**
+   - turn with the tabs (click), ← → on the tabs, Alt+1/2/3, and Back/Forward: every turn at 60 fps, with the 535k-row file open
+   - at rest, nothing may stay turned: check that focus mode's full-screen grid and the Details drawer still sit on the screen right after a turn
+   - the Ticket station: ▲ Previous ticket / ▼ Next ticket held down (↑ ↓ keys), Home/End on 535k rows; "Big view ▸" from the drawer
+   - the simplified Dashboard's "Show the full dashboard", and a dashboard tile row (it turns to the Sheet with the answer)
 1. Scroll the grid of the 535k-row file: mouse wheel (slow and fast), dragging the scrollbar, PageDown held, arrow keys held, Home/End.
 2. Scroll sideways in the 300-column file.
 3. Search, then step through matches with the snap menu ("aimbot"), including wrap-around.
