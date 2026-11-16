@@ -1,6 +1,28 @@
-# Flogic desktop sweep: report (partial)
+# Flogic desktop sweep: report
 
-**From Fernando's agent, 15–16 Nov 2026, branch `phase1-grid-menus`.** Not finished. What's left is handed to DJ's agent in `SCANME/SWEEP-CONTINUE-v0.1.0.md`.
+**From Fernando's agent, 15–16 Nov 2026, and continued by DJ's agent on 16 Nov, branch `phase1-grid-menus`.**
+
+## Where it ended (DJ's agent, 16 Nov)
+
+The full account, job by job, is in `SCANME/returns/SWEEP-CONTINUE-v0.1.0-2026-11-16.md`. In short:
+
+| Left over, below | Now |
+|---|---|
+| The IT console redraws everything on every edit | **Fixed** (`106936f`): longest task per edit 34–57 ms → 9–27 ms, people rows built 105 → 0 or 1 |
+| Sideways scroll, 300 columns | **Fixed** (`96b66fd`): paints of the sheet 95 → 22 per 60 notches. The new frame rate is **not measured** |
+| The drawer covers ▶; Back to file under the tabs | **Fixed** (`791d1e7`): both gate tests pass in the desktop build at 1280 × 672 |
+| Idle with the Sheet in front (the Ready glow) | **Fixed** (`8047777`, DJ's call): 5 fades, then it rests |
+| Dark grey first frame at launch | **Tried, not committed:** the window colour made no difference on DJ's machine, and flashed light for dark-theme users |
+| Wheel in focus mode | **Not settled** |
+| Opening a 207 MB file; packing 40 MB | Unchanged: DJ's decision (a Worker) |
+| The Castle Claude gate | **Run:** all pages as before; `run.js` 22 fails; `fuzz.js` 162 fails (the plan says 185) |
+| The release build | **Built and started**, blank trust file |
+
+**The frame numbers below are Fernando's laptop only.** DJ's machine is a virtual machine with no graphics card (WebView2 paints in software: even plain scrolling is 100 % over budget there), so no frame rate from it is in this report. The "after" frame sweep, and the new numbers for the two scrolling fixes, still need a machine with a GPU.
+
+Everything from here down is Fernando's agent's report, as written.
+
+---
 
 **The short version**
 
