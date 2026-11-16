@@ -22,6 +22,10 @@
 
 body.vault-up { overflow: hidden; }
 
+/*  While the card is up,  the page behind it can't be seen.   So its "Ready" glow  (flogicI.css)  waits:
+    left running,  it cost 14 to 16% of a CPU core for as long as the app sat locked.   (Measured in the desktop sweep.)  */
+body.vault-up .scope-hint.ready { animation-play-state: paused; }
+
 .vault-box {
     width: min(380px, 100%);
     padding: 28px 28px 22px;

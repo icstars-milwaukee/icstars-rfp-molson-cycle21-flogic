@@ -474,14 +474,19 @@ h1 {
 
 /*  "Ready"  (no search yet):  the word glows softly, in and out, slowly.
     Only the word, not the whole window:  calmer on the eyes,  and less for the computer to redraw.
-    (It's an "opacity" change:  the cheapest kind of animation there is.)  */
+    (It's an "opacity" change:  the cheapest kind of animation there is.)
+
+    "steps(12)"  =  each fade is 12 small jumps  (5 a second),  not 60 redraws a second.   Same slow glow to the eye.
+    Why:  the word sits inside the blurred glass bar,  so every redraw made the computer blur the bar again.
+    Measured in the desktop app,  doing nothing,  with the Sheet in front:   smooth  ->  14 to 16% of a CPU core,  forever.
+    In 12 steps  ->  about 5%.   (Behind the sign-in card it's paused:  see vaultI.css.)  */
 .scope-hint.ready {
     font-size: 13px;
     font-weight: 600;
     letter-spacing: 0.08em;
     color: var(--text);
     text-shadow: 0 0 10px var(--theme-glow);
-    animation: ready-glow 2.4s ease-in-out infinite alternate;
+    animation: ready-glow 2.4s steps(12, end) infinite alternate;
 }
 
 @keyframes ready-glow {
