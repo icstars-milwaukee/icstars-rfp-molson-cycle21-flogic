@@ -69,10 +69,17 @@ jobs:
         run: |
           set -euo pipefail
           docker run -d --name flogic --read-only --tmpfs /tmp --cap-drop ALL -p 8080:8080 flogic:ci
+          up=0
           for i in $(seq 1 30); do
-            curl -fsS http://127.0.0.1:8080/healthz > /dev/null 2>&1 && break
+            if curl -fsS http://127.0.0.1:8080/healthz > /dev/null 2>&1; then up=1; break; fi
             sleep 1
           done
+          if [ "$up" != "1" ]; then
+            echo "::error::The container never answered on port 8080. Its own log and state are below."
+            docker ps -a
+            docker logs flogic 2>&1 | tail -40
+            exit 1
+          fi
           bash deploy/smoke.sh http://127.0.0.1:8080
           docker logs flogic 2>&1 | tail -5
           docker rm -f flogic
@@ -82,10 +89,17 @@ jobs:
           set -euo pipefail
           docker build -t flogic:ci-it --build-arg IT_CONSOLE=1 .
           docker run -d --name flogic-it --read-only --tmpfs /tmp --cap-drop ALL -p 8081:8080 flogic:ci-it
+          up=0
           for i in $(seq 1 30); do
-            curl -fsS http://127.0.0.1:8081/healthz > /dev/null 2>&1 && break
+            if curl -fsS http://127.0.0.1:8081/healthz > /dev/null 2>&1; then up=1; break; fi
             sleep 1
           done
+          if [ "$up" != "1" ]; then
+            echo "::error::The container never answered on port 8081."
+            docker ps -a
+            docker logs flogic-it 2>&1 | tail -40
+            exit 1
+          fi
           IT_CONSOLE=1 bash deploy/smoke.sh http://127.0.0.1:8081
           docker rm -f flogic-it
 
