@@ -6,16 +6,28 @@
 
 Write your results in `handoff/desktop-sweep-report.md` (section 9).
 
+**The goal:** both apps start fast, never make anyone wait for nothing, and draw at 60 fps, **without breaking anything that works today.** Section 6c says what to do first and when you're done. Section 6d is the test gate after every fix.
+
 ---
 
 ## 0. What you may do, as DJ
 
-- **Commit and push to `phase1-grid-menus` only** (it has everything from `phase-final-edit-path-rust`, plus the Nov 15 changes: the Details drawer, Go to row's corner, no Expand, the Excel numbers fix, and the `DataPage/` rename). Commit and push each tested milestone without asking. Never push to `main`, `phase-final`, `phase-final-edit` or `phase-final-edit-path-rust`, and never force-push.
-- **Never commit:** keyrings, `.flogic-key`, `.flogic-signer`, `.flogic-id`, packs, a filled-in `DataPage/it-signerI.js`, or anything under `desktop/target`, `desktop/dist` or `desktop/out`.
-- **DJ's own trust file is in the working tree.** `DataPage/it-signerI.js` holds DJ's real key, uncommitted. Copy it somewhere safe before you put a test one in, and put it back when you're done. Don't `git checkout` it away without that copy.
+- **Which machine:** you'll most likely run on **Fernando's** machine, as last time.
+  - A few lines below are true on **DJ's machine only**: his trust file in the working tree, the nearly full C: drive, and `Desktop\Castle Claude`.
+  - Check which machine you're on first. Follow the lines that fit it, and say which in the report.
+- **Commit and push to `phase1-grid-menus` only.** It has everything from `phase-final-edit-path-rust`, plus the Nov 15 work:
+  - the Details drawer, Go to row's corner, no Expand
+  - the Excel numbers fix, the SQL `LIKE` fix, and the `DataPage/` rename
+  - Checks, and the stations (Sheet / Dashboard / Ticket)
+  - the tests in `handoff/tests/`
+
+  Commit and push each tested milestone without asking. Never push to `main`, `phase-final`, `phase-final-edit` or `phase-final-edit-path-rust`, and never force-push.
+- **Never commit:** keyrings, `.flogic-key`, `.flogic-signer`, `.flogic-id`, packs, a filled-in `DataPage/it-signerI.js`, test data, or anything under `desktop/target`, `desktop/dist` or `desktop/out`.
+- **Never use real client data.** The class rule is that real ServiceNow rows never go to AI tools. Use only the made-up files from `handoff/tests/make-tickets.py` and the test sets named in section 2. If a real export is on the machine, don't open it.
+- **The trust file:** on DJ's machine, `DataPage/it-signerI.js` holds DJ's real key, uncommitted. Copy it somewhere safe before you put a test one in, and put it back when you're done. Don't `git checkout` it away without that copy. On Fernando's machine the file in git is the blank one, so make a test trust file as in section 1.
 - **Stop only what you started.** Stop only the Flogic processes you launched, by name or by process id: `flogic*.exe`, `Flogic*.exe`, and the `msedgewebview2.exe` processes whose command line has `webview-exe-name=flogic` or `webview-exe-name=Flogic`. Never kill Edge or WebView2 broadly, and never run `msedge --version`.
 - **Line endings:** the repo's files use CRLF. Edit with an editor tool or `perl -pi`, never `sed -i`. Before adding a function to a page script, check its name isn't already used: all the scripts share one scope.
-- **The C: drive is nearly full.** About 1–3 GB is free.
+- **Disk space** (DJ's machine: the C: drive is nearly full, about 3 GB free; check yours):
   - Build into the one shared folder, `desktop/target/shared`.
   - Delete `desktop/target/shared/debug` when you're done with debug builds.
   - Never delete DJ's files to make room. Ask.
@@ -59,10 +71,11 @@ Write your results in `handoff/desktop-sweep-report.md` (section 9).
   4. Rebuild the staff sweep build.
   5. Put DJ's file back at the end and check it with `git diff`.
 
-## 2. Test data
+## 2. Test data (all made up)
 
-- **Reuse the earlier set:** `finance_ledger_2026.sql`, `hr_roster_2026.xlsx`, `ops_tickets_2026.csv`, `big_warehouse.sql` (40 MB, 535,500 rows), the 1999 and 2006 files, and the odd inputs.
-- **Use `Desktop\Castle Claude\stress-files`** too, read-only. Never change or delete anything there.
+- **Start with `handoff/tests/make-tickets.py`:** `py -3.12 -I make-tickets.py C:\temp\fake` makes a 25,000-row ServiceNow-style `incident.csv`, a `change_request.csv`, and `expected.json` (the true answers). `py -3.12 -I make-tickets.py C:\temp\fake-big 535000` makes a big one for speed.
+- **Reuse your earlier made-up set** if you still have it: `finance_ledger_2026.sql`, `hr_roster_2026.xlsx`, `ops_tickets_2026.csv`, `big_warehouse.sql` (40 MB, 535,500 rows), the 1999 and 2006 files, and the odd inputs. If they're gone, make new ones.
+- **On DJ's machine only:** `Desktop\Castle Claude\stress-files` (big square CSVs), read-only. Never change or delete anything there, and don't open the ServiceNow exports in the Castle Claude week06 folders: they're real.
 - **Make these:**
   - A CSV with 1,000,000 rows and 12 columns.
   - A CSV with 300 columns.
@@ -135,7 +148,7 @@ Note the screen's refresh rate first. **A 60 fps frame is 16.7 ms.** On a 120/14
 6b. **Go to row** is a small bar under the sheet's bottom-left corner now (not in the controls row). Type a row and press Enter, and use its button. **Expand (show all) is gone:** don't look for it.
 7. The dashboard: first draw, Edit mode, moving and resizing tiles (with the ◀ ▶ and S M L buttons: there's no dragging), adding a tile, Hide/Show.
 8. The Query menu: open it, type a query, show the answer, scroll the answer.
-8b. **Checks** (the square right after Ask, since Nov 15): open it (an empty list fills with suggested checks), **Run all** on the 535k-row file and on `incident.csv`, **Show ▸** on a failed check, **+ Add a check** (type one), **Save** (a download) and **Load** it back. Opening Ask closes Checks and the other way round. The page must keep breathing while the checks run: time "Run all" as a load (section 3) and watch for long tasks.
+8b. **Checks** (the long button next to Ask, since Nov 15): open it (an empty list fills with suggested checks), **Run all** on the 535k-row file and on the made-up `incident.csv`, **Show ▸** on a failed check, **+ Add a check** (type one), **Save** (a download) and **Load** it back. Opening Ask closes Checks and the other way round. The page must keep breathing while the checks run: time "Run all" as a load (section 3) and watch for long tasks.
 9. The theme chip and menu. Switch each theme.
 10. Lock and unlock. Watch the card's appearance and the auto-lock countdown (the timer select).
 11. **The title bar:**
@@ -161,7 +174,7 @@ These are guesses from reading the code. Prove or rule out each one.
 - **The title bar's `onResized` handler** asks Rust `isMaximized()` on every resize event. During a live resize that is many round trips a second. It may need throttling to one per frame, or only acting when resizing stops.
 - **`html.flogic-desktop { padding-top: 32px }`** and the fixed-element offsets in `desktop/titlebar/titlebarI.css`. Check nothing reflows the whole page per frame. Check no layout uses `100vh` and now overflows by 32 px (a stray scrollbar).
 - **The sign-in card and Lock:** do they keep timers or animations running when hidden?
-- **Start-up:** the app loads about 12 scripts, all at once, before the card shows. Is anything big (the SQL engine, the xlsx reader, the dashboard) parsed and run before it's needed?
+- **Start-up:** the app loads 13 scripts, all at once, before the card shows. The last two, `checksI.js` and `stationsI.js`, build their pieces and move the page's pieces into the stations at load. Is anything big (the SQL engine, the xlsx reader, the dashboard) parsed and run before it's needed?
 - **The 500 for missing files:** WebView2 asks for `/favicon.ico` by itself. That one is fixed (the build copies the icon). Look for any other failed requests at start.
 - **Big-file paths:** reading, packing and opening 40 MB in one go. Do they block the page? Should they use a worker or chunks? Report this before changing it, because it's a design change.
 
@@ -201,6 +214,41 @@ Do this after the measurements, then measure the turns again.
   - Focus mode and the Details drawer still sit on the screen right after a turn.
   - Turns stay at 60 fps.
 
+## 6c. What to do first, and when you're done
+
+**Order** (if time runs short, stop at the end of a step, with the report written so far):
+1. **Section 7:** both apps work at all. A broken feature beats any speed number: report it at once.
+2. **The baseline:** run the test gate (6d) before changing anything, and keep its output. Every later run compares with it.
+3. **Measure** everything in section 3, then section 4's interactions. Write the numbers down before fixing anything.
+4. **Fix the worst first:** what a person feels most (a freeze, a long wait, a stutter while scrolling or turning) before what only a trace shows.
+5. **Section 6b:** center the carousel on the Dashboard, then measure the turns again.
+6. **Measure again** and write the report (section 9).
+
+**Done means** all of these:
+- Every budget in section 3 passes, or the report says why not and what it would take.
+- The test gate (6d) passes as at the baseline: nothing that passed then fails now.
+- Every fix has a before and an after number, and its own commit.
+- Nothing in section 6's "Report and ask DJ" list was changed without asking.
+
+## 6d. The test gate: run it before your first change and after every fix
+
+**On any machine (`handoff/tests/`, see its README).** Made-up data only:
+- `stations-test.mjs`, `drawer-test.mjs`, `checks-test.mjs`: each must end `ALL PASS`, in Edge and in the staff sweep build (`exe:` for stations and drawer).
+- `excel-test.mjs`: the four rows must show `-5`, `-12.5`, `=SUM(B2:B4)`, `@handle` with no `'` in front.
+- `usability-audit.mjs`: compare with the baseline. No contrast may drop below 4.5, no button below 24×24, and the drawer must never cover the clicked cell.
+
+**On DJ's machine only (`Desktop\Castle Claude`):**
+- `tools/run-tests.sh` pages: `aim`, `break-it`, `realfile-focus`, `realfile-drag`, `realfile-view`, `realfile-afterquery`, `realfile-vault`, `realfile-ask`, `realfile-query`, `realfile-deadends`.
+- After any change to `flogic.html`, rebuild the pages first: `perl tools/make-test-pages.pl`, then `py -3.12 -I tools/make-vault-pages.py`.
+- `tools/query-test`: `node run.js` and `node fuzz.js` (the engine against real SQLite).
+- On Fernando's machine, write in the report that DJ needs to run these before merging.
+
+**Known failures. Not yours to chase; report them only if they change:**
+- `realfile-vault` 44/45 and part of `realfile-quotes`: this branch has no `demo-data/` folder.
+- `realfile-quotes`, three big ServiceNow reads: Edge's own file read fails on DJ's machine after the 94 MB file, even on a blank page with no app code.
+- `realfile-chaos` comes back blank. It did before Nov 15 too.
+- `query-test` `run.js` 22 fails and `fuzz.js` 185 fails: 64-bit numbers past 2^53 (exact big integers were rolled back on this branch). Same before and after the `LIKE` fix.
+
 ## 7. Also check that the desktop apps work at all
 
 Do this once, quickly, before measuring:
@@ -227,8 +275,9 @@ Do this once, quickly, before measuring:
 ## 9. The report
 
 `handoff/desktop-sweep-report.md`:
-- the machine (CPU, RAM, screen and refresh rate, display scale)
+- the machine (whose it is, CPU, RAM, screen and refresh rate, display scale)
 - a table for every measurement in section 3, with budget, result, pass or fail
+- the test gate (6d) at the baseline and at the end, side by side
 - every fix, with its commit, before and after
 - what's left over budget, and why
 - **Top 5 for DJ**
