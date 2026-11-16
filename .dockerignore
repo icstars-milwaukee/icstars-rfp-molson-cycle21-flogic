@@ -1,0 +1,20 @@
+# Nothing goes to Docker but the two page folders and the server's settings.
+# (Everything is left out first,  then those three are let back in.)
+*
+!DataPage/
+!it-console/
+!deploy/
+deploy/*
+!deploy/nginx.conf
+
+# ...and never these,  wherever they are:  data,  packs,  key files,  keyrings.
+**/*.flogic
+**/*.flogic-key
+**/*.flogic-keyring
+**/*.flogic-signer
+**/*.flogic-id
+**/*.csv
+**/*.xlsx
+**/*.sql
+**/*.db
+**/*.zip

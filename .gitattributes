@@ -1,0 +1,9 @@
+# The files Linux runs must keep Unix line endings, on every machine: a shell script with Windows line endings
+# does not run in a container or in CI.  (Everything else is left as it was.)
+*.sh                    text eol=lf
+Dockerfile              text eol=lf
+.dockerignore           text eol=lf
+docker-compose.yml      text eol=lf
+deploy/nginx.conf       text eol=lf
+deploy/*.mjs            text eol=lf
+.github/workflows/*.yml text eol=lf

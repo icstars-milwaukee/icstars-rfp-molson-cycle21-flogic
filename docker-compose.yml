@@ -1,0 +1,30 @@
+# Flogic on any machine with Docker:
+#
+#   docker compose up -d --build        build it here and start it      ->  http://localhost:8080
+#   docker compose pull && docker compose up -d      or:  use the image CI published  (take out "build:" below)
+#   docker compose down                 stop it
+#
+# The container holds the app's files and nothing else.   It can't write to its own disk,  and it doesn't run as root.
+
+services:
+  flogic:
+    build:
+      context: .
+      args:
+        IT_CONSOLE: "0"                 # "1":  IT's console too,  at /it-console/it-console.html
+    image: ghcr.io/icstars-milwaukee/icstars-rfp-molson-cycle21-flogic:0.3.0
+    ports:
+      - "8080:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+    # KEY-FILE SIGN-IN needs IT's trust file  (IT's console:  "Download the app's trust file").
+    # It is IT's PUBLIC key:  not a secret,  but it is never committed.   Put it next to this file and take the # off:
+    # volumes:
+    #   - ./it-signerI.js:/usr/share/nginx/html/DataPage/it-signerI.js:ro
