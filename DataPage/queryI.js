@@ -2403,7 +2403,10 @@ function castValue(v, to, from) {
     }
 }
 
-//  LIKE 'Chi%':   %  =  any letters,   _  =  one letter.   (Big and small letters count as the same,  like SQLite.)
+//  LIKE 'Chi%':   %  =  any letters,   _  =  one letter.
+//  Big and small letters count as the same  ONLY for  A-Z,  exactly like SQLite:   'chi%'  finds  Chicago,
+//  but  'Ã%'  does NOT find  ã  (and  'é'  doesn't find  É).   (The regex  "i"  flag folds EVERY alphabet:  it used to,
+//  and a LIKE on accented text gave more rows than SQLite.   Found by the Checks:  8,200 rows,  SQLite says 8,163.)
 function likeMatcher(pattern, escape) {
     const ANY  = /[\s\S]*/.source;
     const ONE  = /[\s\S]/.source;
@@ -2413,12 +2416,18 @@ function likeMatcher(pattern, escape) {
         const ch = pattern[k];
         if (esc !== null && ch === esc) {
             k++;
-            if (k < pattern.length) out += regexLetter(pattern[k]);
+            if (k < pattern.length) out += likeLetter(pattern[k]);
             continue;
         }
-        out += ch === '%' ? ANY : ch === '_' ? ONE : regexLetter(ch);
+        out += ch === '%' ? ANY : ch === '_' ? ONE : likeLetter(ch);
     }
-    return new RegExp(out + '$', 'i');
+    return new RegExp(out + '$');
+}
+
+//  One letter of a LIKE pattern,  as regex:   a  ->  [aA]   (A-Z only),   .  ->  \.   (symbols:  as themselves),   é  ->  é
+function likeLetter(ch) {
+    if (/[A-Za-z]/.test(ch)) return '[' + ch.toLowerCase() + ch.toUpperCase() + ']';
+    return regexLetter(ch);
 }
 
 function regexLetter(ch) {
