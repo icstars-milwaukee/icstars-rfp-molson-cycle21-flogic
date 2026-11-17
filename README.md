@@ -12,7 +12,8 @@ A page of files that opens a person's CSV, Excel or SQL data in their own browse
 | Make the practice data (made-up, 25,000 rows, the same every time) | `py -3.12 -I tests\make-tickets.py C:\flogic-demo` |
 | Run the app | [`DataPage/flogic.html`](DataPage/flogic.html) |
 | Run the self-tests | [`tests/README.md`](tests/README.md) |
-| Clear a device before the next demo | the sheet's **Reset** tab |
+| Clear a device before the next demo | [`demo-day/fresh-start/wipe.html`](demo-day/fresh-start/wipe.html) (one button), or the sheet's **Reset** tab |
+| Start fresh on macOS or Linux, and find where the IT console saved things | [`demo-day/fresh-start/`](demo-day/fresh-start/README.md) ([macOS](demo-day/fresh-start/macos.md), [Linux](demo-day/fresh-start/linux.md)) |
 
 Not in git on purpose: the practice data (the repo refuses data files) and IT's filled-in trust file
 `DataPage/it-signerI.js` (CI refuses it; copy it across by hand). Details in `demo-day/README.md`.

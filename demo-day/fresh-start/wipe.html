@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flogic fresh start</title>
+<style>
+    :root { --bg: #f4f1ea; --card: #fff; --ink: #1c1b19; --dim: #6a665e; --line: #d9d3c5; --bad: #b3261e; --good: #1d7a46; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #16171a; --card: #202226; --ink: #ecebe7; --dim: #a19d93; --line: #3a3d44; --bad: #ff8d84; --good: #6fd39a; } }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.5 "Segoe UI", system-ui, sans-serif; }
+    main { max-width: 760px; margin: 0 auto; padding: 24px 16px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 12px 0; }
+    pre { white-space: pre-wrap; margin: 0; font: 15px/1.5 Consolas, Menlo, monospace; }
+    button { font: inherit; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--bad); background: var(--bad); color: #fff; font-weight: 600; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: default; }
+    .dim { color: var(--dim); }
+    .ok { color: var(--good); font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+    <h1>Flogic fresh start</h1>
+    <p class="dim">This page clears what the Flogic app remembers in <b>this browser</b>: the people who signed in here (their PIN copies) and the drive folder that was picked. It never touches your files, the keyring, key files or data.</p>
+    <p class="dim">It works because a page opened from your disk (file://) shares its storage with <code>DataPage/flogic.html</code> in Chrome, Edge and other Chromium browsers. In Firefox or Safari it can't see the app's storage: use the console line in the README instead.</p>
+    <div class="card"><pre id="out">Looking…</pre></div>
+    <p><button id="wipe" disabled>Clear Flogic from this browser</button></p>
+    <p class="dim">Then open <code>DataPage/flogic.html</code>: the sign-in card should list no names.</p>
+</main>
+<script>
+'use strict';
+//  Opened as  wipe.html#wipe  it clears straight away  (for running it headless, with the browser closed).
+const NAMES = ['flogic-filekey', 'flogic-mailbox', 'flogic-vault'];
+const NL = String.fromCharCode(10);
+
+async function look() {
+    //  indexedDB.databases() first:  opening a database that doesn't exist would CREATE an empty, broken one
+    const have = (await indexedDB.databases()).map(d => d.name).filter(n => NAMES.includes(n));
+    if (!have.includes('flogic-filekey')) return { have, people: [] };
+    const people = await new Promise(done => {
+        const o = indexedDB.open('flogic-filekey');
+        o.onerror = () => done(['(could not read)']);
+        o.onsuccess = () => {
+            const db = o.result;
+            if (!db.objectStoreNames.contains('people')) { db.close(); return done([]); }
+            const q = db.transaction('people').objectStore('people').getAll();
+            q.onsuccess = () => { db.close(); done(q.result.map(p => p.name || p.id)); };
+            q.onerror = () => { db.close(); done(['(could not read)']); };
+        };
+    });
+    return { have, people };
+}
+function show(lines) { document.getElementById('out').textContent = lines.join(NL); }
+async function report(prefix) {
+    const s = await look();
+    const lines = (prefix || []).slice();
+    if (s.have.length === 0) lines.push('Flogic has nothing stored in this browser. It will start as a first time.');
+    else {
+        lines.push('Flogic databases here: ' + s.have.join(', '));
+        lines.push('People remembered: ' + (s.people.length ? s.people.length + ' (' + s.people.join(', ') + ')' : 'none'));
+    }
+    show(lines);
+    document.getElementById('wipe').disabled = s.have.length === 0;
+    return s;
+}
+async function wipe() {
+    document.getElementById('wipe').disabled = true;
+    const res = await Promise.all(NAMES.map(n => new Promise(r => {
+        const q = indexedDB.deleteDatabase(n);
+        q.onsuccess = () => r(n + ': cleared');
+        q.onerror = () => r(n + ': ERROR');
+        q.onblocked = () => r(n + ': BLOCKED (close every Flogic tab, then try again)');
+    })));
+    const s = await report(res.concat(['']));
+    if (s.have.length === 0) { const p = document.createElement('p'); p.className = 'ok'; p.textContent = 'Done. Fresh start.'; document.getElementById('out').after(p); }
+}
+document.getElementById('wipe').addEventListener('click', wipe);
+report().then(() => { if (location.hash === '#wipe') wipe(); });
+</script>
+</body>
+</html>

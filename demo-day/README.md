@@ -24,7 +24,9 @@ editable (press **Edit**).
    It must say **4 passed, 2 failed**.
 5. Only for the sign-in act: copy `DataPage/it-signerI.js` and the keyring/drive folder across, and renew the key files.
 
-The sheet's **Reset** tab has every way to clear a device before the next demo.
+The sheet's **Reset** tab has every way to clear a device before the next demo. On macOS or Linux, and for where the
+IT console saves its files, see [`fresh-start/`](fresh-start/README.md). [`fresh-start/wipe.html`](fresh-start/wipe.html) clears
+the app's memory in one click.
 
 Edits you make in the sheet are saved in that browser only. If you change a name or step the sheet depends on
 (for example the file name `incident.csv`), change it in `demo-checks.json` too: a check's table is the file's name.

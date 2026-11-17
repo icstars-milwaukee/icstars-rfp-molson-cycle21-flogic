@@ -379,6 +379,12 @@ Then look: the card must list no names and offer "Connect your Flogic folder" an
   code: `Promise.all(['flogic-filekey','flogic-mailbox','flogic-vault'].map(n => new Promise(r => { const q = indexedDB.deleteDatabase(n); q.onsuccess = q.onerror = q.onblocked = () => r(); }))).then(() => location.reload())`,
   code2label: 'Count the people still stored here (should print 0):',
   code2: `indexedDB.databases().then(l => { if (!l.some(d => d.name === 'flogic-filekey')) return console.log('people on this device: 0'); const o = indexedDB.open('flogic-filekey'); o.onsuccess = () => { const db = o.result; if (!db.objectStoreNames.contains('people')) { db.close(); return console.log('people on this device: 0'); } db.transaction('people').objectStore('people').count().onsuccess = c => { console.log('people on this device:', c.target.result); db.close(); }; }; })` },
+{ t: 'Level 2 without the console: wipe.html (any system)', tag: 'Chrome / Edge', proof: 'tested',
+  body: `Double-click demo-day/fresh-start/wipe.html in the SAME browser you use for the app. It lists who is remembered, then "Clear Flogic from this browser" clears only Flogic's three databases. It works because pages opened from disk share storage with the app in Chrome and Edge (not Firefox or Safari: use the console line above there).
+With the browser closed it also runs headless as wipe.html#wipe. That is how Marcus G was cleared from this machine's Chrome on 16 Nov.` },
+{ t: 'macOS and Linux: commands and where the IT console saves things', tag: 'macOS / Linux', proof: 'hand',
+  body: `demo-day/fresh-start/macos.md and linux.md: clone, make the practice data, clear the browser (easy way and headless), find every file the IT console saved, and a backup-first full reset. demo-day/fresh-start/README.md has the table of what the console saves where (keyring and trust file go to Downloads; key files, the stamp and packs go into IT's folder).
+Not run on a Mac or Linux yet: the shell lines were syntax-checked, and wipe.html was tested.` },
 { t: 'Level 3: Clear site data in DevTools (catches anything)', tag: 'Any browser', proof: 'hand',
   body: `F12 > Application tab > Storage > "Clear site data" (leave everything ticked), then F5. This works for a page opened from a file (file://) as well as a web address. Use it if Level 2 left something behind, or if the browser still remembers the folder permission.
 Do NOT use Edge's "Clear browsing data" for this: it wipes every site you use.` },
