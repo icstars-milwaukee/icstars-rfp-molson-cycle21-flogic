@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flogic demo-day live sheet</title>
+<style>
+/*
+    Flogic demo-day live sheet.   ONE file,  no internet,  no libraries.   Open it by double-clicking.
+    Everything you read here is editable:  press  Edit.   Your edits are kept in THIS browser,
+    and "Save my edits" makes a file you can carry to another device.
+*/
+:root {
+    --bg: #f4f1ea;  --card: #ffffff;  --ink: #1c1b19;  --dim: #6a665e;  --line: #d9d3c5;
+    --accent: #1f5a8a;  --accent-ink: #ffffff;
+    --good: #1d7a46;  --good-bg: #e3f3ea;
+    --warn: #9a6200;  --warn-bg: #fdf0d2;
+    --bad: #b3261e;   --bad-bg: #fbe4e2;
+    --see: #eaf2fa;   --code: #1d2530;  --code-ink: #e8edf3;
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --bg: #16171a;  --card: #202226;  --ink: #ecebe7;  --dim: #a19d93;  --line: #3a3d44;
+        --accent: #6fb1e6;  --accent-ink: #0d1a26;
+        --good: #6fd39a;  --good-bg: #17301f;
+        --warn: #f0c26a;  --warn-bg: #33290f;
+        --bad: #ff8d84;   --bad-bg: #3a1a18;
+        --see: #1a2733;   --code: #0f1115;  --code-ink: #e8edf3;
+    }
+}
+:root[data-theme="dark"] {
+    --bg: #16171a;  --card: #202226;  --ink: #ecebe7;  --dim: #a19d93;  --line: #3a3d44;
+    --accent: #6fb1e6;  --accent-ink: #0d1a26;
+    --good: #6fd39a;  --good-bg: #17301f;
+    --warn: #f0c26a;  --warn-bg: #33290f;
+    --bad: #ff8d84;   --bad-bg: #3a1a18;
+    --see: #1a2733;   --code: #0f1115;  --code-ink: #e8edf3;
+}
+* { box-sizing: border-box; }
+html { font-size: 17px; scroll-padding-top: 150px; }
+.card { scroll-margin-top: 150px; }          /* a card that scrolls to the top lands BELOW the sticky bar, not under it */
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: "Segoe UI", system-ui, sans-serif; line-height: 1.45; }
+button { font: inherit; color: inherit; cursor: pointer; border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 6px 12px; min-height: 34px; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+button.good { background: var(--good); color: #fff; border-color: var(--good); font-weight: 600; }
+button.bad  { background: var(--bad-bg); color: var(--bad); border-color: var(--bad); }
+button:disabled { opacity: .45; cursor: default; }
+a { color: var(--accent); }
+
+/* ---------- top bar ---------- */
+#bar { position: sticky; top: 0; z-index: 10; background: var(--card); border-bottom: 1px solid var(--line); padding: 8px 16px; }
+#row1, #row2 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: 1100px; margin: 0 auto; }
+#row2 { margin-top: 6px; }
+#title { font-weight: 700; font-size: 1.05rem; margin-right: auto; }
+#clock { font-variant-numeric: tabular-nums; font-size: 1.7rem; font-weight: 700; min-width: 4.2ch; }
+#lap   { font-variant-numeric: tabular-nums; color: var(--dim); min-width: 12ch; }
+#lap.over { color: var(--bad); font-weight: 700; }
+#now { flex: 1 1 200px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+nav { display: flex; gap: 4px; flex-wrap: wrap; }
+nav button { border-radius: 8px 8px 0 0; }
+nav button[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+
+main { max-width: 1100px; margin: 0 auto; padding: 14px 16px 120px; }
+.pane { display: none; }
+.pane.on { display: block; }
+h2 { margin: 18px 0 8px; font-size: 1.25rem; }
+.lede { color: var(--dim); margin: 4px 0 12px; }
+
+/* ---------- cards ---------- */
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 10px 0; }
+.card.active { border: 2px solid var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+.card.done { opacity: .72; }
+.card.missed { border-color: var(--bad); }
+.head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.num { background: var(--accent); color: var(--accent-ink); border-radius: 999px; min-width: 28px; height: 28px; display: inline-grid; place-items: center; font-weight: 700; flex: none; }
+.ttl { font-weight: 700; font-size: 1.1rem; flex: 1 1 200px; }
+.secs { color: var(--dim); font-variant-numeric: tabular-nums; }
+.opt { background: var(--warn-bg); color: var(--warn); border-radius: 6px; padding: 0 7px; font-size: .8rem; }
+.lapnote { font-variant-numeric: tabular-nums; font-size: .9rem; }
+.lapnote.ok { color: var(--good); } .lapnote.no { color: var(--bad); }
+.lbl { font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); margin: 10px 0 2px; }
+.say { font-style: italic; border-left: 4px solid var(--line); padding: 2px 10px; margin: 8px 0 0; }
+.do { white-space: pre-wrap; }
+.see { white-space: pre-wrap; background: var(--see); border-radius: 8px; padding: 8px 10px; }
+.any { white-space: pre-wrap; }
+details.off { margin-top: 8px; }
+details.off summary { cursor: pointer; color: var(--bad); font-weight: 600; }
+.offtxt { white-space: pre-wrap; background: var(--bad-bg); border-radius: 8px; padding: 8px 10px; margin-top: 4px; }
+.body { white-space: pre-wrap; margin-top: 6px; }
+.chip { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: .78rem; font-weight: 600; border: 1px solid transparent; user-select: none; }
+.chip.tested { background: var(--good-bg); color: var(--good); }
+.chip.hand   { background: var(--warn-bg); color: var(--warn); }
+.tag { display: inline-block; border-radius: 6px; padding: 0 8px; font-size: .78rem; background: var(--see); color: var(--accent); font-weight: 600; }
+pre.code { background: var(--code); color: var(--code-ink); border-radius: 8px; padding: 10px 12px; margin: 8px 0 0; overflow-x: auto; white-space: pre-wrap; word-break: break-word; font: .86rem/1.45 Consolas, "Cascadia Mono", monospace; }
+.codewrap { position: relative; }
+.copy { position: absolute; top: 14px; right: 6px; min-height: 26px; padding: 0 8px; font-size: .78rem; }
+.check { display: flex; gap: 10px; align-items: flex-start; }
+.check input[type=checkbox] { width: 22px; height: 22px; margin-top: 3px; flex: none; }
+.keygrid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--card); }
+.keygrid > div { padding: 5px 10px; border-bottom: 1px solid var(--line); }
+.keygrid > div:nth-child(odd) { color: var(--dim); }
+.keygrid .itembar { grid-column: 1 / -1; background: var(--see); }
+.ctl { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+
+/* ---------- edit mode ---------- */
+body.editing [data-f] { outline: 1px dashed var(--accent); outline-offset: 2px; min-height: 1.3em; border-radius: 3px; cursor: text; }
+body.editing [data-f]:focus { outline: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.itembar { display: none; gap: 6px; margin-top: 8px; }
+body.editing .itembar { display: flex; }
+.itembar button { min-height: 28px; padding: 0 9px; font-size: .85rem; }
+body.editing .chip { cursor: pointer; }
+
+/* ---------- live mode: bigger, quieter ---------- */
+body.live { font-size: 1.12rem; }
+body.live .practice-only, body.live .secs, body.live .chip, body.live .lapnote { display: none; }
+body.live .see { font-size: 1.1em; }
+body.live details.off:not([open]) summary { opacity: .7; }
+
+#toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 16px; border-radius: 999px; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 30; }
+#toast.on { opacity: .95; }
+table.reps { border-collapse: collapse; width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+table.reps th, table.reps td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+@media print { #bar, .itembar, .copy, .ctl { display: none !important; } .pane { display: block !important; } body { background: #fff; } }
+@media (max-width: 640px) { html { font-size: 16px; } #clock { font-size: 1.4rem; } .keygrid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<header id="bar">
+    <div id="row1">
+        <span id="title">Flogic · demo-day live sheet</span>
+        <span id="clock">0:00</span>
+        <span id="lap"></span>
+        <button id="bStart" class="primary" title="Space">▶ Start rep</button>
+        <button id="bOk" class="good" title="Space or →" disabled>✓ Matched</button>
+        <button id="bOff" class="bad" title="X" disabled>✗ It was off</button>
+        <button id="bSkip" title="S" disabled>Skip ⏭</button>
+        <button id="bBack" title="←" disabled>↶ Back</button>
+    </div>
+    <div id="row2">
+        <nav id="tabs" role="tablist"></nav>
+        <span id="now"></span>
+        <button id="bLive" title="L">Live mode</button>
+        <button id="bEdit" title="Edit every word on this sheet">✎ Edit</button>
+        <button id="bTheme" title="Light / dark">◐</button>
+    </div>
+</header>
+
+<main>
+    <section id="p-run" class="pane"></section>
+    <section id="p-before" class="pane"></section>
+    <section id="p-breaks" class="pane"></section>
+    <section id="p-reset" class="pane"></section>
+    <section id="p-practice" class="pane"></section>
+</main>
+<div id="toast"></div>
+<input type="file" id="fileIn" accept=".json,application/json" hidden>
+
+<script>
+'use strict';
+/*
+    HOW THIS PAGE IS BUILT   (so you can change it)
+      DEFAULT  =  every word you read.   Edit mode changes the SAVED copy,  not this list.
+      "Reset sheet to built-in"  throws your edits away and goes back to DEFAULT.
+      Each item has  proof:  'tested'  =  I ran it in a real browser on 16 Nov 2026 and it did exactly this,
+                             'hand'    =  read from the code or the notes,  NOT run by a machine:  rehearse it.
+      {BS}  stands for a backslash in DEFAULT  (it is turned into a real one before you see it).
+*/
+const NL = String.fromCharCode(10);
+const BS = String.fromCharCode(92);
+const KEY = 'flogic-demo-sheet-v1';
+const REPS_KEY = 'flogic-demo-sheet-reps-v1';
+const DONE_KEY = 'flogic-demo-sheet-ticks-v1';
+
+const DEFAULT = {
+meta: { proven: 'Proven 16 Nov 2026 on build a159de2 (branch phase1-grid-menus), headless Edge, real mouse and keyboard events, made-up data.' },
+
+steps: [
+{ t: 'Open the app', secs: 20, proof: 'tested',
+  say: 'This is Flogic. It opens your data right here, in your own browser. Nothing gets uploaded.',
+  do: `1. Open DataPage/flogic.html in Edge (or click into the app frame in the deck).
+2. Ctrl+0 for 100% zoom.  F11 if you are going full screen.`,
+  see: `A card: "Sign in to Flogic", with the buttons "Connect your Flogic folder" and "Open a plain file without signing in".
+Tabs across the top read:  Ticket | Dashboard | Sheet.`,
+  any: `The tab says Flogic. F12 > Console has nothing red.`,
+  off: `Blank page: wrong file. It must be DataPage/flogic.html.
+A person's name and "PIN" on the card: someone signed in here before. Reset tab, Level 2 (10 seconds).` },
+
+{ t: 'Open a made-up file', secs: 25, proof: 'tested',
+  say: `I'll open a plain file, no sign-in. This is made-up service-desk data: 25,000 tickets.`,
+  do: `1. Click "Open a plain file without signing in".
+2. Click "Choose File" and pick incident.csv.`,
+  see: `Status line:  Rows 1–15 of 25000.   The app lands on the Dashboard by itself.
+Tiles:  Rows 25,000  ·  Different Assignment group 20 (Most rows: SD-L1-NORTH (1,341))
+Rows by State: Closed 17,268 · Resolved 4,833 · Canceled 2,372 · New 196 · On Hold 172 · In Progress 159
+Rows by Priority: P3 15,049 · P4 7,476 · P2 2,472 · P1 3`,
+  any: `The Rows tile equals the number after "of" in the status line, and each bar tile adds up to the Rows tile (17,268+4,833+2,372+196+172+159 = 25,000). That holds for any file with no blanks.`,
+  off: `Nothing loaded: click Choose File again.
+Only 4 tiles: that is the simple view. Click "Show the full dashboard (6 tiles)".
+Different numbers: wrong file. Compare with the answer key (Before tab).
+The file MUST be called incident.csv exactly. "incident (1).csv" breaks the Checks (Drill 3).` },
+
+{ t: 'Click through a number', secs: 30, proof: 'tested',
+  say: 'Every number is a doorway. Click Closed and you are looking at the 17,268 tickets behind it.',
+  do: `1. On the Dashboard click the "Closed 17,268" row.
+2. Click "← Back to file".`,
+  see: `The Sheet shows  Rows 1–15 of 17268  and an ANSWER pill.
+"← Back to file" gives you  Rows 1–15 of 25000  again.`,
+  any: `The number after "of" equals the number you clicked.`,
+  off: `Nothing opened: click the words, not the empty bar.
+Lost? Alt+2 is always the Dashboard.` },
+
+{ t: 'Three views of one file', secs: 35, proof: 'tested',
+  say: 'Same file, three views. The Sheet to scan, the Ticket to read one record, the Dashboard for the big picture.',
+  do: `1. Alt+3 (Sheet). Click any cell: the Details drawer opens.
+2. Click "Big view ▸".
+3. Press ▼ twice, then End, then Home.
+4. Alt+2 back to the Dashboard.`,
+  see: `The Ticket shows a headline (for example "Laptop will not boot") and "N of 25,000", with a rail: ▲ Previous ticket · ▼ Next ticket · ⤒ First · Last ⤓.
+▼ moves N by exactly 1. End = the last ticket (▼ greys out). Home = the first.`,
+  any: `Alt+1 / Alt+2 / Alt+3 always land on Ticket / Dashboard / Sheet, from anywhere.`,
+  off: `Keys do nothing: click an empty part of the page first (the keyboard may be inside a box).
+The drawer is in the way: click "Details ▾" to close it.` },
+
+{ t: 'Ask a question', secs: 45, proof: 'tested',
+  say: 'No SQL needed. Pick a question, or type it in plain words. And it shows you the SQL it wrote, so you can trust the answer.',
+  do: `1. Click Ask. Click the quick pick "How many for each Urgency".
+2. "← Back to file". Click Ask again. Click in the box, Ctrl+A, type:  how many for each Priority   then Enter.
+3. Click "Copy SQL".   4. Click "Save as CSV".`,
+  see: `1. ANSWER, 2 rows:  2 - Medium 12611 · 3 - Low 12389.
+2. Rows 1–4 of 4:  P3 - Average 15049 · P4 - Low 7476 · P2 - High 2472 · P1 - Critical 3.
+   The box now reads  SELECT Priority, COUNT(*) FROM incident GROUP BY Priority
+4. incident-query.csv lands in Downloads.`,
+  any: `The counts in an answer add up to the Rows tile (12611 + 12389 = 25000).`,
+  off: `The Ask menu folds away after every pick. That is normal: click Ask again.
+The box starts filled with "SELECT * FROM incident". Ctrl+A first, or your words get glued onto it.
+Enter did nothing: click "Show answer ▶".` },
+
+{ t: 'Checks: the same questions every week', secs: 60, proof: 'tested',
+  say: 'Questions that must always be true about a file: no duplicates, no team swamped. The same list works on next week\'s export.',
+  do: `1. Click Checks. Click Load and pick demo-checks.json.
+2. Click "Run all".
+3. On the red "No assignment group has more than 40 open tickets" click "Show ▸".
+4. "← Back to file".`,
+  see: `After Load:  Loaded 6 checks from demo-checks.json.
+After Run all:  4 passed · 2 failed.
+Green: Row count is at least 25,000 → 25,000 · Every row has a Number → 0 · No Number appears twice → none · At most 5 P1 incidents → 3
+Red: No assignment group has more than 40 open tickets → 1 row (SD-L1-NORTH, 52 open) · No encoding scars → 1,416
+Show ▸ gives  Rows 1–1 of 1  with SD-L1-NORTH.`,
+  any: `Red is the point of the demo: every red names what is wrong, and Show ▸ opens the exact rows.`,
+  off: `"Not run on this file yet": click Run all.
+Everything says "couldn't run: There's no table named incident": the file is not named incident.csv (the table IS the file's name). Open the right file, or in demo-checks.json replace  incident  with your file's name.
+No file to Load? Skip it: opening Checks on a fresh file offers 5 suggested checks. Run all gives 3 passed · 2 failed.` },
+
+{ t: 'A check that cannot run (optional)', secs: 25, opt: true, proof: 'tested',
+  say: 'And if a check cannot run, it says so. It never quietly passes.',
+  do: `1. Checks > "+ Add a check". Name:  Broken on purpose
+2. SQL:  SELECT COUNT(*) FROM incident WHERE Stat = 'New'
+3. Add, then "Run all".`,
+  see: `That row says:  couldn't run: There's no column named Stat. The columns are: Number, Created, Short description, …
+The note under the list counts it:  1 couldn't run.`,
+  any: `A mistake is shown as "couldn't run" with the reason, never as green.`,
+  off: `Typing slow? Skip this step. It is optional.` },
+
+{ t: 'Focus mode', secs: 15, proof: 'tested',
+  say: 'When you only want the data, edge to edge.',
+  do: `On the Dashboard press F. Then Esc.`,
+  see: `The grid fills the window and the tabs step out of the way. Esc brings them back.`,
+  any: `Esc is always the way out.`,
+  off: `F typed into a box: click an empty part of the page first.
+Stuck: Esc, or F5.` },
+
+{ t: 'Hand it over: the report', secs: 20, proof: 'tested',
+  say: 'One click makes a page you can print or save as PDF, and it tells you the file is not locked.',
+  do: `On the Dashboard click "Export report", look, click "Download the numbers (.csv)", then "Close".`,
+  see: `The report reads  incident.csv (25,000 rows) · made <today's date>  and  ⚠ This file isn't locked. Share it like any work document.
+Buttons: Print or save as PDF · Download the numbers (.csv) · Close.
+incident-report.csv lands in Downloads.`,
+  any: `The report's Rows number equals the Rows tile.`,
+  off: `No download: Ctrl+J shows Edge's downloads. Edge may be asking about the file.` },
+
+{ t: 'Act 2: signing in with a key file (optional)', secs: 90, opt: true, proof: 'hand',
+  say: 'In real use IT puts a key file in each person\'s shared-drive folder. They pick the folder, choose a PIN, and they are in. Their access ends on its own.',
+  do: `1. Reload (F5) so the sign-in card is back.
+2. "Connect your Flogic folder": pick the person's folder (u-000X). Click Allow when Edge asks.
+3. Pick a PIN (1111 is refused on purpose).
+4. If the key file carries data, it opens by itself; a "From IT, for you" button opens it again.
+5. Click Lock.`,
+  see: `"Hi, <name>  /  IT gave you: <level> · <groups>  …  Pick a PIN."
+A Viewer sees "A Viewer can't export" on Export. After Lock, the card comes back and the data is off the page.`,
+  any: `Wrong PIN: refused, and it counts the tries left ("9 more tries").`,
+  off: `"Your computer's date looks wrong. It says today is …": set the date and time on this computer.
+"This key file wasn't made by this company's IT. Ask IT for a new key file.": the app's trust file (DataPage/it-signerI.js) is not the one your keyring made. See Before > trust file.
+"No folder picked. Click again, or drag the folder onto this page.": the picker was cancelled.
+"Your access has ended …": the key file ran out. Renew it in IT's console (Before > fresh key files).
+No sign-in option at all: it-signerI.js is the blank one, or the address is plain http (use file:// or localhost).`,
+  note: `Machines cannot click the folder picker. Fernando's agent drove it on 13 Nov with Windows UI Automation, and the words above come from that report. Do this one by hand, twice.` },
+
+{ t: 'Close', secs: 10, proof: 'tested',
+  say: 'Close the tab and the file is gone from the page. The app keeps no copy of your data.',
+  do: `Close the tab. Delete incident-query.csv, incident-report.csv and incident-checks.json from Downloads if you made them.`,
+  see: `Reopen the app: the sign-in card, no file. Console:  localStorage.length  gives 0.`,
+  any: `Nothing about the file is left in the browser.`,
+  off: `Something odd is left over: Reset tab.` }
+],
+
+before: [
+{ t: 'The practice file is on this device', proof: 'tested',
+  body: `Made-up data only. Never a real export in front of an audience.
+It is the SAME file every time (I made it twice: identical bytes), so the answer key below always holds.
+Make it (Python 3.12), from the repo folder:
+No Python on this device? Copy the folder C:{BS}flogic-demo from another device.`,
+  code: `py -3.12 -I tests{BS}make-tickets.py C:{BS}flogic-demo` },
+{ t: 'Edge or Chrome, window, zoom, quiet', proof: 'hand',
+  body: `Sign-in needs a Chromium browser (it uses the folder picker). Plain files open anywhere.
+Ctrl+0. Close every other tab. Plug in power. Turn on Focus (Win+N) so no pop-ups land on the projector. Check which screen is the shared one BEFORE you start.` },
+{ t: 'The trust file (only for Act 2)', proof: 'tested',
+  body: `On this machine DataPage/it-signerI.js is filled in (fingerprint VC7R-2RBX-36TP-EZCH, made 2026-11-14) but it is NOT committed: git holds the blank one. So a fresh clone on another device has key-file sign-in OFF (plain files still work).
+Copy that one file across by hand. It is a public key, not a secret. Never commit it (CI refuses a filled-in one).` },
+{ t: 'Key files are fresh (only for Act 2)', proof: 'hand',
+  body: `Key files run out: Guest 1 day, Viewer and Analyst 7 days (see "Levels and rules" in IT's console).
+The morning of the demo, in IT's console press "Renew everyone". Guests are left out on purpose: renew them by name.
+An old one shows "Your access has ended".` },
+{ t: 'Self-test this machine (about 2 minutes)', proof: 'tested',
+  body: `Each prints PASS / FAIL lines and ends with ALL PASS. They start and stop their own Edge. They look for Edge at C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe, so on another device that path may need changing, and then a failure is the test's, not the app's.
+Run from the repo's tests folder (Node 22 or newer):`,
+  code: `node checks-test.mjs  C:/path/to/repo/DataPage/flogic.html  C:/flogic-demo/incident.csv  C:/flogic-demo/out
+node stations-test.mjs  C:/path/to/repo/DataPage/flogic.html  C:/flogic-demo/incident.csv  C:/flogic-demo/out2` },
+{ t: 'Load demo-checks.json once', proof: 'tested',
+  body: `Open incident.csv, Checks, Load demo-checks.json, Run all. It must say  4 passed · 2 failed.  Then do Reset Level 2 so tomorrow starts clean.` },
+{ t: 'Downloads folder is tidy', proof: 'tested',
+  body: `Delete old incident-query.csv / incident-report.csv / incident-checks.json. Windows renames a repeat download to "incident (1).csv", and if THAT is the file you open, every check says "couldn't run" (the table is the file's name).` },
+{ t: 'Plan B is one move away', proof: 'hand',
+  body: `The file sits on the Desktop, not buried. Recovery for almost anything: F5, "Open a plain file without signing in", Choose File, incident.csv. About 15 seconds. Second device or second window with the app already open if you can.` }
+],
+
+key: [
+  ['Rows in incident.csv', '25,000'], ['Different Assignment groups', '20'],
+  ['Most rows', 'SD-L1-NORTH (1,341)'], ['State: Closed', '17,268'],
+  ['State: Resolved', '4,833'], ['State: Canceled', '2,372'],
+  ['State: New', '196'], ['State: On Hold', '172'],
+  ['State: In Progress', '159'], ['Priority: P3 - Average', '15,049'],
+  ['Priority: P4 - Low', '7,476'], ['Priority: P2 - High', '2,472'],
+  ['Priority: P1 - Critical', '3'], ['Urgency: 2 - Medium', '12,611'],
+  ['Urgency: 3 - Low', '12,389'], ['SD-L1-NORTH open tickets (over 40)', '52'],
+  ['Rows with encoding scars', '1,416'], ['Checks file result', '4 passed · 2 failed'],
+  ['Suggested checks result', '3 passed · 2 failed'], ['change_request.csv rows', '500'],
+  ['Newest ticket by Created', 'INC1909593 · 2026-09-28 23:46:00']
+],
+
+breaks: [
+{ t: 'The Ask menu vanished after I picked something', proof: 'tested', body: `Normal. It steps aside to show the answer. Click Ask again.` },
+{ t: 'Only 4 tiles on the Dashboard', proof: 'tested', body: `That is the simple view. Click "Show the full dashboard (6 tiles)".` },
+{ t: 'Keys (F, arrows, Alt+1/2/3) do nothing', proof: 'tested', body: `The keyboard is inside a box. Click an empty part of the page, then try again.` },
+{ t: 'Stuck in focus mode, or on the wrong tab', proof: 'tested', body: `Esc leaves focus mode. Alt+1 / Alt+2 / Alt+3 jump to Ticket / Dashboard / Sheet.` },
+{ t: 'Every check says "couldn\'t run: There\'s no table named incident"', proof: 'tested', body: `The table is the file's name. You opened change_request.csv or "incident (1).csv". Open incident.csv again and Run all.` },
+{ t: 'Checks say "Not run on this file yet"', proof: 'tested', body: `By design: a new file keeps the list but forgets the results. Click Run all.` },
+{ t: 'Typed question: my words are stuck onto SELECT * FROM incident', proof: 'tested', body: `The box starts filled. Click in it, Ctrl+A, type again. Enter shows the answer.` },
+{ t: 'Anything odd and I cannot tell why', proof: 'tested', body: `F5, Open a plain file, Choose File, incident.csv. Nothing is lost: the app stores no data. Also F12 > Console: a red line is worth reading out loud later.` },
+{ t: '"Your computer\'s date looks wrong…" at sign-in', proof: 'hand', body: `The laptop clock is earlier than the day the key file was made. Windows Settings > Time & language > Date & time > "Set time automatically", then try again.` },
+{ t: '"This key file wasn\'t made by this company\'s IT"', proof: 'hand', body: `The app's DataPage/it-signerI.js does not match the keyring that made the key file. Put the right trust file in (Before tab), reload.` },
+{ t: 'No sign-in option, only plain files', proof: 'hand', body: `Either the trust file is the blank one, or the page is on plain http (not localhost, not https). Plain files still work, so carry on with Acts 1 only.` },
+{ t: 'The Lock chip sits over "← Back to file" (narrow window)', proof: 'hand', body: `Known: scroll the page a little. It happens with a person in many groups.` },
+{ t: 'The folder window will not open, or Edge asks again and again', proof: 'hand', body: `Click Allow when asked. Cancelled picker says "No folder picked": click again, or drag the folder onto the page. A person whose key file carries data is asked each PIN sign-in, unless you pick "Allow on every visit".` }
+],
+
+reset: [
+{ t: 'Level 0: a plain file leaves nothing behind', tag: 'Any device', proof: 'tested',
+  body: `Close the tab. Nothing about the file stays in the app (checked: after opening a 25,000-row file, localStorage holds 0 items and no person is stored).
+What stays is what YOU downloaded: incident-query.csv, incident-report.csv, incident-checks.json. Delete those from Downloads.` },
+{ t: 'Level 1: forget one person (in the app, two clicks)', tag: 'Any browser', proof: 'hand',
+  body: `On that person's PIN card click "Forget me on this laptop". The button changes to "Click again to forget <name> on this laptop": click again.
+That removes the laptop's copy of them and the remembered folder. "Someone else" lists everyone on this laptop: repeat for each.` },
+{ t: 'Level 2: wipe everything the app keeps in this browser (10 seconds)', tag: 'Any browser', proof: 'tested',
+  body: `The app keeps three small databases and nothing else (no cookies, no localStorage): flogic-filekey (people and their locked keys), flogic-mailbox (which drive folder was picked) and flogic-vault (the older credential way).
+1. Open the app's tab.  2. F12 > Console.  3. Paste this and press Enter (if the console refuses the paste, type  allow pasting  and Enter first).  The page reloads itself.
+Then look: the card must list no names and offer "Connect your Flogic folder" and "Open a plain file without signing in".`,
+  code: `Promise.all(['flogic-filekey','flogic-mailbox','flogic-vault'].map(n => new Promise(r => { const q = indexedDB.deleteDatabase(n); q.onsuccess = q.onerror = q.onblocked = () => r(); }))).then(() => location.reload())`,
+  code2label: 'Count the people still stored here (should print 0):',
+  code2: `indexedDB.databases().then(l => { if (!l.some(d => d.name === 'flogic-filekey')) return console.log('people on this device: 0'); const o = indexedDB.open('flogic-filekey'); o.onsuccess = () => { const db = o.result; if (!db.objectStoreNames.contains('people')) { db.close(); return console.log('people on this device: 0'); } db.transaction('people').objectStore('people').count().onsuccess = c => { console.log('people on this device:', c.target.result); db.close(); }; }; })` },
+{ t: 'Level 3: Clear site data in DevTools (catches anything)', tag: 'Any browser', proof: 'hand',
+  body: `F12 > Application tab > Storage > "Clear site data" (leave everything ticked), then F5. This works for a page opened from a file (file://) as well as a web address. Use it if Level 2 left something behind, or if the browser still remembers the folder permission.
+Do NOT use Edge's "Clear browsing data" for this: it wipes every site you use.` },
+{ t: 'Level 4: use a fresh door instead of cleaning', tag: 'Any device', proof: 'hand',
+  body: `A new door has its own empty storage.
+InPrivate window (Ctrl+Shift+N): empty, and forgets everything when closed. Try the folder picker in it once before the demo.
+Or serve the page on another port (a different address is a different, empty store); sign-in works on localhost:`,
+  code: `py -3 -m http.server 8082 --directory DataPage
+then open  http://localhost:8082/flogic.html` },
+{ t: 'Level 5: the desktop app (Flogic.exe, Flogic IT.exe)', tag: 'Windows desktop app', proof: 'hand',
+  body: `The app keeps its own browser store in its own folder, per app: staff and it. Close the app first. Taken from the source (desktop/src/main.rs); the folder did not exist on the machine I looked at, because the app had not been run there. Test-Path says whether it is there.`,
+  code: `Get-Process Flogic* -ErrorAction SilentlyContinue | Stop-Process
+Test-Path "$env:LOCALAPPDATA{BS}org.icstars.flogic{BS}staff"
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA{BS}org.icstars.flogic{BS}staff"
+# IT's console app:  the same, ending {BS}it` },
+{ t: 'Level 6: IT\'s side, the drive folder and the keyring', tag: 'Drive / IT console', proof: 'hand',
+  body: `What IT leaves behind: u-000X folders each holding flogic.flogic-key, a flogic-keyring.stamp file, the keyring file you saved, and data packs (.flogic) you downloaded.
+Best practice: keep a GOLD copy of the whole demo drive folder that you never open, and copy it fresh before every demo. Check both paths before you press Enter:`,
+  code: `Remove-Item -Recurse -Force C:{BS}flogic-demo-drive
+Copy-Item -Recurse C:{BS}flogic-demo-drive-GOLD C:{BS}flogic-demo-drive`,
+  code2label: 'Or start IT from nothing: open the IT console, "New keyring" (a passphrase of 4 or more words), and delete the old flogic-keyring.stamp from the shared folder. Then renew the key files (Before tab).' },
+{ t: 'Another device: the six steps', tag: 'New device', proof: 'hand',
+  body: `1. Copy the repo folder (or git clone), then copy over your filled-in DataPage/it-signerI.js if you do Act 2.
+2. Get the practice file: copy C:{BS}flogic-demo, or run make-tickets.py (Before tab). Copy demo-checks.json next to it.
+3. Open DataPage/flogic.html in Edge or Chrome. Run Reset Level 2, then look at the card.
+4. Open incident.csv, Checks, Load demo-checks.json, Run all: it must say 4 passed · 2 failed.
+5. For Act 2: copy the keyring file and the drive folder, and renew the key files.
+6. Save this sheet's edits on the old device ("Save my edits") and load them here ("Load edits").` }
+],
+
+practice: {
+  plan: `Tonight: five reps, then stop.
+Rep 1  Read-through. Sheet on screen, app beside it. Do every step slowly. Press ✓ Matched only when the "You should see" is really on the screen.
+Rep 2  Eyes up. Say the lines out loud. Glance at the sheet only for the "see".
+Rep 3  Sabotage. Run three of the drills below in the MIDDLE of a rep.
+Rep 4  Cold open. Do Reset Level 2 first, then a full rep. Aim: 4:20 or less and zero misses.
+Rep 5  Live mode. Press L. Phone timer. One clean rep is done. Sleep.`,
+  drills: [
+    { t: 'Drill 1: press F5 in the middle of the Dashboard', body: `Page reloads to the sign-in card, no file. Fix: "Open a plain file without signing in", Choose File, incident.csv. Under 20 seconds. Nothing is lost.` },
+    { t: 'Drill 2: open change_request.csv instead', body: `Status: Rows 1–15 of 500. Dashboard: Rows 500, Most rows: HR-APPS (43). Run all in Checks: 6 couldn't run: There's no table named incident. Fix: Choose File, incident.csv, Run all.` },
+    { t: 'Drill 3: open a copy called "incident (1).csv"', body: `Opens fine (Rows 1–15 of 25000), but Run all gives 6 couldn't run: "There's no table named incident. The tables you can use: incident (1)". This is what a repeat download does to you. Fix: open the original, or rename the copy.` },
+    { t: 'Drill 4: get lost', body: `Fold the Ask menu, enter focus mode, jump to the Ticket tab. Recover with: click Ask, Esc, Alt+2.` },
+    { t: 'Drill 5: zoom to 150%, then back', body: `Ctrl + (plus) three times, find the Ask button, then Ctrl+0. The layout should still let you reach everything.` },
+    { t: 'Drill 6: theme flip', body: `Click the theme chips at the top left (Neo-Neutral / Neo-Dark) and back. Know where they are so a projector washing out the light theme does not surprise you.` },
+    { t: 'Drill 7: the cold reset', body: `Do Reset Level 2 and then Level 2's "count" line. Time it. You should be able to do it with the audience still coming in.` }
+  ]
+}
+};
+
+/* ====================================================================== state */
+function expand(v) {
+    if (typeof v === 'string') return v.split('{BS}').join(BS);
+    if (Array.isArray(v)) return v.map(expand);
+    if (v && typeof v === 'object') { const o = {}; for (const k in v) o[k] = expand(v[k]); return o; }
+    return v;
+}
+const BUILTIN = expand(DEFAULT);
+let S = clone(BUILTIN);
+let reps = [];
+let ticks = {};
+let editing = false, live = false, tab = 'run';
+let run = null;           // { i, t0, lapT0, laps:[sec], miss:{i:true}, skipped:{i:true} }
+let flagged = {};         // steps marked "off" in this rep (their recovery box stays open)
+
+function clone(x) { return JSON.parse(JSON.stringify(x)); }
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } }
+function load() {
+    const a = lsGet(KEY);
+    if (a) { try { const o = JSON.parse(a); if (o && o.steps && o.before && o.reset) S = o; } catch (e) { } }
+    try { reps = JSON.parse(lsGet(REPS_KEY) || '[]'); if (!Array.isArray(reps)) reps = []; } catch (e) { reps = []; }
+    try { ticks = JSON.parse(lsGet(DONE_KEY) || '{}'); } catch (e) { ticks = {}; }
+}
+let saveTimer = 0;
+function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => lsSet(KEY, JSON.stringify(S)), 250); }
+
+/* ====================================================================== small helpers */
+const $ = id => document.getElementById(id);
+function el(tag, props, kids) {
+    const e = document.createElement(tag);
+    for (const k in props || {}) {
+        if (k === 'text') e.textContent = props[k];
+        else if (k === 'class') e.className = props[k];
+        else if (k.slice(0, 2) === 'on') e.addEventListener(k.slice(2), props[k]);
+        else e.setAttribute(k, props[k]);
+    }
+    (kids || []).forEach(c => { if (c) e.appendChild(c); });
+    return e;
+}
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('on'), 1800); }
+function fmt(sec) { sec = Math.max(0, Math.round(sec)); return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); }
+function textOf(e) { return e.innerText.split(String.fromCharCode(13)).join(''); }
+
+//  An editable (or plain) text field bound to  S[list][i][name]
+function field(list, i, name, tag, cls) {
+    const e = el(tag || 'div', { class: cls || '', 'data-f': name });
+    e.textContent = list === null ? S[name] : S[list][i][name] || '';
+    if (editing) {
+        e.setAttribute('contenteditable', 'plaintext-only');
+        e.setAttribute('spellcheck', 'true');
+        e.addEventListener('input', () => { S[list][i][name] = textOf(e); save(); });
+    }
+    return e;
+}
+function copyBtn(getText) {
+    return el('button', { class: 'copy', text: 'Copy', onclick: async ev => {
+        const text = getText();
+        try { await navigator.clipboard.writeText(text); }
+        catch (e) { const ta = el('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (e2) { } ta.remove(); }
+        ev.target.textContent = 'Copied ✓'; setTimeout(() => { ev.target.textContent = 'Copy'; }, 1200);
+    } });
+}
+function codeBlock(list, i, name) {
+    const pre = field(list, i, name, 'pre', 'code');
+    return el('div', { class: 'codewrap' }, [pre, copyBtn(() => S[list][i][name])]);
+}
+function proofChip(list, i) {
+    const it = S[list][i];
+    const kind = it.proof === 'tested' ? 'tested' : 'hand';
+    const c = el('span', { class: 'chip ' + kind + ' practice-only', text: kind === 'tested' ? '✔ proven by a real run' : '◔ rehearse by hand', title: kind === 'tested' ? S.meta.proven : 'Read from the code or notes. No machine has run this. Do it by hand until it is boring.' });
+    if (editing) c.addEventListener('click', () => { it.proof = kind === 'tested' ? 'hand' : 'tested'; save(); render(); });
+    return c;
+}
+function itemBar(list, i, blank) {
+    const arr = S[list];
+    const mv = d => () => { const j = i + d; if (j < 0 || j >= arr.length) return; const t = arr[i]; arr[i] = arr[j]; arr[j] = t; save(); render(); };
+    return el('div', { class: 'itembar' }, [
+        el('button', { text: '▲', onclick: mv(-1), title: 'Move up' }),
+        el('button', { text: '▼', onclick: mv(1), title: 'Move down' }),
+        el('button', { text: '＋ Add below', onclick: () => { arr.splice(i + 1, 0, clone(blank)); save(); render(); } }),
+        el('button', { class: 'bad', text: '✕ Remove', onclick: () => { if (confirm('Remove this item?')) { arr.splice(i, 1); save(); render(); } } })
+    ]);
+}
+const BLANK = {
+    steps: { t: 'New step', secs: 20, proof: 'hand', say: '', do: '', see: '', any: '', off: '' },
+    before: { t: 'New item', proof: 'hand', body: '' },
+    breaks: { t: 'New problem', proof: 'hand', body: '' },
+    reset: { t: 'New reset', tag: 'Any device', proof: 'hand', body: '' },
+    drills: { t: 'New drill', body: '' }
+};
+
+/* ====================================================================== panes */
+function renderRun() {
+    const p = $('p-run'); p.textContent = '';
+    const core = S.steps.filter(s => !s.opt).reduce((a, s) => a + (Number(s.secs) || 0), 0);
+    p.appendChild(el('h2', { text: 'The run' }));
+    p.appendChild(el('p', { class: 'lede practice-only', text: 'Core path ' + fmt(core) + '. Optional steps are extra. ' + S.meta.proven + ' Green chip = a machine ran it. Amber = rehearse by hand.' }));
+    const links = el('div', { class: 'ctl practice-only' }, [
+        el('a', { href: '../../DataPage/flogic.html', target: '_blank', text: 'Open the app ↗' }),
+        el('a', { href: '../index.html', target: '_blank', text: 'Open the deck ↗' }),
+        el('a', { href: 'demo-checks.json', download: 'demo-checks.json', text: 'demo-checks.json ⤓' })
+    ]);
+    links.childNodes.forEach(n => { n.style.marginRight = '14px'; });
+    p.appendChild(links);
+    S.steps.forEach((s, i) => {
+        const cls = 'card' + (run && run.i === i ? ' active' : '') + (run && run.laps[i] !== undefined && run.i !== i ? ' done' : '') + (run && run.miss[i] ? ' missed' : '');
+        const head = el('div', { class: 'head' }, [
+            el('span', { class: 'num', text: String(i + 1) }),
+            field('steps', i, 't', 'span', 'ttl'),
+            s.opt ? el('span', { class: 'opt', text: 'optional' }) : null,
+            el('span', { class: 'secs', text: 'target ' + fmt(s.secs) }),
+            lapNote(i),
+            proofChip('steps', i)
+        ]);
+        if (editing) head.appendChild(el('span', { class: 'secs' }, [el('span', { text: ' secs: ' }), (() => { const n = el('input', { type: 'number', value: String(s.secs), style: 'width:5em' }); n.addEventListener('input', () => { s.secs = Number(n.value) || 0; save(); }); return n; })(), (() => { const c = el('label', { style: 'margin-left:8px' }, [el('input', { type: 'checkbox' }), el('span', { text: ' optional' })]); c.firstChild.checked = !!s.opt; c.firstChild.addEventListener('change', () => { s.opt = c.firstChild.checked; save(); render(); }); return c; })()]));
+        const card = el('div', { class: cls, id: 'step-' + i }, [
+            head,
+            el('div', { class: 'lbl', text: 'Say' }), field('steps', i, 'say', 'div', 'say'),
+            el('div', { class: 'lbl', text: 'Do' }), field('steps', i, 'do', 'div', 'do'),
+            el('div', { class: 'lbl', text: 'You should see  (the check)' }), field('steps', i, 'see', 'div', 'see'),
+            el('div', { class: 'lbl practice-only', text: 'Still true however you got here' }), field('steps', i, 'any', 'div', 'any practice-only')
+        ]);
+        const det = el('details', { class: 'off' });
+        if ((run && run.i === i) || flagged[i] || editing) det.open = true;
+        det.appendChild(el('summary', { text: 'If it is off' }));
+        det.appendChild(field('steps', i, 'off', 'div', 'offtxt'));
+        card.appendChild(det);
+        if (s.note !== undefined || editing) { const n = field('steps', i, 'note', 'div', 'lapnote practice-only'); card.appendChild(n); }
+        card.appendChild(itemBar('steps', i, BLANK.steps));
+        p.appendChild(card);
+    });
+}
+function lapNote(i) {
+    if (!run || run.laps[i] === undefined) return el('span');
+    const over = run.laps[i] > (Number(S.steps[i].secs) || 0);
+    const t = run.skipped[i] ? 'skipped' : fmt(run.laps[i]) + (run.miss[i] ? '  ✗ off' : over ? '  over' : '  ✓');
+    return el('span', { class: 'lapnote ' + (run.miss[i] || over ? 'no' : 'ok'), text: t });
+}
+
+function cards(paneId, list, heading, lede, opts) {
+    const p = $(paneId); p.textContent = '';
+    p.appendChild(el('h2', { text: heading }));
+    if (lede) p.appendChild(el('p', { class: 'lede', text: lede }));
+    S[list].forEach((it, i) => {
+        const checkable = opts && opts.check;
+        const kidsHead = [];
+        if (checkable) {
+            const cb = el('input', { type: 'checkbox' });
+            cb.checked = !!ticks[list + i];
+            cb.addEventListener('change', () => { ticks[list + i] = cb.checked; lsSet(DONE_KEY, JSON.stringify(ticks)); });
+            kidsHead.push(cb);
+        }
+        const title = el('div', { class: 'head' }, [
+            field(list, i, 't', 'span', 'ttl'),
+            it.tag !== undefined ? field(list, i, 'tag', 'span', 'tag') : null,
+            proofChip(list, i)
+        ]);
+        const inner = el('div', { style: 'flex:1' }, [title, field(list, i, 'body', 'div', 'body')]);
+        if (it.code !== undefined) inner.appendChild(codeBlock(list, i, 'code'));
+        if (it.code2label !== undefined) inner.appendChild(field(list, i, 'code2label', 'div', 'body'));
+        if (it.code2 !== undefined) inner.appendChild(codeBlock(list, i, 'code2'));
+        const card = el('div', { class: 'card' }, [checkable ? el('div', { class: 'check' }, kidsHead.concat([inner])) : inner]);
+        card.appendChild(itemBar(list, i, BLANK[list]));
+        p.appendChild(card);
+    });
+    if (editing) p.appendChild(el('button', { text: '＋ Add an item at the end', onclick: () => { S[list].push(clone(BLANK[list])); save(); render(); } }));
+    return p;
+}
+
+function renderBefore() {
+    const p = cards('p-before', 'before', 'Before you walk up', 'Tick as you go. Ticks stay on this browser until you press Untick all.', { check: true });
+    p.insertBefore(el('div', { class: 'ctl' }, [el('button', { text: 'Untick all', onclick: () => { ticks = {}; lsSet(DONE_KEY, '{}'); render(); } })]), p.children[2] || null);
+    p.appendChild(el('h2', { text: 'Answer key  (the numbers on the practice file)' }));
+    p.appendChild(el('p', { class: 'lede', text: 'Counted two ways: by the app and in Python from the same file. If a number on screen differs, you are not on the practice file.' }));
+    const g = el('div', { class: 'keygrid' });
+    S.key.forEach((row, i) => {
+        [0, 1].forEach(c => {
+            const d = el('div', { 'data-f': 'key' });
+            d.textContent = row[c];
+            if (editing) { d.setAttribute('contenteditable', 'plaintext-only'); d.addEventListener('input', () => { row[c] = textOf(d); save(); }); }
+            g.appendChild(d);
+        });
+        if (editing) g.appendChild(el('div', { class: 'itembar' }, [
+            el('button', { text: '▲', onclick: () => { if (i > 0) { const t = S.key[i]; S.key[i] = S.key[i - 1]; S.key[i - 1] = t; save(); render(); } } }),
+            el('button', { text: '▼', onclick: () => { if (i < S.key.length - 1) { const t = S.key[i]; S.key[i] = S.key[i + 1]; S.key[i + 1] = t; save(); render(); } } }),
+            el('button', { text: '＋ Add below', onclick: () => { S.key.splice(i + 1, 0, ['label', 'value']); save(); render(); } }),
+            el('button', { class: 'bad', text: '✕', onclick: () => { S.key.splice(i, 1); save(); render(); } })
+        ]));
+    });
+    p.appendChild(g);
+}
+function renderBreaks() { cards('p-breaks', 'breaks', 'If it breaks', 'The problem you see, then the fix. Read the problem line; do the fix line.'); }
+function renderReset() { cards('p-reset', 'reset', 'Clean slate for a new demo', 'Pick the lightest level that works. The app keeps no data, only people and their locked keys, so most resets take seconds.', { check: true }); }
+
+function renderPractice() {
+    const p = $('p-practice'); p.textContent = '';
+    p.appendChild(el('h2', { text: 'Practice plan' }));
+    p.appendChild(el('div', { class: 'card' }, [bindField(S.practice, 'plan', 'div', 'body')]));
+    p.appendChild(el('h2', { text: 'Mess it up on purpose (drills)' }));
+    p.appendChild(el('p', { class: 'lede', text: 'Each was run for real on 16 Nov: the words in quotes are what the app actually said.' }));
+    S.practice.drills.forEach((d, i) => {
+        const card = el('div', { class: 'card' }, [bindField(d, 't', 'div', 'ttl'), bindField(d, 'body', 'div', 'body')]);
+        const arr = S.practice.drills;
+        card.appendChild(el('div', { class: 'itembar' }, [
+            el('button', { text: '▲', onclick: () => { if (i > 0) { const t = arr[i]; arr[i] = arr[i - 1]; arr[i - 1] = t; save(); render(); } } }),
+            el('button', { text: '▼', onclick: () => { if (i < arr.length - 1) { const t = arr[i]; arr[i] = arr[i + 1]; arr[i + 1] = t; save(); render(); } } }),
+            el('button', { text: '＋ Add below', onclick: () => { arr.splice(i + 1, 0, clone(BLANK.drills)); save(); render(); } }),
+            el('button', { class: 'bad', text: '✕ Remove', onclick: () => { arr.splice(i, 1); save(); render(); } })
+        ]));
+        p.appendChild(card);
+    });
+    p.appendChild(el('h2', { text: 'Rep log' }));
+    const best = reps.length ? Math.min.apply(null, reps.filter(r => r.complete).map(r => r.total).concat([1e9])) : null;
+    p.appendChild(el('p', { class: 'lede', text: reps.length ? (reps.length + ' reps logged' + (best && best < 1e9 ? '. Best complete rep ' + fmt(best) + '.' : '.')) : 'No reps yet. Press ▶ Start rep (or Space) on the Run tab.' }));
+    if (reps.length) {
+        const tb = el('table', { class: 'reps' }, [el('tr', {}, ['When', 'Time', 'Target', 'Off', 'Slowest step'].map(h => el('th', { text: h })))]);
+        reps.slice().reverse().slice(0, 15).forEach(r => tb.appendChild(el('tr', {}, [
+            new Date(r.when).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
+            fmt(r.total) + (r.complete ? '' : ' (stopped)'), fmt(r.target), String(r.misses), r.slowest || ''
+        ].map(t => el('td', { text: t })))));
+        p.appendChild(tb);
+        p.appendChild(el('div', { class: 'ctl' }, [el('button', { text: 'Clear the log', onclick: () => { if (confirm('Clear all logged reps?')) { reps = []; lsSet(REPS_KEY, '[]'); render(); } } })]));
+    }
+    p.appendChild(el('h2', { text: 'Your edits and this device' }));
+    p.appendChild(el('p', { class: 'lede', text: 'Edits live in this browser only. To use them on another device: Save my edits here, Load edits there.' }));
+    p.appendChild(el('div', { class: 'ctl' }, [
+        el('button', { text: '⤓ Save my edits (.json)', onclick: exportEdits }),
+        el('button', { text: '⤒ Load edits', onclick: () => $('fileIn').click() }),
+        el('button', { class: 'bad', text: 'Reset sheet to built-in', onclick: () => { if (confirm('Throw away every edit and go back to the built-in sheet?')) { S = clone(BUILTIN); lsSet(KEY, JSON.stringify(S)); render(); toast('Back to the built-in sheet'); } } })
+    ]));
+}
+function bindField(obj, name, tag, cls) {
+    const e = el(tag, { class: cls, 'data-f': name });
+    e.textContent = obj[name] || '';
+    if (editing) { e.setAttribute('contenteditable', 'plaintext-only'); e.addEventListener('input', () => { obj[name] = textOf(e); save(); }); }
+    return e;
+}
+function exportEdits() {
+    const blob = new Blob([JSON.stringify({ flogicDemoSheet: 1, saved: new Date().toISOString(), sheet: S }, null, 2)], { type: 'application/json' });
+    const a = el('a', { href: URL.createObjectURL(blob), download: 'demo-sheet-edits.json' });
+    document.body.appendChild(a); a.click(); a.remove(); toast('Saved demo-sheet-edits.json');
+}
+$('fileIn').addEventListener('change', async ev => {
+    const f = ev.target.files[0]; ev.target.value = '';
+    if (!f) return;
+    try {
+        const o = JSON.parse(await f.text());
+        const sh = o && o.sheet;
+        if (!o || o.flogicDemoSheet !== 1 || !sh || !Array.isArray(sh.steps) || !Array.isArray(sh.before) || !Array.isArray(sh.reset) || !Array.isArray(sh.breaks) || !Array.isArray(sh.key) || !sh.practice) throw new Error('not a sheet file');
+        S = sh; lsSet(KEY, JSON.stringify(S)); render(); toast('Loaded ' + f.name);
+    } catch (e) { toast('That file is not a demo-sheet edits file'); }
+});
+
+/* ====================================================================== tabs + render */
+const TABS = [['run', 'Run'], ['before', 'Before'], ['breaks', 'If it breaks'], ['reset', 'Reset'], ['practice', 'Practice']];
+function renderTabs() {
+    const n = $('tabs'); n.textContent = '';
+    TABS.forEach(t => n.appendChild(el('button', { text: t[1], role: 'tab', 'aria-selected': String(tab === t[0]), onclick: () => { tab = t[0]; render(); window.scrollTo(0, 0); } })));
+}
+function render() {
+    document.body.classList.toggle('editing', editing);
+    document.body.classList.toggle('live', live);
+    $('bEdit').textContent = editing ? '✓ Done editing' : '✎ Edit';
+    $('bLive').textContent = live ? 'Practice mode' : 'Live mode';
+    renderTabs(); renderRun(); renderBefore(); renderBreaks(); renderReset(); renderPractice();
+    TABS.forEach(t => $('p-' + t[0]).classList.toggle('on', tab === t[0]));
+    buttons();
+}
+
+/* ====================================================================== the rep */
+function buttons() {
+    const on = !!run;
+    $('bStart').textContent = on ? '■ Stop rep' : '▶ Start rep';
+    $('bStart').className = on ? '' : 'primary';
+    $('bOk').disabled = !on; $('bOff').disabled = !on; $('bSkip').disabled = !on; $('bBack').disabled = !on || run.i === 0;
+    if (!on) { $('now').textContent = reps.length ? 'Last rep ' + fmt(reps[reps.length - 1].total) + ' · ' + reps[reps.length - 1].misses + ' off' : 'Press Space or ▶ Start rep'; }
+    else $('now').textContent = 'Step ' + (run.i + 1) + ' of ' + S.steps.length + ':  ' + S.steps[run.i].t;
+}
+function startRep() {
+    if (editing) return;
+    run = { i: 0, t0: Date.now(), lapT0: Date.now(), laps: [], miss: {}, skipped: {} }; flagged = {};
+    tab = 'run'; render(); focusStep();
+}
+function focusStep() { const e = $('step-' + run.i); if (e) e.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+function lapDone(kind) {
+    const now = Date.now();
+    run.laps[run.i] = (now - run.lapT0) / 1000; run.lapT0 = now;
+    if (kind === 'skip') run.skipped[run.i] = true;
+}
+function advance(kind) {
+    if (!run) return;
+    lapDone(kind);
+    if (run.i >= S.steps.length - 1) return finishRep(true);
+    run.i++; render(); focusStep();
+}
+function backStep() { if (!run || run.i === 0) return; run.i--; delete run.laps[run.i]; delete run.miss[run.i]; delete run.skipped[run.i]; run.lapT0 = Date.now(); render(); focusStep(); }
+function finishRep(complete) {
+    const total = (Date.now() - run.t0) / 1000;
+    const target = S.steps.filter(s => !s.opt).reduce((a, s) => a + (Number(s.secs) || 0), 0);
+    let slow = null;
+    run.laps.forEach((sec, i) => { if (sec !== undefined && !run.skipped[i] && (slow === null || sec - S.steps[i].secs > slow.over)) slow = { i, over: sec - S.steps[i].secs, sec }; });
+    const rec = { when: new Date().toISOString(), total: Math.round(total), target, misses: Object.keys(run.miss).length, complete: complete, slowest: slow ? (S.steps[slow.i].t + ' ' + fmt(slow.sec)) : '' };
+    if (complete || total > 20) { reps.push(rec); lsSet(REPS_KEY, JSON.stringify(reps)); }
+    const msg = (complete ? 'Rep done ' : 'Stopped at ') + fmt(total) + ' · ' + rec.misses + ' off' + (complete && total <= target && rec.misses === 0 ? ' · clean ✓' : '');
+    run = null; render(); toast(msg);
+}
+setInterval(() => {
+    if (!run) { $('clock').textContent = '0:00'; $('lap').textContent = ''; $('lap').className = ''; return; }
+    const now = Date.now();
+    $('clock').textContent = fmt((now - run.t0) / 1000);
+    const lap = (now - run.lapT0) / 1000, tgt = Number(S.steps[run.i].secs) || 0;
+    $('lap').textContent = 'step ' + fmt(lap) + ' / ' + fmt(tgt);
+    $('lap').className = lap > tgt ? 'over' : '';
+}, 250);
+
+$('bStart').addEventListener('click', () => { if (run) { if (confirm('Stop this rep?')) finishRep(false); } else startRep(); });
+$('bOk').addEventListener('click', () => advance('ok'));
+$('bOff').addEventListener('click', () => {
+    if (!run) return;
+    run.miss[run.i] = true; flagged[run.i] = true;       //  the lap clock keeps running: fixing it is part of the step
+    renderRun(); buttons();
+    const d = document.querySelector('#step-' + run.i + ' details.off'); if (d) d.open = true;
+    toast('Marked off. Read the fix, then press ✓ Matched');
+});
+$('bSkip').addEventListener('click', () => advance('skip'));
+$('bBack').addEventListener('click', backStep);
+$('bEdit').addEventListener('click', () => { editing = !editing; if (editing && run) { run = null; } render(); toast(editing ? 'Edit mode: click any text and type. Auto-saved.' : 'Saved in this browser'); });
+$('bLive').addEventListener('click', () => { live = !live; render(); });
+$('bTheme').addEventListener('click', () => {
+    const r = document.documentElement, dark = getComputedStyle(r).getPropertyValue('--bg').trim() === '#16171a';
+    r.setAttribute('data-theme', dark ? 'light' : 'dark');
+});
+document.addEventListener('keydown', e => {
+    const t = e.target;
+    if (editing || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (t && (t.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(t.tagName))) return;
+    if (e.key === ' ' || e.key === 'ArrowRight') { e.preventDefault(); if (run) advance('ok'); else if (e.key === ' ') startRep(); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); backStep(); }
+    else if (e.key === 'x' || e.key === 'X') { if (run) $('bOff').click(); }
+    else if (e.key === 's' || e.key === 'S') { if (run) advance('skip'); }
+    else if (e.key === 'l' || e.key === 'L') { live = !live; render(); }
+    else if (e.key === 'Escape') { if (run && confirm('Stop this rep?')) finishRep(false); }
+});
+
+load();
+render();
+</script>
+</body>
+</html>

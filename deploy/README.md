@@ -65,7 +65,7 @@ opens with a passphrase. It is left out so a public address doesn't show an admi
 1. **It builds:** every script parses, and the image builds.
 2. **It is alive, and it is ours:** `deploy/smoke.sh` against the running container. Not just "200": it looks for
    Flogic's own title and file picker, asks for every script the page names, and checks the headers.
-3. **It is right:** `handoff/tests/preset-core-test.mjs`, on made-up rows: key files, the data that rides in them,
+3. **It is right:** `tests/preset-core-test.mjs`, on made-up rows: key files, the data that rides in them,
    and every way of tampering with one.
 
 On a `release/*` branch or a `v*` tag, a green run publishes the image to `ghcr.io`.
@@ -79,8 +79,7 @@ bash deploy/smoke.sh https://your-address
 ## No Docker on this machine?
 
 `node deploy/stand-in.mjs` serves the same folders with the same rules, and takes its headers from
-`deploy/nginx.conf`. It is for checking (`bash deploy/smoke.sh http://127.0.0.1:8080`,
-`handoff/sweep-tools/sweep/web-check.js`), not for deploying.
+`deploy/nginx.conf`. It is for checking (`bash deploy/smoke.sh http://127.0.0.1:8080`), not for deploying.
 
 **Not yet seen running:** the image itself. The machine this was written on has no Docker. The first CI run on
 GitHub is the first real build: look at the Actions tab before relying on it.

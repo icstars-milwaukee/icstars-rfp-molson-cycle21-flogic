@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import vm from 'node:vm';
 
-const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = ['DataPage/vaultcoreI.js', 'DataPage/policyI.js', 'DataPage/signincoreI.js', 'DataPage/mailboxI.js', 'it-console/itconsoleI.js']
     .map((f) => readFileSync(path.join(REPO, f), 'utf8')).join('\n;\n');
 const ctx = vm.createContext({ crypto: globalThis.crypto, TextEncoder, TextDecoder, console, setTimeout, clearTimeout, btoa, atob, URL, Blob });

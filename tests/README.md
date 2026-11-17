@@ -20,7 +20,7 @@ py -3.12 -I make-negatives.py C:\temp\fake\negatives.xlsx
 | `preset-core-test.mjs` | Preset data in key files, in plain Node (no browser, no files): a small pack rides in a member's key file, the app takes it only if IT's signature covers it, every edit to the file is refused, the size limits hold. CI runs it on every push | `node preset-core-test.mjs` |
 | `usability-audit.mjs` | Prints click-target sizes, text contrast (both themes), keyboard focus, whether the drawer covers the clicked cell. A report to read, not pass/fail | `node usability-audit.mjs <page> C:\temp\fake\incident.csv <out>` |
 
-- **`<page>`** is `C:/…/DataPage/flogic.html` for Edge. For the desktop sweep build, the stations test and the drawer test take `exe:C:/…/desktop/target/shared/sweep-staff.exe` instead.
+- **`<page>`** is `C:/…/DataPage/flogic.html` for Edge. For the desktop sweep build, the stations test and the drawer test take `exe:C:/…/desktop/target/shared/sweep-staff.exe` instead. (That mode needs the old sweep harness, which is not on this branch: it is in git history at commit `a159de2`, folder `handoff/sweep-tools`. The Edge mode needs nothing else.)
 - **Results:** each test prints PASS/FAIL lines and ends with `ALL PASS` or `N FAILED`. Screenshots go in `<out>`.
 - **Cleanup:** each test stops only the Edge or app process it started, by its process id.
 - **The code is rough, the tests too.** A failure can be the test's fault: read the failing line and its numbers before changing the app. They have caught real bugs, though: the frozen Sheet after sign-in, the drawer opening off screen, and the Excel `'-5`.

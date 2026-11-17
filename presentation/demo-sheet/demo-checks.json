@@ -1,0 +1,53 @@
+{
+  "flogicChecks": 1,
+  "made": "2026-11-16",
+  "file": "incident",
+  "checks": [
+    {
+      "name": "Row count is at least 25,000",
+      "sql": "SELECT COUNT(*) FROM incident",
+      "expect": {
+        "value": "atLeast",
+        "to": 25000
+      }
+    },
+    {
+      "name": "Every row has a Number",
+      "sql": "SELECT COUNT(*) FROM incident WHERE Number IS NULL",
+      "expect": {
+        "value": "equal",
+        "to": 0
+      }
+    },
+    {
+      "name": "No Number appears twice",
+      "sql": "SELECT Number, COUNT(*) AS copies FROM incident GROUP BY Number HAVING COUNT(*) > 1",
+      "expect": {
+        "rows": 0
+      }
+    },
+    {
+      "name": "At most 5 P1 incidents",
+      "sql": "SELECT COUNT(*) FROM incident WHERE Priority = 'P1 - Critical'",
+      "expect": {
+        "value": "atMost",
+        "to": 5
+      }
+    },
+    {
+      "name": "No assignment group has more than 40 open tickets",
+      "sql": "SELECT \"Assignment group\", COUNT(*) AS open_tickets FROM incident WHERE State NOT IN ('Closed', 'Resolved', 'Canceled', 'Cancelled') GROUP BY \"Assignment group\" HAVING COUNT(*) > 40",
+      "expect": {
+        "rows": 0
+      }
+    },
+    {
+      "name": "No encoding scars (â€ Ã Â) in Short description, Description, Work notes, Close notes",
+      "sql": "SELECT COUNT(*) FROM incident WHERE \"Short description\" LIKE '%â€%' OR \"Short description\" LIKE '%Ã%' OR \"Short description\" LIKE '%Â%' OR Description LIKE '%â€%' OR Description LIKE '%Ã%' OR Description LIKE '%Â%' OR \"Work notes\" LIKE '%â€%' OR \"Work notes\" LIKE '%Ã%' OR \"Work notes\" LIKE '%Â%' OR \"Close notes\" LIKE '%â€%' OR \"Close notes\" LIKE '%Ã%' OR \"Close notes\" LIKE '%Â%'",
+      "expect": {
+        "value": "equal",
+        "to": 0
+      }
+    }
+  ]
+}

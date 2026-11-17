@@ -27,13 +27,13 @@ jobs:
       - name: Rung 1 - every script parses
         run: |
           set -euo pipefail
-          for f in DataPage/*.js it-console/*.js desktop/titlebar/*.js handoff/tests/*.mjs; do
+          for f in DataPage/*.js it-console/*.js desktop/titlebar/*.js tests/*.mjs; do
             node --check "$f"
           done
           echo "Every script parses."
 
       - name: Rung 3 - key files and preset data are right
-        run: node handoff/tests/preset-core-test.mjs
+        run: node tests/preset-core-test.mjs
 
       - name: No data, no keys, a blank trust file
         run: bash deploy/no-data-check.sh
