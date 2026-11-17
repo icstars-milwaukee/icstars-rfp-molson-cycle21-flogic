@@ -527,8 +527,7 @@ function renderRun() {
     p.appendChild(el('h2', { text: 'The run' }));
     p.appendChild(el('p', { class: 'lede practice-only', text: 'Core path ' + fmt(core) + '. Optional steps are extra. ' + S.meta.proven + ' Green chip = a machine ran it. Amber = rehearse by hand.' }));
     const links = el('div', { class: 'ctl practice-only' }, [
-        el('a', { href: '../../DataPage/flogic.html', target: '_blank', text: 'Open the app ↗' }),
-        el('a', { href: '../index.html', target: '_blank', text: 'Open the deck ↗' }),
+        el('a', { href: '../DataPage/flogic.html', target: '_blank', text: 'Open the app ↗' }),
         el('a', { href: 'demo-checks.json', download: 'demo-checks.json', text: 'demo-checks.json ⤓' })
     ]);
     links.childNodes.forEach(n => { n.style.marginRight = '14px'; });
